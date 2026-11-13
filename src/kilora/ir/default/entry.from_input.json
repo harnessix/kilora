@@ -1,0 +1,233 @@
+{
+  "name": "entry.from_input",
+  "part": "entry",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "hooks": [],
+  "inputs": {
+    "rows": {
+      "axes": [
+        "experts"
+      ],
+      "dtype": "int64"
+    },
+    "key_width": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "tau": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "epsilon": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "temperature_in": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "x": {
+      "axes": [
+        "batch",
+        "tokens",
+        "key"
+      ],
+      "dtype": "float32"
+    },
+    "keys": {
+      "axes": [
+        "experts",
+        "per",
+        "key"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "logits": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "temperature": {
+      "axes": [],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "flatten",
+      "args": [
+        "keys"
+      ],
+      "result": "flat_keys",
+      "attributes": {
+        "axis1": "experts",
+        "axis2": "per",
+        "new_axis": "cols"
+      }
+    },
+    {
+      "id": 1,
+      "op": "matmul",
+      "args": [
+        "x",
+        "flat_keys"
+      ],
+      "result": "flat_reads",
+      "attributes": {
+        "transpose_b": true
+      }
+    },
+    {
+      "id": 2,
+      "op": "unflatten",
+      "args": [
+        "flat_reads"
+      ],
+      "result": "reads",
+      "attributes": {
+        "axis": "cols",
+        "axis1": "experts",
+        "axis2": "per",
+        "size_of": "keys"
+      }
+    },
+    {
+      "id": 3,
+      "op": "vector_norm",
+      "args": [
+        "x"
+      ],
+      "result": "input_norm",
+      "attributes": {
+        "axis": "key",
+        "keep": false
+      }
+    },
+    {
+      "id": 4,
+      "op": "mul",
+      "args": [
+        "input_norm",
+        "input_norm"
+      ],
+      "result": "energy",
+      "attributes": {}
+    },
+    {
+      "id": 5,
+      "op": "mul",
+      "args": [
+        "reads",
+        "reads"
+      ],
+      "result": "squared",
+      "attributes": {}
+    },
+    {
+      "id": 6,
+      "op": "sum",
+      "args": [
+        "squared"
+      ],
+      "result": "projected",
+      "attributes": {
+        "axis": "per",
+        "keep": false
+      }
+    },
+    {
+      "id": 7,
+      "op": "mul",
+      "args": [
+        "tau",
+        "projected"
+      ],
+      "result": "scaled",
+      "attributes": {}
+    },
+    {
+      "id": 8,
+      "op": "add",
+      "args": [
+        "energy",
+        "epsilon"
+      ],
+      "result": "denominator",
+      "attributes": {}
+    },
+    {
+      "id": 9,
+      "op": "div",
+      "args": [
+        "scaled",
+        "denominator"
+      ],
+      "result": "normalized",
+      "attributes": {}
+    },
+    {
+      "id": 10,
+      "op": "cast",
+      "args": [
+        "rows"
+      ],
+      "result": "row_float",
+      "attributes": {
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": 11,
+      "op": "clamp",
+      "args": [
+        "row_float"
+      ],
+      "result": "row_min",
+      "attributes": {
+        "low": 1.0,
+        "high": 1e+30
+      }
+    },
+    {
+      "id": 12,
+      "op": "div",
+      "args": [
+        "row_min",
+        "key_width"
+      ],
+      "result": "row_scale",
+      "attributes": {}
+    },
+    {
+      "id": 13,
+      "op": "div",
+      "args": [
+        "normalized",
+        "row_scale"
+      ],
+      "result": "logits",
+      "attributes": {}
+    },
+    {
+      "id": 14,
+      "op": "scale",
+      "args": [
+        "temperature_in"
+      ],
+      "result": "temperature",
+      "attributes": {
+        "value": 1.0,
+        "by_strength": false
+      }
+    }
+  ],
+  "identity": "f831411ba507a4de50bd6cc326546cc9b2027e8cd715e86a0128d8b9671d0a09"
+}

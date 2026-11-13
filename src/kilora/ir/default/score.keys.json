@@ -1,0 +1,166 @@
+{
+  "name": "score.keys",
+  "part": "score",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "query": {
+      "axes": [
+        "batch",
+        "tokens",
+        "key"
+      ],
+      "dtype": "float32"
+    },
+    "rows": {
+      "axes": [
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "key_width": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "temperature": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "keys": {
+      "axes": [
+        "experts",
+        "per",
+        "key"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "logits": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {
+    "epsilon": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1e-06
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "key_projection",
+      "args": [
+        "query",
+        "keys"
+      ],
+      "result": "projection",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "pow_int",
+      "args": [
+        "projection"
+      ],
+      "result": "projection_squared",
+      "attributes": {
+        "exponent": 2
+      }
+    },
+    {
+      "id": 2,
+      "op": "sum",
+      "args": [
+        "projection_squared"
+      ],
+      "result": "energy",
+      "attributes": {
+        "axis": "per",
+        "keep": false
+      }
+    },
+    {
+      "id": 3,
+      "op": "pow_int",
+      "args": [
+        "query"
+      ],
+      "result": "query_squared",
+      "attributes": {
+        "exponent": 2
+      }
+    },
+    {
+      "id": 4,
+      "op": "sum",
+      "args": [
+        "query_squared"
+      ],
+      "result": "query_norm",
+      "attributes": {
+        "axis": "key",
+        "keep": false
+      }
+    },
+    {
+      "id": 5,
+      "op": "add",
+      "args": [
+        "query_norm",
+        "epsilon"
+      ],
+      "result": "denominator",
+      "attributes": {}
+    },
+    {
+      "id": 6,
+      "op": "div",
+      "args": [
+        "energy",
+        "denominator"
+      ],
+      "result": "share",
+      "attributes": {}
+    },
+    {
+      "id": 7,
+      "op": "div",
+      "args": [
+        "rows",
+        "key_width"
+      ],
+      "result": "fraction",
+      "attributes": {}
+    },
+    {
+      "id": 8,
+      "op": "div",
+      "args": [
+        "share",
+        "fraction"
+      ],
+      "result": "normalized",
+      "attributes": {}
+    },
+    {
+      "id": 9,
+      "op": "mul",
+      "args": [
+        "temperature",
+        "normalized"
+      ],
+      "result": "logits",
+      "attributes": {}
+    }
+  ],
+  "identity": "81158f015eb8fdaa23684eafdd1a58a10147a70d1fa6a8f4f25e03767c8f0fbe"
+}

@@ -1,0 +1,76 @@
+{
+  "name": "gate.mask_expect",
+  "part": "gate",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "probability": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "uniforms": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "mask": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "detach",
+      "args": [
+        "probability"
+      ],
+      "result": "hard_value",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "detach",
+      "args": [
+        "probability"
+      ],
+      "result": "fixed_probability",
+      "attributes": {}
+    },
+    {
+      "id": 2,
+      "op": "sub",
+      "args": [
+        "probability",
+        "fixed_probability"
+      ],
+      "result": "surrogate",
+      "attributes": {}
+    },
+    {
+      "id": 3,
+      "op": "add",
+      "args": [
+        "hard_value",
+        "surrogate"
+      ],
+      "result": "mask",
+      "attributes": {}
+    }
+  ],
+  "identity": "843de8dae61bc604001a519fcc715c8531ab230572aec9becdaa89a11bf4d5da"
+}

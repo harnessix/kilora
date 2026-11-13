@@ -1,0 +1,50 @@
+{
+  "name": "transition",
+  "part": "transition",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "hooks": [],
+  "inputs": {
+    "last_weights": {
+      "axes": [
+        "batch",
+        "tokens",
+        "r1"
+      ],
+      "dtype": "float32"
+    },
+    "matrix": {
+      "axes": [
+        "r1",
+        "experts"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "weights": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "matmul",
+      "args": [
+        "last_weights",
+        "matrix"
+      ],
+      "result": "weights",
+      "attributes": {
+        "transpose_b": false
+      }
+    }
+  ],
+  "identity": "df9d6f49150fcba286ad1850fa9a9dae0e95b8a73bf0f0b9ef84b2e854e950bd"
+}

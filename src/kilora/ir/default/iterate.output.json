@@ -1,0 +1,67 @@
+{
+  "name": "iterate.output",
+  "part": "iterate",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "base": {
+      "axes": [
+        "batch",
+        "tokens",
+        "out"
+      ],
+      "dtype": "float32"
+    },
+    "coefficients": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "up": {
+      "axes": [
+        "cols",
+        "out"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "output": {
+      "axes": [
+        "batch",
+        "tokens",
+        "out"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "matmul",
+      "args": [
+        "coefficients",
+        "up"
+      ],
+      "result": "delta",
+      "attributes": {
+        "transpose_b": false
+      }
+    },
+    {
+      "id": 1,
+      "op": "add",
+      "args": [
+        "base",
+        "delta"
+      ],
+      "result": "output",
+      "attributes": {}
+    }
+  ],
+  "identity": "f5bb571c379652201bdb6a2e0512df50bd9e42fe41278791108f72374eaeb676"
+}

@@ -1,0 +1,77 @@
+{
+  "name": "freeze_step",
+  "part": "freeze",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "previous": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "route": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "fraction": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "replace": {
+      "axes": [],
+      "dtype": "bool"
+    }
+  },
+  "outputs": {
+    "aggregate": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "mul",
+      "args": [
+        "route",
+        "fraction"
+      ],
+      "result": "weighted",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "add",
+      "args": [
+        "previous",
+        "weighted"
+      ],
+      "result": "summed",
+      "attributes": {}
+    },
+    {
+      "id": 2,
+      "op": "where",
+      "args": [
+        "replace",
+        "route",
+        "summed"
+      ],
+      "result": "aggregate",
+      "attributes": {}
+    }
+  ],
+  "identity": "de4f2cd9a98d5f89749508ba2bf3a87bc6b82ff444d2a9f55963ffb96637c2f4"
+}

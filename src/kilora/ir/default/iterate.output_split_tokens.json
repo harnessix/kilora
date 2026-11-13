@@ -1,0 +1,115 @@
+{
+  "name": "iterate.output_split_tokens",
+  "part": "iterate",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "base": {
+      "axes": [
+        "batch",
+        "tokens",
+        "out"
+      ],
+      "dtype": "float32"
+    },
+    "coefficients": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "up": {
+      "axes": [
+        "cols",
+        "out"
+      ],
+      "dtype": "float32"
+    },
+    "token": {
+      "axes": [
+        "batch",
+        "tokens",
+        "r1"
+      ],
+      "dtype": "float32"
+    },
+    "channel": {
+      "axes": [
+        "batch",
+        "tokens",
+        "out"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "output": {
+      "axes": [
+        "batch",
+        "tokens",
+        "out"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "rename_axis",
+      "args": [
+        "token"
+      ],
+      "result": "token_cols",
+      "attributes": {
+        "axis": "r1",
+        "new_axis": "cols"
+      }
+    },
+    {
+      "id": 1,
+      "op": "mul",
+      "args": [
+        "token_cols",
+        "coefficients"
+      ],
+      "result": "masked",
+      "attributes": {}
+    },
+    {
+      "id": 2,
+      "op": "matmul",
+      "args": [
+        "masked",
+        "up"
+      ],
+      "result": "delta",
+      "attributes": {
+        "transpose_b": false
+      }
+    },
+    {
+      "id": 3,
+      "op": "mul",
+      "args": [
+        "delta",
+        "channel"
+      ],
+      "result": "gated",
+      "attributes": {}
+    },
+    {
+      "id": 4,
+      "op": "add",
+      "args": [
+        "base",
+        "gated"
+      ],
+      "result": "output",
+      "attributes": {}
+    }
+  ],
+  "identity": "861ebdf5d151a49b01550f7958569fecb8b048a55f68d0e222041b29befd2866"
+}

@@ -1,0 +1,214 @@
+{
+  "name": "transition.cosine_row",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "hooks": [],
+  "inputs": {
+    "down": {
+      "axes": [
+        "experts",
+        "per",
+        "key"
+      ],
+      "dtype": "float32"
+    },
+    "up": {
+      "axes": [
+        "r1",
+        "key"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "row": {
+      "axes": [
+        "experts"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "transpose",
+      "args": [
+        "up"
+      ],
+      "result": "up_t",
+      "attributes": {
+        "axis1": "r1",
+        "axis2": "key"
+      }
+    },
+    {
+      "id": 1,
+      "op": "batch_matmul",
+      "args": [
+        "down",
+        "up_t"
+      ],
+      "result": "products",
+      "attributes": {}
+    },
+    {
+      "id": 2,
+      "op": "mul",
+      "args": [
+        "products",
+        "products"
+      ],
+      "result": "squared",
+      "attributes": {}
+    },
+    {
+      "id": 3,
+      "op": "sum_pair",
+      "args": [
+        "squared"
+      ],
+      "result": "overlap",
+      "attributes": {
+        "axis1": "per",
+        "axis2": "r1"
+      }
+    },
+    {
+      "id": 4,
+      "op": "sqrt",
+      "args": [
+        "overlap"
+      ],
+      "result": "numerator",
+      "attributes": {}
+    },
+    {
+      "id": 5,
+      "op": "mul",
+      "args": [
+        "down",
+        "down"
+      ],
+      "result": "down_squared",
+      "attributes": {}
+    },
+    {
+      "id": 6,
+      "op": "sum_pair",
+      "args": [
+        "down_squared"
+      ],
+      "result": "down_sum",
+      "attributes": {
+        "axis1": "per",
+        "axis2": "key"
+      }
+    },
+    {
+      "id": 7,
+      "op": "sqrt",
+      "args": [
+        "down_sum"
+      ],
+      "result": "down_norm",
+      "attributes": {}
+    },
+    {
+      "id": 8,
+      "op": "mul",
+      "args": [
+        "up",
+        "up"
+      ],
+      "result": "up_squared",
+      "attributes": {}
+    },
+    {
+      "id": 9,
+      "op": "sum_pair",
+      "args": [
+        "up_squared"
+      ],
+      "result": "up_sum",
+      "attributes": {
+        "axis1": "r1",
+        "axis2": "key"
+      }
+    },
+    {
+      "id": 10,
+      "op": "sqrt",
+      "args": [
+        "up_sum"
+      ],
+      "result": "up_norm",
+      "attributes": {}
+    },
+    {
+      "id": 11,
+      "op": "mul",
+      "args": [
+        "up_norm",
+        "down_norm"
+      ],
+      "result": "norms",
+      "attributes": {}
+    },
+    {
+      "id": 12,
+      "op": "clamp_min",
+      "args": [
+        "norms"
+      ],
+      "result": "safe_norms",
+      "attributes": {
+        "low": 1e-30
+      }
+    },
+    {
+      "id": 13,
+      "op": "div",
+      "args": [
+        "numerator",
+        "safe_norms"
+      ],
+      "result": "matches",
+      "attributes": {}
+    },
+    {
+      "id": 14,
+      "op": "sum",
+      "args": [
+        "matches"
+      ],
+      "result": "total",
+      "attributes": {
+        "axis": "experts",
+        "keep": false
+      }
+    },
+    {
+      "id": 15,
+      "op": "clamp_min",
+      "args": [
+        "total"
+      ],
+      "result": "safe_total",
+      "attributes": {
+        "low": 1e-30
+      }
+    },
+    {
+      "id": 16,
+      "op": "div",
+      "args": [
+        "matches",
+        "safe_total"
+      ],
+      "result": "row",
+      "attributes": {}
+    }
+  ],
+  "identity": "bb54e27511cef2e6305cf9de53165d97919c45dcba9f4bbba618dc9bb906e78e"
+}

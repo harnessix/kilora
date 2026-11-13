@@ -1,0 +1,40 @@
+{
+  "name": "live_write.root",
+  "part": "live_write",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "total": {
+      "axes": [],
+      "dtype": "float64"
+    }
+  },
+  "outputs": {
+    "norm": {
+      "axes": [],
+      "dtype": "float64"
+    }
+  },
+  "bindings": {
+    "exponent": {
+      "kind": "embedded",
+      "dtype": "float64",
+      "shape": [],
+      "axes": [],
+      "value": 0.5
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "pow",
+      "args": [
+        "total",
+        "exponent"
+      ],
+      "result": "norm",
+      "attributes": {}
+    }
+  ],
+  "identity": "01094bcd710e39367a8c3e6f95967b825471123ed009326b50a56fec9b855c20"
+}

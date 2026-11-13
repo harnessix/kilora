@@ -1,0 +1,31 @@
+{
+  "created_with": "0.1.0",
+  "model": {
+    "class": "TinyDenoiser",
+    "family": "kilora-tiny-1",
+    "args": {
+      "channels": 4,
+      "width": 16,
+      "num_layers": 2,
+      "seed": 0
+    }
+  },
+  "mod": "mod.kmod.safetensors",
+  "depths": [
+    0,
+    1,
+    2,
+    3,
+    5
+  ],
+  "tolerance": {
+    "relative": 1e-05,
+    "by_depth": {
+      "0": 1e-05,
+      "1": 1.4e-05,
+      "2": 0.00011,
+      "3": 0.00017,
+      "5": 0.00055
+    }
+  }
+}

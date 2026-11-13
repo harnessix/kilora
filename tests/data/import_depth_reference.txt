@@ -1,0 +1,666 @@
+# Copyright The KiLoRA Authors
+# SPDX-License-Identifier: Apache-2.0
+# Import-only depth loop frozen at 364d25fe. The test supplies compute globals.
+def _run_input(
+    x, y0, sets, once, depth, regs, target, td=None, entry=None, stats=None,
+    *, interpret=False, grad_steps=None, noise_scale=0.0,
+):
+    """The input-form sets (imported LoRAs; ``once``, positions in ``sets``) with depth.
+    Step one reads ``a = A_e x`` from the layer input. Imported accumulate chains
+    add the carried state in read space at later steps and scale their additions by
+    preceding read keeps. Their cumulative size is limited to twice step one's size.
+    Step ``k`` routes (the first step from ``y0``, later steps from the carried state
+    through the output-key transition), and its change is ``sum_e p_e,k (B_e a_e)``,
+    scaled by the set's strength and masked by the set's split output gate (the
+    adaptive gate, the learned separable one or both, :func:`split_gate`). Accumulate:
+    ``y_k = y0 + sum_j<=k change_j``; path: ``y_k = y0 + change_k``. The state the next
+    step reads is ``y0 + z~ B`` with the read dropout
+    on the scaled change ``z`` in the set's carry mode (:func:`read_dropout`, keyed apart
+    from the state-form sets). Depth 0 and 1 give the single application ``y0 + (a p) B
+    s``; a fractional depth blends the last two steps. Without probes, the router
+    queries of later steps follow in the low-rank space: ``q = q0 + sum_j z~_j (B_j
+    R^T)``. ``td`` (:class:`_TokenDepth`): a depth per token; inactive tokens keep their
+    output, change and carried state."""
+    if interpret:
+        from .ir.driver import _loop_output, _read_mask, _run, _split_gate_grad
+
+    dtype = y0.dtype
+    ins = [sets[i] for i in once]
+    rg = [regs[i] for i in once]
+    joint_derived = _derived_state_sets(ins)
+    names = [
+        f"{target}#input{i}" if st.form == "input" else _set_target(target, st, i)
+        for i, st in zip(once, ins, strict=True)
+    ]
+    coefs = []
+    direction_queries = []
+    for st, r in zip(ins, rg, strict=True):
+        # The read in the model type (cached casts, per-LoRA regions); the low-rank
+        # values that follow are float32, as in the fast path of trained sets and the
+        # fused kernels, so the read dropout and the gate see no low-precision rounding.
+        if st.direction_core is not None:
+            q = F.linear(x.to(dtype), _as(st.router, dtype)).float()
+            c = F.linear(q, st.direction_core.float())
+            if st.expert_mask is not None:
+                c = c * st.expert_mask.to(c.dtype)
+            direction_queries.append(q)
+        else:
+            c = (
+                F.linear(y0.to(dtype), _as(st.down, dtype))
+                if st.form == "state"
+                else _input_read(st, x, dtype)
+            ).float()
+            direction_queries.append(None)
+        coefs.append(c * r.float() if r is not None else c)
+    scales = [st.scale.float() if isinstance(st.scale, torch.Tensor) else st.scale for st in ins]
+    ups = [_as(st.up, dtype) for st in ins]
+    steps, low, frac = _depth_parts(depth) if depth > 1 else (1, 1, 0.0)
+    if td is not None:
+        steps, low, frac = td.steps, td.steps, 0.0
+    # The learned separable gate and the adaptive gate act on the output of each step;
+    # the state the next step reads is not gated.
+    split = [learned_kind(st) == "separable" or uses_adaptive(st) for st in ins]
+    blend_coefficients = (
+        td is not None
+        and not any(split)
+        and not any(joint_derived and learned_kind(st) in ("neuron", "lowrank") for st in ins)
+        and all(st.expert_offsets is None for st in ins)
+        and not any(st.exact for st in ins)
+    )
+    if any(split):
+        y0_norm, y0_rms = _y0_gate_stats(y0)
+    hists: list = [{} for _ in ins]
+    elementwise = [joint_derived and learned_kind(st) in ("neuron", "lowrank") for st in ins]
+    previous_delta = [torch.zeros_like(y0) if on else None for on in elementwise]
+    if any(elementwise):
+        with torch.no_grad():
+            gate_rms = y0.float().square().mean(-2, keepdim=True).sqrt() + DROPOUT_DELTA
+
+    chain_extras: list = [None] * len(ins)
+
+    def correction(i, st, weights):
+        if not st.exact:
+            return None
+        if chain_extras[i] is not None:
+            return chain_extras[i]
+        return _exact_correction(st, x, coefs[i], weights, rg[i], dtype) * scales[i]
+
+    def gated_change(i, st, gate, z, k, weights, output):
+        last = k == steps if td is None else td.last(k)
+        act = None if td is None else td.active(k)
+        args = (y0_norm, y0_rms, gate, names[i], 0, k, rg[i], last)
+        forced = stats.get("forced_gates") if stats is not None else None
+        if interpret and td is None:
+            a, b = _split_gate_grad(st, z, hists[i], *args)
+        else:
+            a, b = forced[k - 1] if forced else split_gate(st, z, hists[i], *args, active=act)
+        if stats is not None and stats.get("record_macro"):
+            stats.setdefault("output_gates", []).append((a.detach(), b.detach()))
+        from . import fused
+
+        if interpret:
+            return _loop_output(output, z.to(dtype), ups[i], (a, b), dtype)
+        delta = fused.token_gate(z, a, dtype) @ ups[i]
+        extra = correction(i, st, weights)
+        if extra is not None:
+            delta = delta + extra * a.to(dtype)
+        return fused.channel_change(delta, b, output)
+
+    by_read = [import_score(st) in ("read_share", "derived") for st in ins]
+    has_derived = any(import_score(st) == "derived" for st in ins)
+    gamma = share_transition_gamma(ins[0]) if any(by_read) and not joint_derived else 0.0
+    transitions = [
+        share_transition(st) if gamma and b else None for st, b in zip(ins, by_read, strict=True)
+    ]
+    chains = [steps > 1 and _import_depth_chain(st) for st in ins]
+    read_cross = [
+        _import_read_cross(st, ups) if on else None for st, on in zip(ins, chains, strict=True)
+    ]
+    fold = (
+        not joint_derived
+        and not any(chains)
+        and entry is None
+        and not _ablation.force_loop()
+        and not (_STEP_CARRY and _ablation.carry_steps(False))
+        and not any(depth_split_on(st) for st in ins)
+        and not any(st.axis_joint for st in ins)
+        and not (has_derived and derived_exclusion())
+        and not any(t is not None for t in transitions)
+        and _import_fold_enabled()
+        and steps > 1
+        and (not frac or (not any(split) and dtype == torch.float32))
+        and td is None
+        and all(st.gate_head_limit is None or not uses_adaptive(st) for st in ins)
+        and all(by_read)
+        and all(learned_kind(st) == "none" for st in ins)
+        and _fast_path_ok(y0, ins, 0.0, None, None)
+        and not (
+            _ROUTES
+            or _SHARES
+            or _DIRECTION_SHARES
+            or _SET_SHARES
+            or _GATE_STATS
+            or _route_freeze.RECORDS
+        )
+    )
+    if fold:
+        gates = (
+            _import_gates(ins, coefs, rg, x, target=target)
+            if has_derived
+            else _read_share_gates(ins, coefs, rg, x=x)
+        )
+        y = y0
+        for i, (st, gate) in enumerate(zip(ins, gates, strict=True)):
+            weight = gate.float().repeat_interleave(st.per_expert, dim=-1)
+            part = coefs[i] * weight
+            if split[i]:
+                _import_fold_history(part, scales[i], steps, st.iteration, rg[i], hists[i], st.up)
+            count = low + frac if frac else steps
+            change = part if st.iteration == "path" else part * count
+            z = change * scales[i]
+            weights = gate if st.iteration == "path" else gate * count
+            if split[i]:
+                y = gated_change(i, st, gate, z, steps, weights, y)
+            else:
+                delta = z.to(dtype) @ ups[i]
+                if st.exact:
+                    delta = delta + correction(i, st, weights)
+                y = y + delta
+        return y
+
+    def input_gates(state, prev=None):
+        if joint_derived:
+            return _mixed_route(
+                state, ins, None, prev, True, noise_scale, rg, True, x=x,
+                interpret=interpret,
+            )
+        keys = [_set_keys(st) for st in ins]
+        qs = [
+            torch.zeros((*state.shape[:-1], st.router.shape[0]), device=state.device)
+            if by_read[i]
+            else q
+            if q is not None
+            else F.linear(state.float(), st.router.float())
+            for i, (st, q) in enumerate(zip(ins, direction_queries, strict=True))
+        ]
+        return _route(qs, ins, keys, prev, False, 0.0, rg)
+
+    carry_input = bool(_STEP_CARRY) and _ablation.carry_steps(False)
+    if steps == 1 and not blend_coefficients and not carry_input and (
+        grad_steps is None or grad_steps(1)
+    ):
+        if all(st.apply_once for st in ins):
+            gates = [
+                c.new_ones((*c.shape[:-1], c.shape[-1] // st.per_expert))
+                for st, c in zip(ins, coefs, strict=True)
+            ]
+        else:
+            gates = input_gates(y0)
+            if has_derived and not joint_derived:
+                selected = _import_gates(ins, coefs, rg, x, target=target)
+                gates = [r if b else g for g, r, b in zip(gates, selected, by_read, strict=True)]
+            elif not joint_derived:
+                gates = _with_read_share(gates, by_read, ins, coefs, rg, x=x)
+            if not joint_derived and any(st.axis_joint for st in ins):
+                gates = _axis_import_gates(ins, coefs, rg, x, y0)
+            if entry is not None:
+                gates[0] = (
+                    stats["forced_routes"][0] if stats and "forced_routes" in stats else entry
+                )
+                _derived_path_note(stats, gates[0], derived_logits(ins[0], x))
+        _note_routes(target, gates, ins)
+        _note_directions(target, 1, ins, gates)
+        if _PROBES:
+            if joint_derived:
+                _probe(target, 1, y0, None, ins, (once, len(sets)), rg, coefs)
+                _probe_gates(target, 1, gates, (once, len(sets)))
+            else:
+                _probe_input(target, 0, y0, sets, once, gates, None, rg, coefs)
+        y = y0
+        for i, gate in enumerate(gates):
+            weight = gate.float().repeat_interleave(ins[i].per_expert, dim=-1)
+            _log_direction_keep(ins[i], coefs[i] * weight * scales[i], coefs[i], names[i])
+            if learned_kind(ins[i]) in ("neuron", "lowrank") and (
+                ins[i].apply_once or joint_derived
+            ):
+                z = coefs[i] * weight * scales[i]
+                delta = z.to(dtype) @ ups[i]
+                with torch.no_grad():
+                    rms = y0.float().pow(2).mean(-2, keepdim=True).sqrt() + DROPOUT_DELTA
+                gate_weights = (
+                    gate / gate.sum(-1, keepdim=True).clamp_min(1e-12)
+                    if ins[i].apply_once else gate
+                )
+                mask = output_gate(
+                    ins[i], delta, y0, torch.zeros_like(y0), gate_weights, rms, target, i, 1
+                )
+                if ins[i].exact:
+                    delta = delta + correction(i, ins[i], gate)
+                if split[i]:
+                    a, b = split_gate(
+                        ins[i],
+                        z,
+                        hists[i],
+                        y0_norm,
+                        y0_rms,
+                        gate_weights,
+                        names[i],
+                        0,
+                        1,
+                        None,
+                        True,
+                    )
+                    mask = mask * (a * b).to(mask.dtype)
+                y = y + delta * mask
+            elif split[i]:
+                y = gated_change(i, ins[i], gate, coefs[i] * weight * scales[i], 1, gate, y)
+            else:
+                # the plain LoRA's products: (a p) B, then the strength
+                sc = ins[i].scale
+                sc = sc.to(dtype) if isinstance(sc, torch.Tensor) else sc
+                delta = ((coefs[i] * weight).to(dtype) @ ups[i]) * sc
+                if ins[i].exact:
+                    delta = delta + correction(i, ins[i], gate)
+                if interpret:
+                    product = _loop_output(
+                        torch.zeros_like(y), (coefs[i] * weight).to(dtype), ups[i], None, dtype
+                    )
+                    y = y + product * sc
+                else:
+                    y = y + delta
+        y = _add_expert_offsets(y, ins, gates)
+        if td is not None:  # a token below depth 1 takes that part of the step
+            y = td.blend(y0, y, 1)
+        if joint_derived and depth < 1:
+            y = y0 + depth * (y - y0)
+        _ablation.note_output(target, 1, y, y0)
+        if _PROBES:
+            y = _probe_output(target, y, ins, (once, len(sets)))
+        return y
+    keys = None if joint_derived else [_set_keys(st) for st in ins]
+    fast = LOWRANK_ENABLED and not _PROBES and not _ablation.force_loop()
+    if fast:
+        q0 = [
+            torch.zeros((*y0.shape[:-1], st.router.shape[0]), device=y0.device)
+            if by_read[i]
+            else q
+            if q is not None
+            else F.linear(y0.float(), st.router.float())
+            for i, (st, q) in enumerate(zip(ins, direction_queries, strict=True))
+        ]
+        cross = [
+            [
+                None
+                if st.direction_core is not None or by_read[i]
+                else u.float() @ st.router.float().t()
+                for i, st in enumerate(ins)
+            ]
+            for u in ups
+        ]  # B_j R_i^T
+    # z~_0 = strength a (the dropped carry), or nothing carried yet (the drop carry)
+    holds = [
+        c * sc if st.carry == "dropped" else None
+        for c, sc, st in zip(coefs, scales, ins, strict=True)
+    ]
+    carried: list = [None] * len(ins)
+    zs: list = [None] * len(ins)
+    exact_weights: list = [None] * len(ins)
+    blended_zs: list = [None] * len(ins)
+    step_sets = [
+        _import_depth_settings(st) if on else st for st, on in zip(ins, chains, strict=True)
+    ]
+    splits = [depth_split_on(st) for st in step_sets]
+    metrics = [
+        _step_metric(st, y0.device) if on else None for st, on in zip(ins, splits, strict=True)
+    ]
+    refs: list = [None] * len(ins)
+    alive: list = [None] * len(ins)
+    chain_refs: list = [None] * len(ins)
+    chain_metrics = [
+        _step_metric(st, y0.device) if on else None for st, on in zip(ins, chains, strict=True)
+    ]
+    walk_index = (stats or {}).get("ablation_walk", 0)
+    carry_target = f"{target}#input{tuple(once)}#walk{walk_index}"
+    start = _carry_start(carry_target, tuple(y0.shape[:-1]), len(ins)) if carry_input else None
+    if carry_input and any(st.exact for st in ins):
+        raise NotImplementedError("exact routed changes do not support carry across sampler steps")
+    if start is not None:
+        carried = [c.to(coefs[i]) for i, c in enumerate(start["carried"])]
+        holds = [c if st.carry == "dropped" else None for st, c in zip(ins, carried, strict=True)]
+        zs = []
+        for i, (st, change) in enumerate(zip(ins, start["change"], strict=True)):
+            scale = torch.as_tensor(scales[i], device=change.device, dtype=change.dtype)
+            value = torch.where(scale != 0, change / scale, torch.zeros_like(change))
+            zs.append(value.to(coefs[i]) if st.iteration != "path" else None)
+        hists = [
+            gate_history(start, i, zs[i] * scales[i] if zs[i] is not None else None, rg[i])
+            for i in range(len(ins))
+        ]
+    prev = None
+    snap = None
+    carry_snap = None
+    y = out = y0
+    skip_tables = [None] * len(ins)
+    if steps >= 3:
+        from .segments import skip_decisions
+
+        skip_tables = [
+            skip_decisions(st)
+            if not joint_derived and import_score(st) == "derived" and derived_mode() == "full"
+            else None
+            for st in ins
+        ]
+    frozen = False
+    for k in range(1, steps + 1):
+        keep = grad_steps is None or grad_steps(k)
+        with contextlib.nullcontext() if keep else torch.no_grad():
+            old_zs, old_carried, old_holds = list(zs), list(carried), list(holds)
+            old_exact_weights = list(exact_weights)
+            old_alive = list(alive)
+            old_extras = list(chain_extras)
+            step_coefs = [
+                _import_depth_coefs(st, coefs[i], carried, ups, rg[i], read_cross[i])
+                if (chains[i] or (joint_derived and st.form == "state")) and k > 1
+                else coefs[i]
+                for i, st in enumerate(ins)
+            ]
+            if joint_derived:
+                state = y0
+                for value, up in zip(carried, ups, strict=True):
+                    if value is not None:
+                        state = state + value.to(dtype) @ up
+                if frozen:
+                    state = state.detach()
+                for i, st in enumerate(ins):
+                    if st.form == "state":
+                        value = F.linear(state.to(dtype), _as(st.down, dtype)).float()
+                        step_coefs[i] = value if rg[i] is None else value * rg[i].float()
+            forced_routes = stats.get("forced_routes_all") if stats is not None else None
+            forced_single = stats.get("forced_routes") if stats is not None else None
+            forced = forced_routes is not None or forced_single is not None
+            if forced_routes is not None:
+                gates = list(forced_routes[k - 1])
+            elif forced_single is not None:
+                gates = [forced_single[k - 1]]
+            elif joint_derived:
+                gates = input_gates(state, prev)
+            elif k == 1 and start is None:
+                state = y0
+                gates = input_gates(y0)
+            elif fast:
+                qs = [
+                    q0[i]
+                    if direction_queries[i] is not None or by_read[i]
+                    else q0[i] + sum(c.float() @ cross[j][i] for j, c in enumerate(carried))
+                    for i in range(len(ins))
+                ]
+                gates = _route(qs, ins, keys, prev, False, 0.0, rg)
+            else:
+                state = y0 + sum(c.to(dtype) @ u for c, u in zip(carried, ups, strict=True))
+                gates = input_gates(state, prev)
+            # The optional prior follows the preceding route and the current read.
+            if has_derived and not forced and not joint_derived:
+                selected = _import_gates(ins, step_coefs, rg, x, prev, transitions, gamma, target)
+                gates = [r if b else g for g, r, b in zip(gates, selected, by_read, strict=True)]
+            elif not forced and not joint_derived:
+                gates = _with_read_share(
+                    gates, by_read, ins, step_coefs, rg, prev, transitions, gamma, x=x
+                )
+            if not forced and not joint_derived and any(st.axis_joint for st in ins):
+                query = (
+                    y0
+                    if k == 1
+                    else y0 + sum(c.to(dtype) @ u for c, u in zip(carried, ups, strict=True))
+                )
+                gates = _axis_import_gates(ins, step_coefs, rg, x, query, prev, transitions, gamma)
+            if entry is not None:
+                if stats is not None and "forced_routes" in stats:
+                    gates[0] = stats["forced_routes"][k - 1]
+                elif k == 1:
+                    gates[0] = entry
+                _derived_path_note(
+                    stats, gates[0], derived_logits(ins[0], x), None if td is None else td.active(k)
+                )
+            _note_routes(target, gates, ins)
+            _note_directions(target, k, ins, gates)
+            if _PROBES:
+                if joint_derived:
+                    _probe(target, k, state, prev, ins, (once, len(sets)), rg, step_coefs)
+                    _probe_gates(target, k, gates, (once, len(sets)))
+                else:
+                    _probe_input(target, k - 1, state, sets, once, gates, prev, rg, coefs)
+            previous = prev
+            prev = (
+                [g / g.sum(-1, keepdim=True).clamp_min(1e-30) for g in gates]
+                if entry is not None and k == 1
+                else gates
+            )
+            y = y0
+            for i, (st, gate) in enumerate(zip(ins, gates, strict=True)):
+                effective = gate
+                if previous is not None and k < steps and skip_tables[i] is not None:
+                    from .segments import skip_mask
+
+                    following = _import_gates(
+                        [st], [step_coefs[i]], [rg[i]], x, [prev[i]], [transitions[i]], gamma
+                    )[0]
+                    mask = skip_mask(skip_tables[i], previous[i], prev[i], following)
+                    effective = torch.where(mask[..., None], torch.zeros_like(gate), gate)
+                weight = effective.float().repeat_interleave(st.per_expert, dim=-1)
+                part = step_coefs[i] * weight
+                survival = alive[i]
+                if survival is not None:
+                    if st.exact:
+                        survival = survival.reshape(*survival.shape[:-1], -1, st.per_expert)
+                        survival = survival.mean(-1).repeat_interleave(st.per_expert, dim=-1)
+                    part = part * survival
+                if chains[i] and st.exact:
+                    value = x
+                    for c, up in zip(carried, ups, strict=True):
+                        if c is not None and up.shape[-1] == x.shape[-1]:
+                            value = value + c.to(dtype) @ up
+                    layer = st
+                    if st.expert_inputs is not None:
+                        change = value - x
+                        layer = dataclasses.replace(
+                            st,
+                            expert_inputs=[
+                                None if v is None else v + change for v in st.expert_inputs
+                            ],
+                        )
+                    weights = effective
+                    if survival is not None:
+                        weights = weights * survival[..., :: st.per_expert]
+                    extra = _exact_correction(layer, value, step_coefs[i], weights, rg[i], dtype)
+                    extra = extra * scales[i]
+                    chain_extras[i] = extra if chain_extras[i] is None else chain_extras[i] + extra
+                if splits[i] and zs[i] is not None and not (
+                    joint_derived and st.aggregation == "replace"
+                ):
+                    zs[i] = depth_split_step(
+                        zs[i],
+                        part,
+                        step_sets[i],
+                        metrics[i],
+                        refs[i],
+                        _weight_of(scales[i]),
+                        names[i],
+                    )
+                else:
+                    if st.iteration == "path" or zs[i] is None or (
+                        joint_derived and st.aggregation == "replace"
+                    ):
+                        zs[i] = part
+                    elif interpret:
+                        zs[i] = _run(
+                            "iterate", "accumulate", {"previous_state": zs[i], "change": part},
+                            _setting=st,
+                        )["state"]
+                    else:
+                        zs[i] = zs[i] + part
+                if chains[i]:
+                    metric = chain_metrics[i]
+                    if st.exact:
+                        change = (zs[i] * scales[i]).to(dtype) @ ups[i] + chain_extras[i]
+                        size = change.detach().float().norm(dim=-1)
+                    else:
+                        size = _metric_size(zs[i], metric, _weight_of(scales[i]))
+                    if k == 1:
+                        chain_refs[i] = size
+                    else:
+                        limit = step_sets[i].radial_budget * chain_refs[i]
+                        ratio = (limit / size.clamp_min(1e-30)).clamp(max=1)
+                        zs[i] = zs[i] * ratio[..., None]
+                        if st.exact:
+                            chain_extras[i] = chain_extras[i] * ratio[..., None]
+                if splits[i] and k == 1 and step_sets[i].radial_budget > 0:
+                    refs[i] = _metric_size(zs[i], metrics[i], _weight_of(scales[i]))
+                if st.exact:
+                    exact_weights[i] = (
+                        effective
+                        if st.iteration == "path" or exact_weights[i] is None
+                        else exact_weights[i] + effective
+                    )
+                if blend_coefficients:
+                    continue
+                if elementwise[i]:
+                    z = zs[i] * scales[i]
+                    delta = z.to(dtype) @ ups[i]
+                    mask = output_gate(
+                        st, delta, y0, previous_delta[i], gate, gate_rms, target, once[i], k
+                    )
+                    previous_delta[i] = delta
+                    if split[i]:
+                        last = k == steps if td is None else td.last(k)
+                        a, b = split_gate(
+                            st, z, hists[i], y0_norm, y0_rms, gate, names[i], 0, k, rg[i], last,
+                            active=None if td is None else td.active(k),
+                        )
+                        mask = mask * (a * b).to(mask.dtype)
+                    y = y + delta * mask
+                elif split[i]:
+                    y = gated_change(i, st, gate, zs[i] * scales[i], k, exact_weights[i], y)
+                else:
+                    delta = (zs[i] * scales[i]).to(dtype) @ ups[i]
+                    if st.exact:
+                        delta = delta + correction(i, st, exact_weights[i])
+                    y = (
+                        _loop_output(y, (zs[i] * scales[i]).to(dtype), ups[i], None, dtype)
+                        if interpret else y + delta
+                    )
+            y = _add_expert_offsets(y, ins, gates)
+            if td is not None:  # inactive tokens keep their output and their change
+                if blend_coefficients:
+                    for i, z in enumerate(zs):
+                        value = z * scales[i]
+                        old = blended_zs[i]
+                        blended_zs[i] = td.blend(
+                            torch.zeros_like(value) if old is None else old, value, k
+                        )
+                else:
+                    out = td.blend(out, y, k)
+                zs = [td.keep(z, o, k) for z, o in zip(zs, old_zs, strict=True)]
+                exact_weights = [
+                    td.keep(z, o, k) if z is not None else None
+                    for z, o in zip(exact_weights, old_exact_weights, strict=True)
+                ]
+                chain_extras = [
+                    td.keep(z, o, k) if z is not None else None
+                    for z, o in zip(chain_extras, old_extras, strict=True)
+                ]
+            _ablation.note_output(target, k, y, y0)
+            if frac and k == low:
+                snap = y
+                carry_snap = list(zs)
+            if k < steps:
+                for i, st in enumerate(ins):
+                    z = zs[i] * scales[i]
+                    if stats is not None and stats.get("forced_read_keeps"):
+                        m = stats["forced_read_keeps"][k - 1]
+                    elif stats is not None and stats.get("forced_read_keeps_all"):
+                        m = stats["forced_read_keeps_all"][k - 1][i]
+                    elif interpret:
+                        shape = (*z.shape[:-1], z.shape[-1] // st.per_expert, st.per_expert)
+                        m = _read_mask(
+                            "mask_expect" if expect_masks() else "mask_sample",
+                            {
+                                "change": z.detach().float().reshape(shape),
+                                "base_read": coefs[i].detach().reshape(shape),
+                                "uniforms": dropout_uniforms(
+                                    shape, names[i], k, z.device, column_keys(st)
+                                ),
+                            }, st,
+                        ).reshape_as(z)
+                        if torch.is_grad_enabled() and z.requires_grad:
+                            surrogate = _read_dropout_for_set(
+                                z, coefs[i], st.per_expert, names[i], k, column_keys(st), st.key
+                            )
+                            m = m.detach() + (surrogate - surrogate.detach())
+                    else:
+                        m = _read_dropout_for_set(
+                            z, coefs[i], st.per_expert, names[i], k, column_keys(st), st.key
+                        )
+                    if stats is not None and stats.get("record_macro"):
+                        stats.setdefault("read_keeps", []).append(m.detach())
+                    for rec in _route_freeze.RECORDS:
+                        keeps = rec.setdefault("input_keeps", {}).setdefault((target, k), {})
+                        keeps[i] = m.detach()
+                    if holds[i] is None:
+                        carried[i] = m * z
+                    else:
+                        holds[i] = (
+                            z if _ablation.read_dropout_off()
+                            else holds[i] + (1 - m) * (z - holds[i])
+                        )
+                        carried[i] = holds[i]
+                    if interpret:
+                        carried[i] = _run(
+                            "carry", st.carry,
+                            {
+                                "change": z,
+                                "carried": (
+                                    old_holds[i] if old_holds[i] is not None
+                                    else torch.zeros_like(z)
+                                ),
+                                "mask": m, "base_read": coefs[i], "uniforms": torch.zeros_like(z),
+                            }, _setting=st,
+                        )["state"]
+                        if holds[i] is not None:
+                            holds[i] = carried[i]
+                    if chains[i]:
+                        alive[i] = m if alive[i] is None else alive[i] * m
+                if td is not None:  # and their carried state
+                    carried = [td.keep(c, o, k) for c, o in zip(carried, old_carried, strict=True)]
+                    holds = [td.keep(h, o, k) for h, o in zip(holds, old_holds, strict=True)]
+                    alive = [
+                        a if a is None else td.keep(a, torch.ones_like(a) if o is None else o, k)
+                        for a, o in zip(alive, old_alive, strict=True)
+                    ]
+        frozen = not keep
+    if carry_input:
+        changes = [z * sc for z, sc in zip(zs, scales, strict=True)]
+        if frac:
+            changes = _blend(
+                [z * sc for z, sc in zip(carry_snap, scales, strict=True)], changes, frac
+            )
+        ends = [
+            carry_transfer(z, c, st.per_expert)
+            for st, z, c in zip(ins, changes, coefs, strict=True)
+        ]
+        _carry_end(carry_target, ends, changes, start, depth, _gate_ends(ins, hists))
+    for i, st in enumerate(ins):
+        _log_direction_keep(st, zs[i] * scales[i], coefs[i], names[i])
+    if frac:
+        y = snap + frac * (y - snap)
+    if td is not None:
+        if blend_coefficients:
+            y = y0
+            for z, up in zip(blended_zs, ups, strict=True):
+                y = y + z.to(dtype) @ up
+        else:
+            y = out
+    if joint_derived and depth < 1 and td is None:
+        y = y0 + depth * (y - y0)
+    if _PROBES:
+        y = _probe_output(target, y, ins, (once, len(sets)))
+    return y.detach() if frozen else y

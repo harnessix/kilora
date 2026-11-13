@@ -1,0 +1,210 @@
+{
+  "name": "carry.mask_sample",
+  "part": "carry",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "change": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "per"
+      ],
+      "dtype": "float32"
+    },
+    "base_read": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "per"
+      ],
+      "dtype": "float32"
+    },
+    "uniforms": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "per"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "mask": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "per"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {
+    "two": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 2.0
+    },
+    "delta": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1e-06
+    },
+    "decay_base": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 0.5
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "detach",
+      "args": [
+        "base_read"
+      ],
+      "result": "fixed_base",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "pow",
+      "args": [
+        "fixed_base",
+        "two"
+      ],
+      "result": "squared",
+      "attributes": {}
+    },
+    {
+      "id": 2,
+      "op": "mean",
+      "args": [
+        "squared"
+      ],
+      "result": "mean_square",
+      "attributes": {
+        "axis": "per",
+        "keep": true
+      }
+    },
+    {
+      "id": 3,
+      "op": "sqrt",
+      "args": [
+        "mean_square"
+      ],
+      "result": "rms",
+      "attributes": {}
+    },
+    {
+      "id": 4,
+      "op": "add",
+      "args": [
+        "rms",
+        "delta"
+      ],
+      "result": "sigma",
+      "attributes": {}
+    },
+    {
+      "id": 5,
+      "op": "abs",
+      "args": [
+        "change"
+      ],
+      "result": "magnitude",
+      "attributes": {}
+    },
+    {
+      "id": 6,
+      "op": "div",
+      "args": [
+        "magnitude",
+        "sigma"
+      ],
+      "result": "exponent",
+      "attributes": {}
+    },
+    {
+      "id": 7,
+      "op": "pow",
+      "args": [
+        "decay_base",
+        "exponent"
+      ],
+      "result": "probability",
+      "attributes": {}
+    },
+    {
+      "id": 8,
+      "op": "lt",
+      "args": [
+        "uniforms",
+        "probability"
+      ],
+      "result": "selected",
+      "attributes": {}
+    },
+    {
+      "id": 9,
+      "op": "cast",
+      "args": [
+        "selected"
+      ],
+      "result": "hard_value",
+      "attributes": {
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": 10,
+      "op": "detach",
+      "args": [
+        "hard_value"
+      ],
+      "result": "hard",
+      "attributes": {}
+    },
+    {
+      "id": 11,
+      "op": "detach",
+      "args": [
+        "probability"
+      ],
+      "result": "fixed_probability",
+      "attributes": {}
+    },
+    {
+      "id": 12,
+      "op": "sub",
+      "args": [
+        "probability",
+        "fixed_probability"
+      ],
+      "result": "surrogate",
+      "attributes": {}
+    },
+    {
+      "id": 13,
+      "op": "add",
+      "args": [
+        "hard",
+        "surrogate"
+      ],
+      "result": "mask",
+      "attributes": {}
+    }
+  ],
+  "identity": "5ab5af089f084a8e6772e29721797dd5d420e21a8910cb2106f9abdaa95115b4"
+}

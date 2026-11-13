@@ -1,0 +1,50 @@
+{
+  "name": "score.weighted",
+  "part": "score",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "projection": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "per"
+      ],
+      "dtype": "float32"
+    },
+    "weights": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "weighted": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "per"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "mul",
+      "args": [
+        "projection",
+        "weights"
+      ],
+      "result": "weighted",
+      "attributes": {}
+    }
+  ],
+  "identity": "ea78f84c1d28b430db31a87e1e623e9d2b73a38e67f6b76ea7a69430ffafe2a1"
+}

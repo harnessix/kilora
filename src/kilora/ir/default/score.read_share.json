@@ -1,0 +1,107 @@
+{
+  "name": "score.read_share",
+  "part": "score",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "reads": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "per"
+      ],
+      "dtype": "float32"
+    },
+    "temperature": {
+      "axes": [],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "logits": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {
+    "epsilon": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1e-12
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "mul",
+      "args": [
+        "reads",
+        "reads"
+      ],
+      "result": "squared",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "sum",
+      "args": [
+        "squared"
+      ],
+      "result": "energy",
+      "attributes": {
+        "axis": "per",
+        "keep": false
+      }
+    },
+    {
+      "id": 2,
+      "op": "sum",
+      "args": [
+        "energy"
+      ],
+      "result": "total",
+      "attributes": {
+        "axis": "experts",
+        "keep": true
+      }
+    },
+    {
+      "id": 3,
+      "op": "add",
+      "args": [
+        "total",
+        "epsilon"
+      ],
+      "result": "denominator",
+      "attributes": {}
+    },
+    {
+      "id": 4,
+      "op": "div",
+      "args": [
+        "energy",
+        "denominator"
+      ],
+      "result": "share",
+      "attributes": {}
+    },
+    {
+      "id": 5,
+      "op": "mul",
+      "args": [
+        "temperature",
+        "share"
+      ],
+      "result": "logits",
+      "attributes": {}
+    }
+  ],
+  "identity": "0a8949dbcbdcea884c24ac7ad5a45bfdd5ae640b8910ead38a775381a753cfd4"
+}

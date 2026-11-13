@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kilora-trainer-example"
+version = "0.1.0"
+description = "Example KiLoRA trainer plugins: a static mod trainer and an editor trainer"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{ name = "harnessix" }]
+dependencies = ["kilora>=0.1.0", "kilora-pullback>=0.1.0"]
+
+[project.entry-points."kilora.trainers"]
+example = "kilora_trainer_example:TRAINERS"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kilora_trainer_example"]

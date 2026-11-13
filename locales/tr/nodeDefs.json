@@ -1,0 +1,1951 @@
+{
+  "KiLoRASelect": {
+    "display_name": "KiLoRA Mod listesi: mod ekle",
+    "description": "Bir mod listesine mod ekler. Birkaçını zincirleyin, sonra listeyi KiLoRA Mod listesini uygula düğümüne bağlayın.",
+    "inputs": {
+      "file": {
+        "name": "dosya",
+        "tooltip": "models/kilora içinden bir KiLoRA mod dosyası."
+      },
+      "strength": {
+        "name": "güç",
+        "tooltip": "1 eğitim gücüdür. 0 modu kapatır. Negatif değerler moddan uzaklaştırır."
+      },
+      "prior": {
+        "name": "yönlendirici tercihi",
+        "tooltip": "Birkaç mod bir katmanı paylaştığında yönlendiricinin bu modu ne kadar tercih ettiği. 1 nötrdür."
+      },
+      "sets": {
+        "name": "mod listesi",
+        "tooltip": "Başka bir liste düğümünden mod listesi. Yeni liste başlatmak için boş bırakın."
+      },
+      "enabled": {
+        "name": "etkin",
+        "tooltip": "Kapalı: listede kalır ama yüklenmez."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "mod listesi",
+        "tooltip": "Sonraki liste düğümüne veya KiLoRA Mod listesini uygula düğümüne bağlayın."
+      }
+    }
+  },
+  "KiLoRAImportLoRA": {
+    "display_name": "KiLoRA Mod listesi: LoRA ekle",
+    "description": "Bir mod listesine normal bir LoRA dosyası ekler.",
+    "inputs": {
+      "lora_name": {
+        "name": "LoRA dosyası",
+        "tooltip": "models/loras içinden bir LoRA dosyası."
+      },
+      "strength": {
+        "name": "güç",
+        "tooltip": "LoRA ağırlığı, LoRA yükleyicideki gibi. KiLoRA karışımında önerilen güç 0,7’dir."
+      },
+      "sets": {
+        "name": "mod listesi",
+        "tooltip": "Başka bir liste düğümünden mod listesi. Yeni liste başlatmak için boş bırakın."
+      },
+      "enabled": {
+        "name": "etkin",
+        "tooltip": "Kapalı: listede kalır ama yüklenmez."
+      },
+      "lora_stack": {
+        "name": "LoRA stack",
+        "tooltip": "Optional. A LoRA stack: file, model strength, clip strength. Each entry is added with the model strength. When this is connected, it is used instead of the LoRA file above."
+      },
+      "axis": {
+        "name": "eksen",
+        "tooltip": "auto: choose the axis from LoRA metadata, trigger words, tags or file name. creative: route with creative LoRAs. functional: a plain LoRA on its own axis. ip: the character or prop axis: a plain LoRA on its own axis, and several IP LoRAs route together. shared: route with each active axis."
+      },
+      "size_norm": {
+        "name": "size norm",
+        "tooltip": "off: güç verildiği gibi. weight: güç, tüm dosya için tek bir sayıyla çarpılır. Sayı yalnızca küçültür: tipik bir kütüphane LoRA'sından büyük bir dosya o boyuta indirilir. Daha zayıf bir dosya, radial budget açıkken de her zaman kendi boyutunu korur. Dosyanın içindeki oranlar değişmez."
+      },
+      "start": {
+        "name": "başlangıç",
+        "tooltip": "Bu LoRA’nın etki etmeye başladığı örnekleme ilerlemesi (0 ile 1 arası, dahil)."
+      },
+      "end": {
+        "name": "bitiş",
+        "tooltip": "Bu LoRA’nın etki etmeyi bıraktığı örnekleme ilerlemesi (0 ile 1 arası, dahil)."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "mod listesi",
+        "tooltip": "Sonraki liste düğümüne veya KiLoRA Mod listesini uygula düğümüne bağlayın."
+      }
+    }
+  },
+  "KiLoRATriggerWords": {
+    "display_name": "KiLoRA Trigger Words",
+    "description": "Shows the trigger words of a LoRA file, from its metadata, its training tags and a Civitai sidecar.",
+    "inputs": {
+      "lora_name": {
+        "name": "LoRA dosyası",
+        "tooltip": "models/loras içinden bir LoRA dosyası."
+      },
+      "lora_stack": {
+        "name": "LoRA stack",
+        "tooltip": "Optional. A LoRA stack. Trigger words of those files are added after the LoRA file above."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "tetikleyici kelimeler",
+        "tooltip": "Tetikleyici kelimeler. İsteminize ekleyin."
+      }
+    }
+  },
+  "KiLoRAPalette": {
+    "display_name": "KiLoRA Palet",
+    "description": "Kayıtlı bir paleti (güç, rol ve tetik sözcükleriyle LoRA ve mod dosyaları) mod listesi olarak yükler. Shuffle her seed için başka bir set seçer.",
+    "inputs": {
+      "palette": {
+        "name": "palet",
+        "tooltip": "kilora_palettes klasöründen bir palet veya models/kilora içinden bir mod paketi."
+      },
+      "shuffle": {
+        "name": "karıştır",
+        "tooltip": "Açık: seed ile paletin bir alt kümesi, aralıkta rastgele güçlerle."
+      },
+      "pick_min": {
+        "name": "seçim en az",
+        "tooltip": "Shuffle: en az kayıt sayısı."
+      },
+      "pick_max": {
+        "name": "seçim en çok",
+        "tooltip": "Shuffle: en çok kayıt sayısı."
+      },
+      "strength_min": {
+        "name": "güç en az",
+        "tooltip": "Shuffle: bir kaydın en düşük gücü."
+      },
+      "strength_max": {
+        "name": "güç en çok",
+        "tooltip": "Shuffle: bir kaydın en yüksek gücü."
+      },
+      "seed": {
+        "name": "seed",
+        "tooltip": "Shuffle: aynı seed aynı seçimi verir."
+      },
+      "sets": {
+        "name": "mod listesi",
+        "tooltip": "İsteğe bağlı. Paletin kayıtları bu mod listesine eklenir."
+      },
+      "mask_a": {
+        "name": "maske a",
+        "tooltip": "İsteğe bağlı. Bölgesi a olan kayıtların bölgesi."
+      },
+      "mask_b": {
+        "name": "maske b",
+        "tooltip": "İsteğe bağlı. Bölgesi b olan kayıtların bölgesi."
+      },
+      "mode": {
+        "name": "mode",
+        "tooltip": "Shuffle: random picks or picks based on local counts."
+      },
+      "reset_state": {
+        "name": "reset state",
+        "tooltip": "Clear the local Shuffle counts for this palette."
+      },
+      "reward": {
+        "name": "reward",
+        "tooltip": "Learn mode: rate the seeded pick. Restore the image seed and settings, with no intervening state changes; use fixed seed, then set reward back to none."
+      },
+      "embedding_model_path": {
+        "name": "embedding model path",
+        "tooltip": "Path to the local embedding model used by Shuffle in embedding mode."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "mod listesi",
+        "tooltip": "Sonraki liste düğümüne veya KiLoRA Mod listesini uygula düğümüne bağlayın."
+      },
+      "1": {
+        "name": "tetikleyici kelimeler",
+        "tooltip": "Yüklenen kayıtların tetik sözcükleri, prompt için."
+      },
+      "2": {
+        "name": "settings",
+        "tooltip": "Paletin ayarları. KiLoRA Apply Mod List'e bağlayın."
+      },
+      "3": {
+        "name": "rapor",
+        "tooltip": "Ne olduğu ve uyarılar."
+      }
+    }
+  },
+  "KiLoRASavePalette": {
+    "display_name": "KiLoRA Paleti Kaydet",
+    "description": "Bir mod listesini ağırlıksız bir palet dosyası olarak kaydeder, örneğin bir Shuffle seçimi.",
+    "inputs": {
+      "sets": {
+        "name": "mod listesi",
+        "tooltip": "Kaydedilecek mod listesi, örneğin KiLoRA Palet düğümünün sets çıkışı."
+      },
+      "name": {
+        "name": "ad",
+        "tooltip": "Paletin gösterilen adı."
+      },
+      "filename": {
+        "name": "dosya adı",
+        "tooltip": "Uzantısız dosya adı."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "İsteğe bağlı. Paletle kaydedilen KiLoRA Apply ayarları."
+      }
+    }
+  },
+  "KiLoRASuggestions": {
+    "display_name": "KiLoRA Mod List: Suggest LoRAs",
+    "description": "Lists installed LoRAs by co-usage or embedding similarity.",
+    "inputs": {
+      "sets": {
+        "name": "mod listesi",
+        "tooltip": "The current mod list used to find related LoRAs."
+      },
+      "model_path": {
+        "name": "embedding model path",
+        "tooltip": "Path to a saved LayerChain model directory. The library basis must match the basis used to train it."
+      },
+      "suggest_by": {
+        "name": "suggest by",
+        "tooltip": "Choose co-usage, similarity, a missing direction, or similarity to kept entries. Complementary scores the uncovered embedding norm times cosine with the current mean."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "suggestions",
+        "tooltip": "Up to five installed LoRA files and their scores."
+      }
+    }
+  },
+  "KiLoRALoadOrder": {
+    "display_name": "KiLoRA Mod listesi: kontrol et",
+    "description": "Yükleme sırasını ve sorunları gösterir. Model değişmez.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "Listenin yükleneceği model. Değişmez."
+      },
+      "sets": {
+        "name": "mod listesi",
+        "tooltip": "Kontrol edilecek mod listesi."
+      },
+      "depth": {
+        "name": "derinlik",
+        "tooltip": "Geçiş sayısı. -1 modun önerdiği derinliği kullanır."
+      }
+    }
+  },
+  "KiLoRAApply": {
+    "display_name": "KiLoRA Mod listesini uygula",
+    "description": "Bir listedeki tüm modları modelin bir kopyasına yükler.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "Yüklenecek model. Orijinal değişmez."
+      },
+      "sets": {
+        "name": "mod listesi",
+        "tooltip": "Son liste düğümünden gelen mod listesi."
+      },
+      "depth": {
+        "name": "derinlik",
+        "tooltip": "Geçiş sayısı. -1 modun önerdiği derinliği kullanır."
+      },
+      "iteration": {
+        "name": "yineleme",
+        "tooltip": "Derinlik geçişlerinin nasıl çalıştığı. mod: modun seçtiği kip. accumulate: her geçiş kendi değişikliğini ekler. path: her geçiş sonraki uzmanı seçer ve sonuç o uzmanın değişikliğidir."
+      },
+      "depth_schedule": {
+        "name": "derinlik planı",
+        "tooltip": "İsteğe bağlı. Bir KiLoRA Derinlik Planı. Derinliğin ve modların varsayılan planının yerine geçer."
+      },
+      "routing_scope": {
+        "name": "yönlendirme kapsamı",
+        "tooltip": "Uzmanları hangi logitlerin seçtiği. mod: her modda kayıtlı kapsam. token: her token kendi başına. tensor: tüm tokenların ortalaması, tüm tensör için tek seçim."
+      },
+      "routing_select": {
+        "name": "yönlendirme seçimi",
+        "tooltip": "Logitlerin uzman ağırlıklarına nasıl dönüştüğü. mod: her modda kayıtlı seçim. sparsemax: toplamı 1 olan ağırlıklar, zayıf uzmanlar 0. top1: yalnızca en iyi uzman."
+      },
+      "output_gate": {
+        "name": "çıkış kapısı",
+        "tooltip": "Her modun değişikliğinin nasıl sınırlandığı. mod: modun seçtiği kip. auto: adaptive, mod eğitilmiş bir kapıya sahipse both. adaptive: her çıkış kanalı ve token, kendi temel ölçeğine göre büyük olan ya da yön değiştiren bir değişikliğin daha azını tutar. learned: yalnızca modun eğitilmiş kapısı. both: çarpım. none: kapı yok."
+      },
+      "gate_kappa": {
+        "name": "kapı kappa",
+        "tooltip": "Uyarlanır kapının ölçeği. Temel ölçeğin kappa katı kadar bir değişiklik 0,5 olasılıkla tutulur. Küçük değerler daha çok sınırlar. 0 modun değerini kullanır."
+      },
+      "path_width": {
+        "name": "yol genişliği",
+        "tooltip": "Yalnızca yol yinelemesi için. Yürüyüş sayısı: ilk adımın en iyi uzmanlarından başlarlar ve her yürüyüş kendi sorgusundan devam eder. Daha büyük bir genişlik, yanlış bir ilk adımdan sonra doğru uzmanı bulur. 0 modun değerini kullanır (varsayılan 1: bir yürüyüş)."
+      },
+      "path_select": {
+        "name": "yol seçimi",
+        "tooltip": "Yalnızca yol yinelemesi için. Her tokenin bir yürüyüşün sonucunu nasıl seçtiği. mod: modun seçimi. converged: sabit noktaya ulaşan yürüyüş kazanır, sonra daha yüksek yol puanı. score: yalnızca yol puanı. mix: yol puanlarına göre ağırlıklı bir yürüyüş karışımı."
+      },
+      "clip": {
+        "name": "clip",
+        "tooltip": "Optional. The text encoder layers of the mods and LoRA files apply to this CLIP, as ComfyUI's LoRA loader does. Use the clip output for the prompt."
+      },
+      "route_freeze": {
+        "name": "yönlendirmeyi dondur",
+        "tooltip": "Hız. Bu örnekleme ilerlemesinden sonra (0,4: adımların %40'ından sonra) her katman yönlendirmeyi bırakır: o adımın uzman ağırlıklarını ve kapısını sabit ölçekler olarak tutar ve tek bir düşük ranklı çarpım hesaplar, neredeyse düz bir LoRA kadar hızlı. 0 modun değerini kullanır (varsayılan kapalı)."
+      },
+      "timeline": {
+        "name": "timeline",
+        "tooltip": "Optional. Time-dependent values from KiLoRA Timeline. Without it nothing changes."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional. KiLoRA settings. An input of this node that is not at its default replaces the value of the settings."
+      },
+      "depth_map": {
+        "name": "depth_map",
+        "tooltip": "İsteğe bağlı. KiLoRA Derinlik Haritası'ndan görüntünün her alanı için bir derinlik. Başlangıç ilerlemesinden itibaren görüntü tokenlarının derinliğinin yerini alır."
+      },
+      "linear_jump": {
+        "name": "linear jump",
+        "tooltip": "Approximate later depth passes with a fitted map. Off by default; image quality can change."
+      },
+      "jump_threshold": {
+        "name": "jump residual limit",
+        "tooltip": "Maximum relative fitting error for using the approximation at a layer. Higher errors keep the full loop."
+      },
+      "axis_alpha": {
+        "name": "axis_alpha",
+        "tooltip": "Off is the default. Creative and IP share one budget per token. Auto blends them using previous-step trigger attention, or alpha_mask when connected."
+      },
+      "alpha_mask": {
+        "name": "alpha mask",
+        "tooltip": "Optional IP alpha mask when axis_alpha is auto. It replaces trigger maps and its edge is feathered over 16 pixels. With axis_alpha off it has no effect."
+      },
+      "gate_history": {
+        "name": "gate history",
+        "tooltip": "full updates the adaptive gate at every depth step. head:k fixes its keep rates after the first k steps (k must be at least 1)."
+      },
+      "expert_text": {
+        "name": "expert_text",
+        "tooltip": "Auto prepares separate text conditioning for experts in layered mode. Off keeps the shared text path."
+      },
+      "variation": {
+        "name": "variation",
+        "tooltip": "Entry sampling temperature for derived routing. Zero selects deterministically."
+      },
+      "record_history": {
+        "name": "record history",
+        "tooltip": "Record file hashes and date locally. Turn off to stop recording."
+      },
+      "candidates": {
+        "name": "Candidates",
+        "tooltip": "Choose this many experts before routing. 0 or at least the expert count uses every expert."
+      },
+      "attention_route": {
+        "name": "attention route (deprecated)",
+        "tooltip": "Deprecated and ignored. Attention projections use the same routing and depth as other mounts."
+      },
+      "attention_route_cap": {
+        "name": "attention route cap (deprecated)",
+        "tooltip": "Deprecated and ignored. Kept to preserve saved workflow widget positions."
+      },
+      "size_norm": {
+        "name": "size norm",
+        "tooltip": "off: her LoRA girdisi kendi size norm ayarını kullanır. weight: zincirdeki her LoRA girdisi dosya başına bir boyut sayısı alır. Sayı yalnızca küçültür: tipik bir kütüphane LoRA'sından büyük bir dosya o boyuta indirilir. Daha zayıf bir dosya, radial budget açıkken de her zaman kendi boyutunu korur. Rapor her dosyanın kuralını belirtir. Modlar ve paketler kayıtlı güçlerini korur."
+      },
+      "radial_step": {
+        "name": "radyal adım",
+        "tooltip": "Biriken derinlik döngüsü. Sonraki her derinlik adımının, değişikliğin boyutunu mevcut yönü boyunca değiştiren kısmının adım boyu. 1 olduğu gibi ekler. 0 boyutu korur, yalnızca yön değişir. 1, 1 ve bütçe 0 ile adımlar eskisi gibi eklenir. Varsayılan değer 0.5'tir."
+      },
+      "orthogonal_step": {
+        "name": "dik adım",
+        "tooltip": "Biriken derinlik döngüsü. Sonraki her derinlik adımının, değişikliğin yönünü değiştiren kısmının adım boyu. 1 olduğu gibi ekler. 0 yönü korur, yalnızca boyut değişir."
+      },
+      "radial_budget": {
+        "name": "radyal bütçe",
+        "tooltip": "Biriken derinlik döngüsü. Radyal adım için token başına boyut sınırı: ilk derinlik adımından sonraki değişiklik boyutunun bu katı. Dik kısım kesilmez. 0 kapalıdır."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "model",
+        "tooltip": "Modlu model."
+      },
+      "1": {
+        "name": "rapor",
+        "tooltip": "Ne olduğu ve uyarılar."
+      },
+      "2": {
+        "name": "clip",
+        "tooltip": "The CLIP with the text encoder layers of the mods. Without text encoder layers it is the CLIP you connected."
+      }
+    }
+  },
+  "KiLoRAClearHistory": {
+    "display_name": "KiLoRA Clear Local History",
+    "description": "Remove the local history of applied chains.",
+    "inputs": {},
+    "outputs": {
+      "0": {
+        "name": "rapor",
+        "tooltip": "Ne olduğu ve uyarılar."
+      }
+    }
+  },
+  "KiLoRAClear": {
+    "display_name": "KiLoRA Modları kaldır",
+    "description": "Bir modelden tüm KiLoRA modlarını kaldırır.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "KiLoRA modlarının kaldırılacağı model."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "model",
+        "tooltip": "KiLoRA modu olmayan model."
+      }
+    }
+  },
+  "KiLoRALiveSave": {
+    "display_name": "KiLoRA Canlı: geri al, sıfırla, kaydet",
+    "description": "Canlı bir mod için geri alma, sıfırlama, kayıt noktaları ve yükleme.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "KiLoRA Mod yükle veya KiLoRA Mod listesini uygula düğümünden gelen, canlı mod içeren model."
+      },
+      "action": {
+        "name": "eylem",
+        "tooltip": "undo: bir adım geri. reset: başa dön (undo geri getirir). save point, load: adlı kayıtlar."
+      },
+      "name": {
+        "name": "ad",
+        "tooltip": "Kayıt noktasının adı."
+      },
+      "mod": {
+        "name": "mod",
+        "tooltip": "Canlı modun ID'si veya all."
+      }
+    }
+  },
+  "KiLoRALiveOptions": {
+    "display_name": "KiLoRA Canlı: ayarlar",
+    "description": "Öğrenmeyi açar veya kapatır ve hızını ayarlar.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "Canlı modu veya içe aktarılan LoRA dosyalarını kaydetmek için örnekleyiciden önce yerleştirin; canlı mod gerekmez."
+      },
+      "mod": {
+        "name": "mod",
+        "tooltip": "Canlı modun ID'si. Yalnızca biri yüklüyse boş bırakın."
+      },
+      "learning": {
+        "name": "öğrenme",
+        "tooltip": "Açık: mod görüntülerinizden öğrenir. Kapalı: durumunu korur."
+      },
+      "speed": {
+        "name": "hız",
+        "tooltip": "Öğrenme hızı. -1 modun değerini kullanır. Yüksek değerler modu daha hızlı değiştirir."
+      },
+      "keep_previous": {
+        "name": "son görüntüyü tut",
+        "tooltip": "on: canlı durum son görüntüyü ve istemini de tutar; iki görüntüyü karşılaştıran düzenleyiciler için. unchanged: mevcut seçimi koru."
+      },
+      "measure_size": {
+        "name": "öğrenme boyutu (uzman)",
+        "tooltip": "Uzman. Öğrenmenin ölçtüğü kopyanın uzun kenarı, piksel: 256 ile 4096 arası, 16'ya yuvarlanır. Tam boyutta ölçmek için görüntü boyutunu yazın (daha yavaş). 0: değişmez. Varsayılan 512."
+      },
+      "reduce_with": {
+        "name": "küçültme yolu",
+        "tooltip": "Küçük kopyanın nasıl yapıldığı. latent: hızlı, VAE gerekmez. decode-resize-encode: yazma düğümünün VAE girişi gerekir. unchanged: mevcut seçimi koru."
+      },
+      "pin": {
+        "name": "pin",
+        "tooltip": "Keep rendering the current state while learning continues. Off follows the latest write; unchanged keeps the current setting."
+      },
+      "controller": {
+        "name": "denetleyici",
+        "tooltip": "r1: temel yazma kuralı (varsayılan). rprop: işaret denetleyicisi. unchanged geçerli seçimi korur."
+      },
+      "measure": {
+        "name": "measurement budget",
+        "tooltip": "How the imported editor measures its moves. compressed: a fixed number of random combinations of all moves per write, two passes each, then an estimate of every slope. full: two passes per move, slower. unchanged: keep the current choice. The default is compressed."
+      },
+      "measure_combos": {
+        "name": "combinations per write",
+        "tooltip": "The number of random combinations that the compressed measurement uses per write. A write costs two passes per combination. 0: unchanged. The default is 8."
+      },
+      "edits": {
+        "name": "düzenlemeler",
+        "tooltip": "Düzenlemeler her LoRA için katman başına çekirdek matrisi ve gücü, ayrıca paket terimlerini değiştirir. Kaynak dosyalara asla yazılmaz. off içe aktarılan LoRA dosyalarını tam olarak geri yükler. unchanged geçerli seçimi korur."
+      },
+      "measure_samples": {
+        "name": "samples per write measurement",
+        "tooltip": "Samples per write measurement: the same noise and timesteps for every trial. More samples measure more steadily and cost more time. 1 = one sample at the middle timestep."
+      },
+      "learn": {
+        "name": "öğrenme sinyali",
+        "tooltip": "Bir yazmanın nasıl öğrendiği. measure: eğimleri ek ileri geçişlerle ölçer (varsayılan). prediction: değişikliği, üretimin kaydettiği tahmin hatalarından ölçüm geçişi olmadan kapalı biçimde çözer; koruma bir sonraki üretimde çalışır. unchanged mevcut seçimi korur."
+      }
+    }
+  },
+  "KiLoRALivePacks": {
+    "display_name": "KiLoRA Live: Düzenleyici paketleri",
+    "description": "Kurulu düzenleyici paketlerini listeler, paketleri açar veya kapatır ve yüklenen kaydın paketlerini gösterir.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "KiLoRA Mod yükle veya KiLoRA Mod listesini uygula düğümünden gelen, canlı mod içeren model."
+      },
+      "mod": {
+        "name": "mod",
+        "tooltip": "Canlı modun ID'si. Yalnızca biri yüklüyse boş bırakın."
+      },
+      "packs": {
+        "name": "paketler",
+        "tooltip": "auto: ortak paket ve modun ailesinin paketi. common only: yalnızca ortak paket. pinned: yüklenen kaydın paket sürümleri."
+      },
+      "turned_off": {
+        "name": "kapalı",
+        "tooltip": "Kapatılacak paketlerin kimlikleri, virgülle ayrılmış."
+      },
+      "editor_kind": {
+        "name": "düzenleyici",
+        "tooltip": "Paketlerin düzenleyicisi. Yalnızca tek bir düzenleyicinin paketleri kuruluysa boş bırakın."
+      },
+      "measurement": {
+        "name": "ölçüm",
+        "tooltip": "Düzenleyicinin her yönü nasıl ölçtüğü. central: iki geçiş, daha kesin. one-sided: bir geçiş ve ortak bir temel geçiş, daha hızlı. unchanged: mevcut seçimi koru."
+      },
+      "time_bins": {
+        "name": "zaman aralıkları",
+        "tooltip": "Düzenleyicinin ölçtüğü gürültü düzeyi sayısı: 1 veya 2. unchanged: mevcut seçimi koru."
+      },
+      "families": {
+        "name": "families",
+        "tooltip": "Optional. Family packs to use next to the common pack, as a comma list of family names (for example ink_line). Empty: auto takes the mod's family pack, or all installed family packs."
+      },
+      "path_merge": {
+        "name": "yol birleştirme",
+        "tooltip": "Gözlemlenen uzman yollarını düzenleyici durumunda birleştirir. Varsayılan olarak açıktır. unchanged mevcut seçimi korur."
+      },
+      "path_angle": {
+        "name": "path rotation angle",
+        "tooltip": "Rotation angle in radians for editor path merging. Default: 0.05."
+      },
+      "cross_layer": {
+        "name": "cross-layer links",
+        "tooltip": "Use recorded links in the path merge. Off by default. unchanged keeps the current choice."
+      },
+      "keep_merge_pairs": {
+        "name": "keep merge pairs",
+        "tooltip": "Keep before and after coefficients for up to 32 merges per branch. Off by default."
+      },
+      "merge_residual": {
+        "name": "merge residual",
+        "tooltip": "Keep the part outside the direction set, or drop it. Default: keep."
+      },
+      "term_budget": {
+        "name": "term budget",
+        "tooltip": "Compact a node after its term count exceeds this number. Default: 64."
+      },
+      "explore": {
+        "name": "explore",
+        "tooltip": "Favor less-used directions in inspiration draws. Zero turns this off. Explore draws keep no path-merge residuals, even with merge residual set to keep."
+      }
+    }
+  },
+  "KiLoRAFreeze": {
+    "display_name": "KiLoRA Canlı: sabit mod olarak dondur",
+    "description": "Canlı modun şu anki durumunu yeni bir sabit mod olarak kaydeder.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "KiLoRA Mod yükle veya KiLoRA Mod listesini uygula düğümünden gelen, canlı mod içeren model."
+      },
+      "mod": {
+        "name": "mod",
+        "tooltip": "Canlı modun ID'si. Yalnızca biri yüklüyse boş bırakın."
+      },
+      "new_id": {
+        "name": "yeni ID",
+        "tooltip": "Yeni modun ID'si. Küçük harf, rakam, nokta, alt çizgi veya tire kullanın."
+      }
+    }
+  },
+  "KiLoRAModInfo": {
+    "display_name": "KiLoRA Mod bilgisi",
+    "description": "Yazarın ipuçlarını gösterir: güç, anahtar kelimeler, örnek istem ve derinlik.",
+    "inputs": {
+      "file": {
+        "name": "dosya",
+        "tooltip": "models/kilora içinden bir KiLoRA mod dosyası."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "güç",
+        "tooltip": "Önerilen güç. Bir güç girişine bağlayın."
+      },
+      "1": {
+        "name": "tetikleyici kelimeler",
+        "tooltip": "Tetikleyici kelimeler. İsteminize ekleyin."
+      },
+      "2": {
+        "name": "örnek istem",
+        "tooltip": "Yazarın örnek istemi."
+      },
+      "3": {
+        "name": "derinlik",
+        "tooltip": "Önerilen derinlik."
+      },
+      "4": {
+        "name": "bilgi",
+        "tooltip": "Metin olarak mod bilgileri."
+      }
+    }
+  },
+  "KiLoRALiveExport": {
+    "display_name": "KiLoRA Canlı: paylaşmak için dışa aktar",
+    "description": "Canlı bir modu paylaşmak için kaydeder. Varsayılan olarak sizden öğrendikleri olmadan.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "KiLoRA Mod yükle veya KiLoRA Mod listesini uygula düğümünden gelen, canlı mod içeren model."
+      },
+      "mod": {
+        "name": "mod",
+        "tooltip": "Canlı modun ID'si. Yalnızca biri yüklüyse boş bırakın."
+      },
+      "include_learned_state": {
+        "name": "öğrendiklerini ekle",
+        "tooltip": "Kapalı: modu sizden öğrendikleri olmadan paylaşın."
+      },
+      "new_id": {
+        "name": "yeni ID",
+        "tooltip": "Paylaşılan modun ID'si. ID'yi korumak için boş bırakın."
+      },
+      "format": {
+        "name": "format",
+        "tooltip": "Choose a KiLoRA mod or a plain LoRA export."
+      }
+    }
+  },
+  "KiLoRALoadMod": {
+    "display_name": "KiLoRA Mod yükle",
+    "description": "Bir KiLoRA modunu modelin bir kopyasına yükler. LoRA yükleyici gibi kullanılır.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "Yüklenecek model. Orijinal değişmez."
+      },
+      "file": {
+        "name": "dosya",
+        "tooltip": "models/kilora içinden bir KiLoRA mod dosyası."
+      },
+      "strength": {
+        "name": "güç",
+        "tooltip": "1 eğitim gücüdür. 0 modu kapatır. Negatif değerler moddan uzaklaştırır."
+      },
+      "depth": {
+        "name": "derinlik",
+        "tooltip": "Geçiş sayısı. -1 modun önerdiği derinliği kullanır."
+      },
+      "iteration": {
+        "name": "yineleme",
+        "tooltip": "Derinlik geçişlerinin nasıl çalıştığı. mod: modun seçtiği kip. accumulate: her geçiş kendi değişikliğini ekler. path: her geçiş sonraki uzmanı seçer ve sonuç o uzmanın değişikliğidir."
+      },
+      "routing_scope": {
+        "name": "yönlendirme kapsamı",
+        "tooltip": "Uzmanları hangi logitlerin seçtiği. mod: her modda kayıtlı kapsam. token: her token kendi başına. tensor: tüm tokenların ortalaması, tüm tensör için tek seçim."
+      },
+      "routing_select": {
+        "name": "yönlendirme seçimi",
+        "tooltip": "Logitlerin uzman ağırlıklarına nasıl dönüştüğü. mod: her modda kayıtlı seçim. sparsemax: toplamı 1 olan ağırlıklar, zayıf uzmanlar 0. top1: yalnızca en iyi uzman."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "model",
+        "tooltip": "Modlu model."
+      },
+      "1": {
+        "name": "rapor",
+        "tooltip": "Ne olduğu ve uyarılar."
+      }
+    }
+  },
+  "KiLoRALiveRecord": {
+    "display_name": "KiLoRA Canlı: 1. Kaydet (örnekleyiciden önce)",
+    "description": "Canlı modu veya içe aktarılan LoRA dosyalarını kaydetmek için örnekleyiciden önce yerleştirin; canlı mod gerekmez.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "Canlı modu veya içe aktarılan LoRA dosyalarını kaydetmek için örnekleyiciden önce yerleştirin; canlı mod gerekmez."
+      },
+      "editor": {
+        "name": "düzenleyici",
+        "tooltip": "models/kilora içinden, bu temel model için yapılmış bir canlı mod düzenleyici dosyası (.kedit). İçe aktarılan LoRA dosyaları için Imported LoRAs seçin; canlı mod veya düzenleyici dosyası gerekmez."
+      },
+      "clip": {
+        "name": "clip",
+        "tooltip": "Metin kodlayıcı. Canlı ölçüm, kaybın istemle ve boş bir açıklamayla ortalamasını alır; boş açıklamayı bununla kodlar. Bu olmadan, yönlendirmeli örnekleyicinin negatif istemi onun yerini alır."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "model",
+        "tooltip": "Bu modeli örnekleyiciye bağlayın."
+      },
+      "1": {
+        "name": "kayıt",
+        "tooltip": "KiLoRA Canlı: 2. Yaz düğümüne bağlayın."
+      }
+    }
+  },
+  "KiLoRALiveWrite": {
+    "display_name": "KiLoRA Canlı: 2. Yaz (örnekleyiciden sonra)",
+    "description": "Canlı mod, adım 2. Örnekleyiciden sonra koyun. Düzenleyici canlı modu günceller. Geri alınabilir. Koruma, prompt uyumunu düşüren veya görüntüyü çökerten bir yazmayı reddeder. Record'da CLIP yoksa koruma kapalıdır.",
+    "inputs": {
+      "path": {
+        "name": "kayıt",
+        "tooltip": "KiLoRA Canlı: 1. Kaydet düğümünün kayıt çıktısı."
+      },
+      "samples": {
+        "name": "latent",
+        "tooltip": "Örnekleyiciden gelen latent. Değişmeden geçer."
+      },
+      "vae": {
+        "name": "VAE",
+        "tooltip": "İsteğe bağlı. decode-resize-encode küçültmesi için VAE."
+      },
+      "mask": {
+        "name": "maske",
+        "tooltip": "Beyaz alanlar değişikliği alır, siyah alanlar olduğu gibi kalır. Yumuşak kenarlar karışır."
+      },
+      "region_caption": {
+        "name": "region caption",
+        "tooltip": "Optional. A caption for the marked region. It names the concept, so later generations can find it. It needs the CLIP on Record."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "latent",
+        "tooltip": "Örnekleyiciden gelen latent, değişmeden."
+      },
+      "1": {
+        "name": "rapor",
+        "tooltip": "Ne olduğu ve uyarılar."
+      }
+    }
+  },
+  "KiLoRALiveLearnFromImages": {
+    "display_name": "KiLoRA Canlı: Görsellerden öğren",
+    "description": "Bir görsel kümesinin ortak yönünü canlı duruma, yeni bir dalda tek bir commit olarak öğrenir. Her beşinci görsel değişikliği denetlemek için ayrılır. Kullandığınız görsellerin haklarından siz sorumlusunuz.",
+    "inputs": {
+      "path": {
+        "name": "kayıt",
+        "tooltip": "KiLoRA Canlı: 1. Kaydet düğümünün kayıt çıktısı."
+      },
+      "vae": {
+        "name": "VAE",
+        "tooltip": "Görüntüleri bağlı modelin gizli biçimine kodlayan VAE."
+      },
+      "cue": {
+        "name": "İpucu",
+        "tooltip": "Her açıklamaya eklenen anahtar sözcük, örneğin bir stil sözcüğü."
+      },
+      "ignore_guard": {
+        "name": "Denetimi yoksay",
+        "tooltip": "Ayrılan görsellerin kaybı artsa veya kayma sınırı aşsa bile değişikliği kaydet. Rapora bir uyarı ekler."
+      },
+      "images": {
+        "name": "Görüntüler",
+        "tooltip": "IMAGE grubu. Görüntü veya klasör kullanın. Bu görüntülerin haklarından siz sorumlusunuz."
+      },
+      "captions": {
+        "name": "Açıklamalar",
+        "tooltip": "Her görüntü için bir satır açıklama. Yalnızca ipucunu kullanmak için boş bırakın."
+      },
+      "folder": {
+        "name": "Klasör",
+        "tooltip": "Aynı adlı isteğe bağlı .txt açıklamaları içeren görüntü klasörü. Klasör veya görüntü kullanın."
+      },
+      "clip": {
+        "name": "clip",
+        "tooltip": "Açıklamalar ve kayma istemleri için metin kodlayıcı. Gerekli."
+      },
+      "mounts": {
+        "name": "Bağlantı noktaları",
+        "tooltip": "İsteğe bağlı bağlantı noktası adı kalıpları, satır başına bir tane veya virgülle ayrılmış, örneğin transformer_blocks.1*. Yalnızca eşleşenler değişir. Boş: hepsi."
+      },
+      "t_min": {
+        "name": "t min",
+        "tooltip": "Örneklerin en düşük örnekleyici zamanı, 0 (son adım, az gürültü) ile 1 (ilk adım, çok gürültü) arası. Az gürültü ayrıntıyı ve dokuyu değiştirir."
+      },
+      "t_max": {
+        "name": "t maks",
+        "tooltip": "Örneklerin en yüksek örnekleyici zamanı, 0 ile 1 arası. Çok gürültü kompozisyonu ve genel stili değiştirir. 0 ve 1 ile tüm adımlar kullanılır."
+      },
+      "mask": {
+        "name": "maske",
+        "tooltip": "İsteğe bağlı bölge maskesi, gizli tokenlara yeniden boyutlandırılır. Değişikliği yalnızca beyaz alanlar verir; siyah alanlardaki hata 0 yapılır."
+      },
+      "axis": {
+        "name": "eksen",
+        "tooltip": "İsteğe bağlı düzenleyici ekseni. Terimleri yalnızca bu eksendeki LoRA çerçeveleri verir. all: tüm eksenler."
+      },
+      "single_image": {
+        "name": "Tek görsel",
+        "tooltip": "Tam olarak bir görselden öğren. Küme ortalaması ve ayrılmış görsellerle denetim yoktur. Rapor, sonucun görsel içeriğini kopyalayabileceği uyarısını verir. Kayma denetimi açık kalır."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "kayıt",
+        "tooltip": "Aynı kayıt, sonraki canlı düğüm için."
+      },
+      "1": {
+        "name": "rapor",
+        "tooltip": "Ayrılan görsellerde değişiklik olmadan ve varken kayıp, göreli kazanç, kayma, yazma normu, dal ve süre."
+      }
+    }
+  },
+  "KiLoRARegion": {
+    "display_name": "KiLoRA Mod Listesi: Bölge",
+    "description": "Bir mod listesindeki modları görüntünün maskelenmiş alanıyla sınırlar. Her mod uzmanlarını bu alandan seçer. Modları farklı alanlara koymak için farklı maskeli listeleri zincirleyin.",
+    "inputs": {
+      "sets": {
+        "name": "mod listesi",
+        "tooltip": "Başka bir liste düğümünden mod listesi. Yeni liste başlatmak için boş bırakın."
+      },
+      "mask": {
+        "name": "maske",
+        "tooltip": "Beyaz alanlar değişikliği alır, siyah alanlar olduğu gibi kalır. Yumuşak kenarlar karışır."
+      },
+      "apply_to": {
+        "name": "uygula",
+        "tooltip": "tüm liste: gelen listedeki her mod. son mod: yalnızca en son eklenen mod."
+      },
+      "caption": {
+        "name": "caption",
+        "tooltip": "Optional. A text encoding for this region (from CLIP Text Encode). With region captions on in KiLoRA Region Attention, the region follows this caption instead of the prompt."
+      },
+      "segs": {
+        "name": "segs",
+        "tooltip": "Optional. Regions from Impact Pack (SEGS). Their masks are joined into one mask and used as the region instead of the mask."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "mod listesi",
+        "tooltip": "Sonraki liste düğümüne veya KiLoRA Mod listesini uygula düğümüne bağlayın."
+      }
+    }
+  },
+  "KiLoRADepthSchedule": {
+    "display_name": "KiLoRA Derinlik Planı",
+    "description": "Her bloğun derinliğini, örnekleme ilerlemesine göre de, bir liste, hazır ayar veya ifadeyle belirler. KiLoRA Mod Listesini Uygula düğümüne bağlayın.",
+    "inputs": {
+      "schedule": {
+        "name": "plan",
+        "tooltip": "Bir liste (blok başına bir derinlik, son değer tekrar eder), hazır ayar adı veya i, n, t, self, cross ve mlp içeren bir ifade. Boşsa hazır ayar geçerlidir."
+      },
+      "preset": {
+        "name": "hazır ayar",
+        "tooltip": "Plan metni boşsa geçerlidir. none: plan yok, derinlik geçerlidir."
+      },
+      "blocks": {
+        "name": "bloklar",
+        "tooltip": "Önizlemedeki blok sayısı."
+      },
+      "preview_kind": {
+        "name": "önizleme katman türü",
+        "tooltip": "Önizlemenin gösterdiği katman türü."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "derinlik planı",
+        "tooltip": "Plan. KiLoRA Mod Listesini Uygula düğümüne bağlayın."
+      },
+      "1": {
+        "name": "önizleme",
+        "tooltip": "Isı haritası: bloklar yatay, örnekleme ilerlemesi dikey. Siyah derinlik 0, sarı en derin değer."
+      }
+    }
+  },
+  "KiLoRARegionAttention": {
+    "display_name": "KiLoRA Mod List: Region Attention",
+    "description": "Experimental. Keeps the change of each KiLoRA region inside its region. In a window of sampling after the layout forms, the tokens of a region attend less (soft) or not at all (hard) to tokens outside it. Connect it after KiLoRA Apply.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "Yüklenecek model. Orijinal değişmez."
+      },
+      "mode": {
+        "name": "mode",
+        "tooltip": "off: no change. soft: a region looks less at the rest of the image. hard: a region does not look at the rest of the image."
+      },
+      "strength": {
+        "name": "strength",
+        "tooltip": "How much less a region looks outside itself in soft mode. Start low: high values change the image."
+      },
+      "until": {
+        "name": "until",
+        "tooltip": "Where the window ends, as a part of the sampler steps. 0.6: the limit stops after 60% of the steps."
+      },
+      "outside_region": {
+        "name": "outside region",
+        "tooltip": "On: the area outside every region counts as one more region, so it does not look into the regions. Use it for a single region."
+      },
+      "start": {
+        "name": "start",
+        "tooltip": "Where the window starts, as a part of the sampler steps. Steps before it never change, so the layout forms freely. 0.3: after the first 30% of the steps."
+      },
+      "region_captions": {
+        "name": "region captions",
+        "tooltip": "On: regions with a caption follow their own caption in the same window of steps (regional prompting). The rest of the image follows the prompt."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "model",
+        "tooltip": "Modlu model."
+      },
+      "1": {
+        "name": "rapor",
+        "tooltip": "Ne olduğu ve uyarılar."
+      }
+    }
+  },
+  "KiLoRASimple": {
+    "display_name": "KiLoRA Settings (Simple)",
+    "description": "KiLoRA settings with one choice: how the LoRAs mix. Connect it to the settings input of KiLoRA Apply or a KiLoRA LoRA node. The mix values: balanced: the defaults of KiLoRA Apply, with depth and routing from each mod. keep_each_strong: each token takes only its best LoRA, at full strength (routing scope token, routing select top1). subtle: one pass and one smooth blend per layer (depth 1, routing scope tensor, routing select sparsemax). stack: KiLoRA LoRA Loader does not route and gives the same output as Load LoRA. The other nodes use the balanced values for stack.",
+    "inputs": {
+      "mix": {
+        "name": "mix",
+        "tooltip": "How the LoRAs mix. balanced: the defaults of KiLoRA Apply, with depth and routing from each mod. keep_each_strong: each token takes only its best LoRA, at full strength (routing scope token, routing select top1). subtle: one pass and one smooth blend per layer (depth 1, routing scope tensor, routing select sparsemax). stack: KiLoRA LoRA Loader does not route and gives the same output as Load LoRA. The other nodes use the balanced values for stack. balanced ile LoRA dosyaları derinlik 3 ile yönlenir ve adımların 0,4'ünde yönlendirmeyi dondurur; stack tek geçiştir."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "settings",
+        "tooltip": "The settings. Connect them to KiLoRA Apply or a KiLoRA LoRA node."
+      }
+    }
+  },
+  "KiLoRASettings": {
+    "display_name": "KiLoRA Settings",
+    "description": "KiLoRA settings: a mix, and single values that replace the values of the mix. Connect it to the settings input of KiLoRA Apply or a KiLoRA LoRA node. Content keys default to per_expert; mix is the compatibility choice. Fused gate statistics are faster; torch reproduces images made before this release.",
+    "inputs": {
+      "mix": {
+        "name": "mix",
+        "tooltip": "How the LoRAs mix. balanced: the defaults of KiLoRA Apply, with depth and routing from each mod. keep_each_strong: each token takes only its best LoRA, at full strength (routing scope token, routing select top1). subtle: one pass and one smooth blend per layer (depth 1, routing scope tensor, routing select sparsemax). stack: KiLoRA LoRA Loader does not route and gives the same output as Load LoRA. The other nodes use the balanced values for stack. balanced ile LoRA dosyaları derinlik 3 ile yönlenir ve adımların 0,4'ünde yönlendirmeyi dondurur; stack tek geçiştir."
+      },
+      "depth": {
+        "name": "derinlik",
+        "tooltip": "Number of passes. -2 takes the depth of the mix. -1 uses the depth that the mods recommend."
+      },
+      "iteration": {
+        "name": "yineleme",
+        "tooltip": "How depth passes work. from mix: the value of the mix. mod: the mode the mod chose. accumulate: each pass adds its change. path: each pass picks the next expert, and the result is that expert's change."
+      },
+      "routing_scope": {
+        "name": "yönlendirme kapsamı",
+        "tooltip": "Which logits choose the experts. from mix: the value of the mix. mod: the scope stored in each mod. token: each token on its own. tensor: the mean over all tokens, one choice for the whole tensor."
+      },
+      "routing_select": {
+        "name": "yönlendirme seçimi",
+        "tooltip": "How the logits become expert weights. from mix: the value of the mix. mod: the selection stored in each mod. sparsemax: weights that sum to 1, weak experts at 0. top1: only the best expert."
+      },
+      "depth_schedule": {
+        "name": "derinlik planı",
+        "tooltip": "İsteğe bağlı. Bir KiLoRA Derinlik Planı. Derinliğin ve modların varsayılan planının yerine geçer."
+      },
+      "lycoris_apply": {
+        "name": "LyCORIS apply",
+        "tooltip": "For routed LoKr and LoHa files, truncated applies the low-rank change; exact applies the whole change."
+      },
+      "candidates": {
+        "name": "Candidates",
+        "tooltip": "Choose this many experts before routing. 0 or at least the expert count uses every expert."
+      },
+      "candidate_summary": {
+        "name": "candidate summary",
+        "tooltip": "Choose content keys or leading read-map directions to select candidates."
+      },
+      "content_keys": {
+        "name": "content keys",
+        "tooltip": "per_expert (default) caches keys for each LoRA. mix is the compatibility choice. KILORA_CONTENT_KEYS overrides this setting."
+      },
+      "gate_stats": {
+        "name": "gate statistics",
+        "tooltip": "fused (default) is faster. torch reproduces images made before this release. KILORA_GATE_STATS overrides this setting."
+      },
+      "routing_features": {
+        "name": "routing features",
+        "tooltip": "Collect optional inputs for routing scores."
+      },
+      "cross_token_region": {
+        "name": "token region cross",
+        "tooltip": "Weight for the token and region routing score product."
+      },
+      "cross_token_prompt": {
+        "name": "token prompt cross",
+        "tooltip": "Weight for the token and prompt routing score product."
+      },
+      "cross_token_timestep": {
+        "name": "token timestep cross",
+        "tooltip": "Weight for the token and timestep routing score product."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "settings",
+        "tooltip": "The settings. Connect them to KiLoRA Apply or a KiLoRA LoRA node."
+      }
+    }
+  },
+  "KiLoRALoRALoader": {
+    "display_name": "KiLoRA LoRA Loader",
+    "description": "Use it in place of Load LoRA. It patches CLIP like Load LoRA. The model LoRAs of all chained KiLoRA LoRA Loaders are routed together when sampling starts. With mix set to stack, the output is the same as Load LoRA.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "Yüklenecek model. Orijinal değişmez."
+      },
+      "clip": {
+        "name": "clip",
+        "tooltip": "The text encoder. It gets the LoRA the same way as with Load LoRA."
+      },
+      "lora_name": {
+        "name": "LoRA dosyası",
+        "tooltip": "models/loras içinden bir LoRA dosyası."
+      },
+      "strength_model": {
+        "name": "strength model",
+        "tooltip": "The LoRA weight on the model, as in Load LoRA. Routing keeps this strength for each LoRA."
+      },
+      "strength_clip": {
+        "name": "strength clip",
+        "tooltip": "The LoRA weight on the text encoder, as in Load LoRA."
+      },
+      "lora_stack": {
+        "name": "LoRA stack",
+        "tooltip": "Optional. More LoRAs as a list of (LoRA file, strength model, strength clip). They load before the LoRA of this node."
+      },
+      "timeline": {
+        "name": "timeline",
+        "tooltip": "Optional. Time-dependent values from KiLoRA Timeline. Without it nothing changes."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional. KiLoRA settings. Without them, the defaults apply."
+      },
+      "depth_map": {
+        "name": "depth_map",
+        "tooltip": "İsteğe bağlı. KiLoRA Derinlik Haritası'ndan görüntünün her alanı için bir derinlik. Başlangıç ilerlemesinden itibaren görüntü tokenlarının derinliğinin yerini alır."
+      },
+      "axis_alpha": {
+        "name": "axis_alpha",
+        "tooltip": "Off is the default. Creative and IP share one budget per token. Auto blends them using previous-step trigger attention, or alpha_mask when connected."
+      },
+      "alpha_mask": {
+        "name": "alpha mask",
+        "tooltip": "Optional IP alpha mask when axis_alpha is auto. It replaces trigger maps and its edge is feathered over 16 pixels. With axis_alpha off it has no effect."
+      },
+      "expert_text": {
+        "name": "expert_text",
+        "tooltip": "Auto prepares separate text conditioning for experts in layered mode. Off keeps the shared text path."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "model",
+        "tooltip": "The model. The LoRAs are routed when sampling starts."
+      },
+      "1": {
+        "name": "clip",
+        "tooltip": "The text encoder with the LoRA."
+      }
+    }
+  },
+  "KiLoRARouteLoaded": {
+    "display_name": "KiLoRA Route Loaded LoRAs",
+    "description": "Put it after your LoRA loaders. It takes the LoRAs that the loaders put on the model and routes them with KiLoRA. Each LoRA keeps its model strength. CLIP is not changed. If the LoRAs cannot be told apart, they stay as loaded and the report says so.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "The model after your LoRA loaders. The original model is not changed."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional. KiLoRA settings. Without them, the defaults apply."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "model",
+        "tooltip": "The model with the loaded LoRAs routed."
+      },
+      "1": {
+        "name": "rapor",
+        "tooltip": "Ne olduğu ve uyarılar."
+      }
+    }
+  },
+  "KiLoRARouteRecord": {
+    "display_name": "KiLoRA Route Record",
+    "description": "Records where each LoRA acts while the sampler runs. Connect its model to the sampler and its routes to KiLoRA Route Map.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "The model with KiLoRA routing (after KiLoRA Apply or a KiLoRA loader)."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "model",
+        "tooltip": "The model that records the routing. Connect it to the sampler."
+      },
+      "1": {
+        "name": "routes",
+        "tooltip": "The recorded routing shares. Connect them to KiLoRA Route Map."
+      }
+    }
+  },
+  "KiLoRARouteMap": {
+    "display_name": "KiLoRA Route Map",
+    "description": "Shows where each LoRA acted in the last sampled image: one colored panel per LoRA, with a legend. Connect the routes of KiLoRA Route Record and the decoded image.",
+    "inputs": {
+      "routes": {
+        "name": "routes",
+        "tooltip": "The routes of KiLoRA Route Record."
+      },
+      "image": {
+        "name": "image",
+        "tooltip": "The decoded image of the same sampler run."
+      },
+      "labels": {
+        "name": "labels",
+        "tooltip": "The LoRA names, separated by commas, in load order. Missing names become LoRA 1, LoRA 2, and so on."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "map",
+        "tooltip": "One panel per LoRA: the image, colored where the LoRA acted. A stronger color is a larger share."
+      },
+      "1": {
+        "name": "rapor",
+        "tooltip": "Ne olduğu ve uyarılar."
+      }
+    }
+  },
+  "KiLoRATokenRoles": {
+    "display_name": "KiLoRA Mod List: Token Roles",
+    "description": "Sets which tokens the mods of a mod list change in an editing workflow: the target image, the reference images or the text. Other tokens keep the base weights.",
+    "inputs": {
+      "sets": {
+        "name": "mod listesi",
+        "tooltip": "Başka bir liste düğümünden mod listesi. Yeni liste başlatmak için boş bırakın."
+      },
+      "roles": {
+        "name": "roles",
+        "tooltip": "auto: the mod's own policy, else the LoRA file's, else the target tokens when reference images are present. target: the image being made. reference: the reference images. all: every token, as without roles."
+      },
+      "apply_to": {
+        "name": "uygula",
+        "tooltip": "tüm liste: gelen listedeki her mod. son mod: yalnızca en son eklenen mod."
+      },
+      "custom": {
+        "name": "custom roles",
+        "tooltip": "Optional. A role list that replaces the choice above, for example reference:0+text for the first reference image and the text."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "mod listesi",
+        "tooltip": "Sonraki liste düğümüne veya KiLoRA Mod listesini uygula düğümüne bağlayın."
+      }
+    }
+  },
+  "KiLoRATwoPanels": {
+    "display_name": "KiLoRA Mod List: Two Panels",
+    "description": "Marks a two-panel canvas. One panel holds the reference picture and the other is the image being made. Mods on auto roles change only the target panel. Applies to every mod of the list.",
+    "inputs": {
+      "sets": {
+        "name": "mod listesi",
+        "tooltip": "Başka bir liste düğümünden mod listesi. Yeni liste başlatmak için boş bırakın."
+      },
+      "reference_side": {
+        "name": "reference side",
+        "tooltip": "The side of the canvas that holds the reference picture."
+      },
+      "split": {
+        "name": "split",
+        "tooltip": "The part of the canvas width (left, right) or height (top, bottom) that the reference panel covers."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "mod listesi",
+        "tooltip": "Sonraki liste düğümüne veya KiLoRA Mod listesini uygula düğümüne bağlayın."
+      }
+    }
+  },
+  "KiLoRARegionIsolation": {
+    "display_name": "KiLoRA Mod List: Region Isolation",
+    "description": "Experimental. Keeps the area outside the KiLoRA regions as the base model makes it. In the first part of sampling, a base-only branch runs next to the sampler, and the outside follows it. Each step in that part costs one extra model call. Connect it after KiLoRA Apply.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "Yüklenecek model. Orijinal değişmez."
+      },
+      "strength": {
+        "name": "strength",
+        "tooltip": "How far the outside follows the base model. 1: fully, 0: off."
+      },
+      "until": {
+        "name": "until",
+        "tooltip": "The part of the sampler steps that the isolation acts in, from the start. After it, the image settles freely, so the edge can heal."
+      },
+      "feather": {
+        "name": "feather",
+        "tooltip": "The soft edge of the regions, in pixels. Larger values blend the edge over a wider band."
+      },
+      "sets": {
+        "name": "mod listesi",
+        "tooltip": "Optional. The mod list whose regions to isolate (the same list as on KiLoRA Apply). Without it, the regions of the list that KiLoRA Apply loaded."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "model",
+        "tooltip": "Modlu model."
+      },
+      "1": {
+        "name": "rapor",
+        "tooltip": "Ne olduğu ve uyarılar."
+      }
+    }
+  },
+  "KiLoRATimeline": {
+    "display_name": "KiLoRA Timeline",
+    "description": "Sets one value over the run: the strength of a mod, or when it is active, for example. Chain Timeline nodes to add rows, and connect the last one to KiLoRA Apply or the LoRA loader. The preview plots every row.",
+    "inputs": {
+      "target": {
+        "name": "target",
+        "tooltip": "all, an axis (creative, functional or ip), or the file name of a mod or LoRA in the mod list, without the extension."
+      },
+      "quantity": {
+        "name": "quantity",
+        "tooltip": "What the row sets. strength multiplies the strength. active turns the mod on (1) or off (0). route_freeze and gate_kappa replace the inputs of KiLoRA Apply. The region quantities set the strength of that effect over time. depth_map and depth_base control the depth map (target all)."
+      },
+      "curve": {
+        "name": "curve",
+        "tooltip": "Keyframes such as 0:1, 0.3:0.6, 1:0.2 (position:value), or an expression with t, step, steps and sigma, for example 1 - t."
+      },
+      "clock": {
+        "name": "clock",
+        "tooltip": "What the keyframe positions mean. progress: 0 at the first step, 1 at the last. step: the step number. sigma: the noise level."
+      },
+      "interpolation": {
+        "name": "interpolation",
+        "tooltip": "linear: values blend between keyframes. step: each value holds until the next keyframe."
+      },
+      "timeline": {
+        "name": "timeline",
+        "tooltip": "Optional. Rows from another Timeline node; this node adds its rows after them."
+      },
+      "more_rows": {
+        "name": "more rows",
+        "tooltip": "Optional. More rows, one per line: target | quantity | curve, then optional | clock and | interpolation."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "timeline",
+        "tooltip": "All rows. Connect it to KiLoRA Apply or to the next Timeline node."
+      },
+      "1": {
+        "name": "önizleme",
+        "tooltip": "Every row over the run: progress across, value up."
+      }
+    }
+  },
+  "KiLoRADepthMap": {
+    "display_name": "KiLoRA Derinlik Haritası",
+    "description": "Bir maskeden (SAM2 ve diğer bölütleyiciler) ya da bir görüntüden (parlaklığı: ControlNet ön işlemcilerinden derinlik, lineart veya poz haritaları) görüntünün her alanı için bir derinlik. start'a kadar her alan tek bir derinlikle çalışır, böylece yerleşim her zamanki gibi oluşur. Sonra her alan kendi derinliğiyle çalışır. KiLoRA Apply veya KiLoRA LoRA Loader'a bağlayın.",
+    "inputs": {
+      "min_depth": {
+        "name": "min_depth",
+        "tooltip": "Haritanın 0 (siyah) olduğu yerdeki derinlik."
+      },
+      "max_depth": {
+        "name": "max_depth",
+        "tooltip": "Haritanın 1 (beyaz) olduğu yerdeki derinlik."
+      },
+      "invert": {
+        "name": "invert",
+        "tooltip": "Derinlikler ayarlanmadan önce siyah ile beyazı değiştirir."
+      },
+      "gamma": {
+        "name": "gamma",
+        "tooltip": "Derinlikler ayarlanmadan önce haritayı biçimlendirir: 1'in üstü daha çoğunu min_depth'e yakın, 1'in altı max_depth'e yakın tutar."
+      },
+      "feather": {
+        "name": "feather",
+        "tooltip": "Haritanın yumuşak kenarı, piksel olarak. Yumuşak kenar derinlikler arasında görünür bir dikişi önler."
+      },
+      "start": {
+        "name": "start",
+        "tooltip": "Haritanın etki ettiği örnekleme ilerlemesi (0,3: adımların %30'undan sonra). Öncesinde her alan base ile çalışır, böylece yerleşim tek derinlikteki gibi kalır."
+      },
+      "base": {
+        "name": "base",
+        "tooltip": "start'tan önce her alanın ve metin tokenlarının derinliği. -1: haritanın ortalama derinliği, yuvarlanmış."
+      },
+      "mask": {
+        "name": "maske",
+        "tooltip": "Bir maske, örneğin SAM2'den. 1, max_depth verir. Bir görüntü de bağlıysa maske kullanılır."
+      },
+      "image": {
+        "name": "image",
+        "tooltip": "Bir görüntü. Parlaklığı haritadır, örneğin bir derinlik, lineart veya poz ön işlemcisinin çıktısı."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "derinlik haritası",
+        "tooltip": "Derinlik haritası. KiLoRA Apply veya KiLoRA LoRA Loader'ın depth_map girişine bağlayın."
+      },
+      "1": {
+        "name": "önizleme",
+        "tooltip": "Görüntü olarak harita: siyah min_depth, beyaz max_depth."
+      }
+    }
+  },
+  "KiLoRALayerConditioning": {
+    "display_name": "KiLoRA Layer",
+    "description": "Selects the axes for this conditioning and sets its mask.",
+    "inputs": {
+      "conditioning": {
+        "name": "conditioning",
+        "tooltip": "The conditioning for this layer."
+      },
+      "layer": {
+        "name": "layer",
+        "tooltip": "The axis for this layer. creative also runs functional."
+      },
+      "mask": {
+        "name": "maske",
+        "tooltip": "Optional mask for this layer."
+      },
+      "alpha_source": {
+        "name": "alpha source",
+        "tooltip": "mask uses the connected mask. attention uses the previous step’s trigger maps for IP and the complement for creative."
+      },
+      "feather": {
+        "name": "feather",
+        "tooltip": "The soft edge of the regions, in pixels. Larger values blend the edge over a wider band."
+      },
+      "crop": {
+        "name": "crop",
+        "tooltip": "off: the whole image. auto: faster, crops the late steps with surrounding context."
+      },
+      "batch": {
+        "name": "batch",
+        "tooltip": "Run this layer in one batched model call with the other layers. Off: each layer runs as its own call, which is exact and at 1024 pixels faster. Turn it on for all layers to batch them."
+      },
+      "compose": {
+        "name": "compose",
+        "tooltip": "separate: each layer runs as its own model call. single: all layers run in one model call per guidance branch, and each image area reads its own layer text. Select single on every layer. The crop input is not used with single."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "conditioning",
+        "tooltip": "Conditioning for this layer."
+      }
+    }
+  },
+  "KiLoRALayerFilter": {
+    "display_name": "KiLoRA Layer Filter",
+    "description": "Limit added model function patches to one layer. Weight and object patches remain global.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "The model after the plugin."
+      },
+      "before": {
+        "name": "before",
+        "tooltip": "The model before the plugin."
+      },
+      "layer": {
+        "name": "layer",
+        "tooltip": "The layer where the plugin runs."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "model",
+        "tooltip": "Modlu model."
+      },
+      "1": {
+        "name": "rapor",
+        "tooltip": "Ne olduğu ve uyarılar."
+      }
+    }
+  },
+  "KiLoRASaveRecipe": {
+    "display_name": "KiLoRA Save Recipe",
+    "description": "Saves a mod list and settings as references without copying the weights.",
+    "inputs": {
+      "sets": {
+        "name": "mod listesi",
+        "tooltip": "The mod list to save."
+      },
+      "filename": {
+        "name": "dosya adı",
+        "tooltip": "The name of the recipe file."
+      },
+      "name": {
+        "name": "ad",
+        "tooltip": "The name shown for the recipe."
+      },
+      "license": {
+        "name": "license",
+        "tooltip": "The license for the recipe."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional settings to save with the recipe."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "rapor",
+        "tooltip": "Ne olduğu ve uyarılar."
+      }
+    }
+  },
+  "KiLoRADirectionNodes": {
+    "display_name": "KiLoRA Direction Nodes",
+    "description": "Add direction nodes from a stored library basis or one complete direction file.",
+    "inputs": {
+      "strength": {
+        "name": "güç",
+        "tooltip": "Strength of the direction nodes."
+      },
+      "chunk": {
+        "name": "chunk",
+        "tooltip": "Number of output directions per node."
+      },
+      "sets": {
+        "name": "mod listesi",
+        "tooltip": "Başka bir liste düğümünden mod listesi. Yeni liste başlatmak için boş bırakın."
+      },
+      "library_path": {
+        "name": "library path",
+        "tooltip": "Library index folder; empty uses the default."
+      },
+      "fine": {
+        "name": "Fine mode",
+        "tooltip": "Allow up to 64 depth steps for direction nodes."
+      },
+      "candidates": {
+        "name": "Candidates",
+        "tooltip": "Maximum direction nodes scored per token in fine mode."
+      },
+      "direction_file": {
+        "name": "Direction file",
+        "tooltip": "Optional path to a LoRA direction file with kilora_directions metadata. When set, use one node with the full saved change at each mount. Library path, chunk, fine and candidates apply only to the library basis."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "mod listesi",
+        "tooltip": "Sonraki liste düğümüne veya KiLoRA Mod listesini uygula düğümüne bağlayın."
+      }
+    }
+  },
+  "KiLoRALoRALibrary": {
+    "display_name": "KiLoRA LoRA Library",
+    "description": "Select LoRAs at the first sampling step and save a recipe.",
+    "inputs": {
+      "model": {
+        "name": "model",
+        "tooltip": "Yüklenecek model. Orijinal değişmez."
+      },
+      "folders": {
+        "name": "folders",
+        "tooltip": "One LoRA folder path per line."
+      },
+      "prompt": {
+        "name": "prompt",
+        "tooltip": "Text used to find matching LoRAs."
+      },
+      "count": {
+        "name": "count",
+        "tooltip": "Maximum number of LoRAs to select."
+      },
+      "strength": {
+        "name": "güç",
+        "tooltip": "Strength of each selected LoRA."
+      },
+      "seed": {
+        "name": "seed",
+        "tooltip": "Seed for selection."
+      },
+      "min_relevance": {
+        "name": "min relevance",
+        "tooltip": "Minimum relevance score."
+      },
+      "include_tags": {
+        "name": "include tags",
+        "tooltip": "Include tags, separated by commas."
+      },
+      "exclude_tags": {
+        "name": "exclude tags",
+        "tooltip": "Exclude tags, separated by commas."
+      },
+      "clip": {
+        "name": "clip",
+        "tooltip": "Optional text encoder for selection."
+      },
+      "mask_a": {
+        "name": "maske a",
+        "tooltip": "İsteğe bağlı. Bölgesi a olan kayıtların bölgesi."
+      },
+      "mask_b": {
+        "name": "maske b",
+        "tooltip": "İsteğe bağlı. Bölgesi b olan kayıtların bölgesi."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "model",
+        "tooltip": "Modlu model."
+      },
+      "1": {
+        "name": "rapor",
+        "tooltip": "Ne olduğu ve uyarılar."
+      },
+      "2": {
+        "name": "recipe",
+        "tooltip": "Path of the recipe written after the first sampling step."
+      }
+    }
+  },
+  "KiLoRASimilarLoRAs": {
+    "display_name": "KiLoRA Similar LoRAs",
+    "description": "Find installed LoRAs with similar content features in the same base family.",
+    "inputs": {
+      "lora": {
+        "name": "LoRA dosyası",
+        "tooltip": "models/loras içinden bir LoRA dosyası."
+      },
+      "count": {
+        "name": "Count",
+        "tooltip": "Maximum number of similar LoRAs to list."
+      },
+      "similar_space": {
+        "name": "similarity space",
+        "tooltip": "Compare pooled content keys or vectors from a trained model."
+      },
+      "model_path": {
+        "name": "embedding model path",
+        "tooltip": "Path to a saved LayerChain model directory. The library basis must match the basis used to train it."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "rapor",
+        "tooltip": "Ne olduğu ve uyarılar."
+      }
+    }
+  },
+  "KiLoRAPrepareLoRAs": {
+    "display_name": "KiLoRA LoRA Hazırla",
+    "description": "Desteklenen LoRA dosyalarını ve yönlendirme anahtarlarını hazırlar. Dosya sırasına göre karışımı hazırlamak için bir model bağlayın.",
+    "inputs": {
+      "paths": {
+        "name": "dosyalar veya klasörler",
+        "tooltip": "Her satıra bir LoRA klasörüne göre bir yol yazın. Tüm dosyaları seçmek için boş bırakın."
+      },
+      "model": {
+        "name": "model",
+        "tooltip": "Bu model ve karışım için anahtarlarını hazırlayan isteğe bağlı model."
+      },
+      "family": {
+        "name": "Aile",
+        "tooltip": "Model olmadan dosya hazırlamak için isteğe bağlı model ailesi."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "rapor",
+        "tooltip": "Ne olduğu ve uyarılar."
+      }
+    }
+  },
+  "KiLoRAMentionPrompt": {
+    "display_name": "KiLoRA Anma İstemi",
+    "description": "@name ifadesinin kütüphaneden bir LoRA çağırdığı bir istemi kodlar. Anmalar metin kodlayıcıdan önce kaldırılır ve mod listesine eklenir.",
+    "inputs": {
+      "clip": {
+        "name": "clip",
+        "tooltip": "Metin kodlayıcı."
+      },
+      "text": {
+        "name": "metin",
+        "tooltip": "İstem. Bir LoRA dosyasını dosya adıyla çağırmak için @name veya @name:0.5 yazın. Değer yoksa güç 0.7 olur."
+      },
+      "sets": {
+        "name": "mod listesi",
+        "tooltip": "İsteğe bağlı. Anılan LoRA'lar bu mod listesine eklenir."
+      },
+      "layer": {
+        "name": "layer",
+        "tooltip": "global: anılan LoRA'lar kendi eksenlerini kullanır. Bir eksen: anılan LoRA'lar o katmanın maskesini izler."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "conditioning",
+        "tooltip": "Anmalar olmadan metnin conditioning değeri."
+      },
+      "1": {
+        "name": "mod listesi",
+        "tooltip": "Her anma için bir girdi içeren mod listesi. KiLoRA Apply Mod List düğümüne bağlayın."
+      },
+      "2": {
+        "name": "rapor",
+        "tooltip": "Her anmanın hangi dosyayı kullandığı ve isteme hangi tetikleyici kelimelerin eklendiği."
+      }
+    }
+  },
+  "KiLoRAPromptSet": {
+    "display_name": "KiLoRA Prompt Set",
+    "description": "Build prompt pairs from subjects, style and cue, or JSON. Chain nodes to add concepts.",
+    "inputs": {
+      "subjects": {
+        "name": "Subjects",
+        "tooltip": "One subject per line. An LLM node can supply this text."
+      },
+      "style": {
+        "name": "Style",
+        "tooltip": "Full style description used by the target prompt."
+      },
+      "cue": {
+        "name": "Cue",
+        "tooltip": "Short cue in the student prompt and the exported trigger words."
+      },
+      "label": {
+        "name": "Concept label",
+        "tooltip": "Letters, numbers, underscores or dashes. Used in the output filename."
+      },
+      "json": {
+        "name": "Prompt set JSON",
+        "tooltip": "Optional JSON concepts or explicit pairs. Overrides the text fields."
+      },
+      "prompt_set": {
+        "name": "Prompt set",
+        "tooltip": "Concepts and prompt pairs. Chain Prompt Set nodes to add concepts."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Prompt set",
+        "tooltip": "Validated concepts and prompt pairs."
+      },
+      "1": {
+        "name": "Report",
+        "tooltip": "Concept labels and pair counts."
+      }
+    }
+  },
+  "KiLoRASolveFromPrompts": {
+    "display_name": "KiLoRA Solve LoRA From Prompts",
+    "description": "Solve plain LoRAs from prompt sets with the connected model and CLIP. Files go to models/loras/kilora-solved/.",
+    "inputs": {
+      "model": {
+        "name": "Model",
+        "tooltip": "Base model used for sampling and fitting the LoRA."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "Text encoder for target, student and negative prompts."
+      },
+      "prompt_set": {
+        "name": "Prompt set",
+        "tooltip": "Concepts and prompt pairs. Chain Prompt Set nodes to add concepts."
+      },
+      "name": {
+        "name": "Name",
+        "tooltip": "Output file stem. Batch sets with one shared name receive numbered stems."
+      },
+      "mode": {
+        "name": "Mode",
+        "tooltip": "single writes one LoRA per concept; joint fits all concepts into one LoRA."
+      },
+      "rank": {
+        "name": "Rank",
+        "tooltip": "Rank of each fitted projection. Default 16."
+      },
+      "steps": {
+        "name": "Steps",
+        "tooltip": "Target trajectory steps. 0 uses the model family's default."
+      },
+      "size": {
+        "name": "Size",
+        "tooltip": "Square image size in pixels, a multiple of 16. 0 uses the model family's default."
+      },
+      "cfg": {
+        "name": "CFG",
+        "tooltip": "Guidance strength of the target trajectories. -1 uses the model family's default."
+      },
+      "seeds": {
+        "name": "Seeds",
+        "tooltip": "Space- or comma-separated integers. Default 811 1811."
+      },
+      "negative_prompt": {
+        "name": "Negative prompt",
+        "tooltip": "Negative conditioning for the target trajectories."
+      },
+      "overwrite": {
+        "name": "Overwrite",
+        "tooltip": "Aynı ada sahip mevcut dosyayı değiştirir. Aksi durumda eşleşen dosyayı yeniden kullanır ve yeni girdileri kısa bir özet içeren bir adla kaydeder."
+      },
+      "output": {
+        "name": "Output",
+        "tooltip": "lora writes plain LoRAs; kmod writes KiLoRA mods; both lists both formats."
+      },
+      "sets": {
+        "name": "Mod list",
+        "tooltip": "Append solved files at strength 0.7 to this mod list."
+      },
+      "preview": {
+        "name": "Preview",
+        "tooltip": "The first image is stored as the preview in each solved mod."
+      },
+      "overlap_penalty": {
+        "name": "Örtüşme cezası",
+        "tooltip": "0 kapalıdır. single kipinde birden çok kavram varsa, her kavram diğer kavramların giriş yönlerine bir cezayla yeniden çözülür. Büyük değerler örtüşmeyi azaltır."
+      },
+      "deflate": {
+        "name": "Deflasyon",
+        "tooltip": "Varsayılan olarak kapalı. single kipinde kavramlar sırayla çözülür. Sonraki her kavram, hedefinden önceki kavramların değişikliklerini çıkararak uyar."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Paths",
+        "tooltip": "One completed LoRA path per line."
+      },
+      "1": {
+        "name": "Mod list",
+        "tooltip": "Solved LoRAs imported at strength 0.7, ready for KiLoRA Apply."
+      },
+      "2": {
+        "name": "Report",
+        "tooltip": "Memory estimate, written files and reused files."
+      }
+    }
+  },
+  "KiLoRASolveFromImages": {
+    "display_name": "KiLoRA Görüntülerden LoRA Çöz",
+    "description": "En az üç görüntünün paylaştığı görünümle bir LoRA çözer, örneğin bir stille. Ayrılan görüntülerin denetimini geçemeyen bir küme kaydedilmez. Dosyalar: models/loras/kilora-solved/. Kullandığınız görüntülerin haklarından siz sorumlusunuz.",
+    "inputs": {
+      "model": {
+        "name": "Model",
+        "tooltip": "Base model used for sampling and fitting the LoRA."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "Text encoder for target, student and negative prompts."
+      },
+      "vae": {
+        "name": "VAE",
+        "tooltip": "Görüntüleri bağlı modelin gizli biçimine kodlayan VAE."
+      },
+      "name": {
+        "name": "Ad",
+        "tooltip": "Uzantısız dosya adı: harf, sayı, alt çizgi veya tire."
+      },
+      "cue": {
+        "name": "İpucu",
+        "tooltip": "Her açıklamayla iki tarafta da kullanılır ve LoRA tetikleyici sözcükleri olarak kaydedilir."
+      },
+      "rank": {
+        "name": "Rank",
+        "tooltip": "Rank of each fitted projection. Default 16."
+      },
+      "steps": {
+        "name": "Steps",
+        "tooltip": "Target trajectory steps. 0 uses the model family's default."
+      },
+      "cfg": {
+        "name": "CFG",
+        "tooltip": "Guidance strength of the target trajectories. -1 uses the model family's default."
+      },
+      "size": {
+        "name": "Size",
+        "tooltip": "Square image size in pixels, a multiple of 16. 0 uses the model family's default."
+      },
+      "seeds": {
+        "name": "Seeds",
+        "tooltip": "Space- or comma-separated integers. Default 811 1811."
+      },
+      "ignore_guard": {
+        "name": "Denetimi yoksay",
+        "tooltip": "Ayrılan görüntülerde gürültü giderme kaybı iyileşmese bile kaydeder. Rapora uyarı ekler."
+      },
+      "overwrite": {
+        "name": "Overwrite",
+        "tooltip": "Aynı ada sahip mevcut dosyayı değiştirir. Aksi durumda eşleşen dosyayı yeniden kullanır ve yeni girdileri kısa bir özet içeren bir adla kaydeder."
+      },
+      "images": {
+        "name": "Görüntüler",
+        "tooltip": "IMAGE grubu. Görüntü veya klasör kullanın. Bu görüntülerin haklarından siz sorumlusunuz."
+      },
+      "captions": {
+        "name": "Açıklamalar",
+        "tooltip": "Her görüntü için bir satır açıklama. Yalnızca ipucunu kullanmak için boş bırakın."
+      },
+      "folder": {
+        "name": "Klasör",
+        "tooltip": "Aynı adlı isteğe bağlı .txt açıklamaları içeren görüntü klasörü. Klasör veya görüntü kullanın."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Paths",
+        "tooltip": "One completed LoRA path per line."
+      },
+      "1": {
+        "name": "Mod list",
+        "tooltip": "Solved LoRAs imported at strength 0.7, ready for KiLoRA Apply."
+      },
+      "2": {
+        "name": "Report",
+        "tooltip": "Görüntü ve ayrılan görüntü sayıları, süreler, iki denetim kaybı, göreli kazanç ve kaydedilen veya yeniden kullanılan yol."
+      }
+    }
+  },
+  "KiLoRAPack": {
+    "display_name": "KiLoRA Pack",
+    "description": "Bundle mods into models/kilora/<name>.kpack.json. Copy the pack and mods into one folder for sharing.",
+    "inputs": {
+      "mods": {
+        "name": "Mods",
+        "tooltip": "One mod filename or path per line. Accepts solve paths; plain LoRA lines are ignored."
+      },
+      "name": {
+        "name": "Name",
+        "tooltip": "Pack name and filename stem."
+      },
+      "strength": {
+        "name": "Strength",
+        "tooltip": "Strength for every mod entry. Default 0.7."
+      },
+      "depth": {
+        "name": "Depth",
+        "tooltip": "-1 uses the mod settings; zero or greater stores a pack depth."
+      },
+      "copy_mods": {
+        "name": "Copy mods",
+        "tooltip": "Copy the mods and pack into models/kilora/<name>/ for sharing."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Pack path",
+        "tooltip": "Saved .kpack.json file. Load it with KiLoRA Palette."
+      },
+      "1": {
+        "name": "Report",
+        "tooltip": "Each mod ID, version, cue and preview availability."
+      }
+    }
+  },
+  "KiLoRABuildEditorPack": {
+    "display_name": "KiLoRA Live: Build Editor Pack",
+    "description": "Build editor packs for live mode from the connected model and CLIP. The packs go to models/kilora/<name>/. Needs the plugin kilora-editor-chunk.",
+    "inputs": {
+      "model": {
+        "name": "Model",
+        "tooltip": "The base model. With one live mod on it, the packs are for that mod. Without a live mod, they are for the base model."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "The text encoder of the model. It encodes each prompt and the empty caption."
+      },
+      "name": {
+        "name": "Name",
+        "tooltip": "The folder name in models/kilora. A new build with the same name replaces the folder."
+      },
+      "prompts": {
+        "name": "Prompts",
+        "tooltip": "JSON that maps each family name to a list of prompts. A family name that starts with _ adds to the common pack only."
+      },
+      "base_family": {
+        "name": "Base family",
+        "tooltip": "The base model family. auto uses the family of the loaded model."
+      },
+      "draws": {
+        "name": "Noise draws",
+        "tooltip": "Noise draws per prompt and caption. More draws give smoother directions and take longer."
+      },
+      "common": {
+        "name": "Common directions",
+        "tooltip": "The number of directions in the common pack."
+      },
+      "family": {
+        "name": "Family directions",
+        "tooltip": "The number of directions in each family pack."
+      },
+      "loras": {
+        "name": "LoRAs",
+        "tooltip": "LoRA files from models/loras that are applied while the packs are built. One name per line, optionally name:strength."
+      },
+      "orthogonalize": {
+        "name": "Orthogonalize",
+        "tooltip": "Remove the common directions and the earlier family packs from each family pack."
+      },
+      "size": {
+        "name": "Size",
+        "tooltip": "Image size in pixels. 0 uses the default of the base family."
+      },
+      "steps": {
+        "name": "Steps",
+        "tooltip": "Sampler steps per image. 0 uses the default of the base family."
+      },
+      "seed": {
+        "name": "Seed",
+        "tooltip": "The first seed of the images and noise draws."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Pack folder",
+        "tooltip": "The folder with the packs and the editor file. KiLoRA Live Packs finds the packs there."
+      },
+      "1": {
+        "name": "Report",
+        "tooltip": "Packs, directions per pack, events, seconds and the memory estimate."
+      }
+    }
+  }
+}

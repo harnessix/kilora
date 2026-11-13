@@ -1,0 +1,76 @@
+{
+  "name": "live_write.scale",
+  "part": "live_write",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "write_norm": {
+      "axes": [],
+      "dtype": "float64"
+    },
+    "norm": {
+      "axes": [],
+      "dtype": "float64"
+    }
+  },
+  "outputs": {
+    "write_scale": {
+      "axes": [],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {
+    "zero": {
+      "kind": "embedded",
+      "dtype": "float64",
+      "shape": [],
+      "axes": [],
+      "value": 0.0
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "gt",
+      "args": [
+        "norm",
+        "zero"
+      ],
+      "result": "positive",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "div",
+      "args": [
+        "write_norm",
+        "norm"
+      ],
+      "result": "quotient",
+      "attributes": {}
+    },
+    {
+      "id": 2,
+      "op": "where",
+      "args": [
+        "positive",
+        "quotient",
+        "zero"
+      ],
+      "result": "scale64",
+      "attributes": {}
+    },
+    {
+      "id": 3,
+      "op": "cast",
+      "args": [
+        "scale64"
+      ],
+      "result": "write_scale",
+      "attributes": {
+        "dtype": "float32"
+      }
+    }
+  ],
+  "identity": "97119891df64db45718af2cf434efb08af4f2f756496a7d837341958dc312a5a"
+}

@@ -1,0 +1,931 @@
+{
+  "name": "gate.adaptive",
+  "part": "gate",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "coefficients": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "before": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "prior_history": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "has_history": {
+      "axes": [],
+      "dtype": "bool"
+    },
+    "up": {
+      "axes": [
+        "cols",
+        "out"
+      ],
+      "dtype": "float32"
+    },
+    "base_norm": {
+      "axes": [
+        "batch",
+        "tokens"
+      ],
+      "dtype": "float32"
+    },
+    "base_rms": {
+      "axes": [
+        "batch",
+        "out"
+      ],
+      "dtype": "float32"
+    },
+    "first_norm": {
+      "axes": [
+        "batch",
+        "tokens"
+      ],
+      "dtype": "float32"
+    },
+    "first_rms": {
+      "axes": [
+        "batch",
+        "out"
+      ],
+      "dtype": "float32"
+    },
+    "first_step": {
+      "axes": [],
+      "dtype": "bool"
+    }
+  },
+  "outputs": {
+    "token": {
+      "axes": [
+        "batch",
+        "tokens",
+        "r1"
+      ],
+      "dtype": "float32"
+    },
+    "channel": {
+      "axes": [
+        "batch",
+        "r1",
+        "out"
+      ],
+      "dtype": "float32"
+    },
+    "history": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {
+    "point_five": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 0.5
+    },
+    "one": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1.0
+    },
+    "zero": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 0.0
+    },
+    "eps": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1e-06
+    },
+    "kappa": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1.0
+    },
+    "token_count": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1.0
+    },
+    "coherence": {
+      "kind": "embedded",
+      "dtype": "bool",
+      "shape": [],
+      "axes": [],
+      "value": true
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "sub",
+      "args": [
+        "coefficients",
+        "before"
+      ],
+      "result": "dz",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "transpose",
+      "args": [
+        "up"
+      ],
+      "result": "up_t",
+      "attributes": {
+        "axis1": "cols",
+        "axis2": "out"
+      }
+    },
+    {
+      "id": 2,
+      "op": "rename_axis",
+      "args": [
+        "up_t"
+      ],
+      "result": "up_t2",
+      "attributes": {
+        "axis": "cols",
+        "new_axis": "r2"
+      }
+    },
+    {
+      "id": 3,
+      "op": "batch_matmul",
+      "args": [
+        "up",
+        "up_t2"
+      ],
+      "result": "gram",
+      "attributes": {}
+    },
+    {
+      "id": 4,
+      "op": "batch_matmul",
+      "args": [
+        "dz",
+        "gram"
+      ],
+      "result": "dgram",
+      "attributes": {}
+    },
+    {
+      "id": 5,
+      "op": "rename_axis",
+      "args": [
+        "dgram"
+      ],
+      "result": "dgram2",
+      "attributes": {
+        "axis": "r2",
+        "new_axis": "cols"
+      }
+    },
+    {
+      "id": 6,
+      "op": "mul",
+      "args": [
+        "dgram2",
+        "dz"
+      ],
+      "result": "dsq",
+      "attributes": {}
+    },
+    {
+      "id": 7,
+      "op": "sum",
+      "args": [
+        "dsq"
+      ],
+      "result": "dsum",
+      "attributes": {
+        "axis": "cols",
+        "keep": false
+      }
+    },
+    {
+      "id": 8,
+      "op": "clamp_min",
+      "args": [
+        "dsum"
+      ],
+      "result": "dpos",
+      "attributes": {
+        "low": 0.0
+      }
+    },
+    {
+      "id": 9,
+      "op": "sqrt",
+      "args": [
+        "dpos"
+      ],
+      "result": "dnorm",
+      "attributes": {}
+    },
+    {
+      "op": "gt",
+      "args": [
+        "base_norm",
+        "first_norm"
+      ],
+      "result": "token_reference_larger",
+      "attributes": {},
+      "id": 10
+    },
+    {
+      "op": "where",
+      "args": [
+        "token_reference_larger",
+        "base_norm",
+        "first_norm"
+      ],
+      "result": "token_reference",
+      "attributes": {},
+      "id": 11
+    },
+    {
+      "id": 12,
+      "op": "mul",
+      "args": [
+        "token_reference",
+        "kappa"
+      ],
+      "result": "knorm",
+      "attributes": {}
+    },
+    {
+      "id": 13,
+      "op": "add",
+      "args": [
+        "knorm",
+        "eps"
+      ],
+      "result": "denom",
+      "attributes": {}
+    },
+    {
+      "id": 14,
+      "op": "div",
+      "args": [
+        "dnorm",
+        "denom"
+      ],
+      "result": "ratio",
+      "attributes": {}
+    },
+    {
+      "id": 15,
+      "op": "pow",
+      "args": [
+        "point_five",
+        "ratio"
+      ],
+      "result": "qtoken",
+      "attributes": {}
+    },
+    {
+      "op": "where",
+      "args": [
+        "first_step",
+        "one",
+        "qtoken"
+      ],
+      "result": "kept_token",
+      "attributes": {},
+      "id": 16
+    },
+    {
+      "id": 17,
+      "op": "unsqueeze",
+      "args": [
+        "kept_token"
+      ],
+      "result": "token",
+      "attributes": {
+        "axis": "r1",
+        "before": "tokens",
+        "after": true
+      }
+    },
+    {
+      "id": 18,
+      "op": "transpose",
+      "args": [
+        "coefficients"
+      ],
+      "result": "zt",
+      "attributes": {
+        "axis1": "tokens",
+        "axis2": "cols"
+      }
+    },
+    {
+      "id": 19,
+      "op": "rename_axis",
+      "args": [
+        "zt"
+      ],
+      "result": "zt2",
+      "attributes": {
+        "axis": "cols",
+        "new_axis": "r2"
+      }
+    },
+    {
+      "id": 20,
+      "op": "batch_matmul",
+      "args": [
+        "zt2",
+        "coefficients"
+      ],
+      "result": "moment0",
+      "attributes": {}
+    },
+    {
+      "id": 21,
+      "op": "div",
+      "args": [
+        "moment0",
+        "token_count"
+      ],
+      "result": "moment",
+      "attributes": {}
+    },
+    {
+      "id": 22,
+      "op": "transpose",
+      "args": [
+        "dz"
+      ],
+      "result": "dzt",
+      "attributes": {
+        "axis1": "tokens",
+        "axis2": "cols"
+      }
+    },
+    {
+      "id": 23,
+      "op": "rename_axis",
+      "args": [
+        "dzt"
+      ],
+      "result": "dzt2",
+      "attributes": {
+        "axis": "cols",
+        "new_axis": "r2"
+      }
+    },
+    {
+      "id": 24,
+      "op": "transpose",
+      "args": [
+        "prior_history"
+      ],
+      "result": "mt",
+      "attributes": {
+        "axis1": "tokens",
+        "axis2": "cols"
+      }
+    },
+    {
+      "id": 25,
+      "op": "rename_axis",
+      "args": [
+        "mt"
+      ],
+      "result": "mt2",
+      "attributes": {
+        "axis": "cols",
+        "new_axis": "r2"
+      }
+    },
+    {
+      "id": 26,
+      "op": "batch_matmul",
+      "args": [
+        "dzt2",
+        "prior_history"
+      ],
+      "result": "dot_m",
+      "attributes": {}
+    },
+    {
+      "id": 27,
+      "op": "batch_matmul",
+      "args": [
+        "dzt2",
+        "dz"
+      ],
+      "result": "nd_m",
+      "attributes": {}
+    },
+    {
+      "id": 28,
+      "op": "batch_matmul",
+      "args": [
+        "mt2",
+        "prior_history"
+      ],
+      "result": "nm_m",
+      "attributes": {}
+    },
+    {
+      "id": 29,
+      "op": "rename_axis",
+      "args": [
+        "up"
+      ],
+      "result": "up_r2",
+      "attributes": {
+        "axis": "cols",
+        "new_axis": "r2"
+      }
+    },
+    {
+      "id": 30,
+      "op": "batch_matmul",
+      "args": [
+        "moment",
+        "up"
+      ],
+      "result": "acc_p",
+      "attributes": {}
+    },
+    {
+      "id": 31,
+      "op": "mul",
+      "args": [
+        "acc_p",
+        "up_r2"
+      ],
+      "result": "acc_prod",
+      "attributes": {}
+    },
+    {
+      "id": 32,
+      "op": "sum",
+      "args": [
+        "acc_prod"
+      ],
+      "result": "acc_plain",
+      "attributes": {
+        "axis": "r2",
+        "keep": false
+      }
+    },
+    {
+      "id": 33,
+      "op": "stack",
+      "args": [
+        "moment",
+        "dot_m",
+        "nd_m",
+        "nm_m"
+      ],
+      "result": "moments",
+      "attributes": {
+        "axis": "r3",
+        "before": "r2"
+      }
+    },
+    {
+      "id": 34,
+      "op": "batch_matmul",
+      "args": [
+        "moments",
+        "up"
+      ],
+      "result": "quad_p",
+      "attributes": {}
+    },
+    {
+      "id": 35,
+      "op": "mul",
+      "args": [
+        "quad_p",
+        "up_r2"
+      ],
+      "result": "quad_prod",
+      "attributes": {}
+    },
+    {
+      "id": 36,
+      "op": "sum",
+      "args": [
+        "quad_prod"
+      ],
+      "result": "quads",
+      "attributes": {
+        "axis": "r2",
+        "keep": false
+      }
+    },
+    {
+      "id": 37,
+      "op": "select",
+      "args": [
+        "quads"
+      ],
+      "result": "acc_coherent",
+      "attributes": {
+        "axis": "r3",
+        "index": 0
+      }
+    },
+    {
+      "id": 38,
+      "op": "select",
+      "args": [
+        "quads"
+      ],
+      "result": "dot",
+      "attributes": {
+        "axis": "r3",
+        "index": 1
+      }
+    },
+    {
+      "id": 39,
+      "op": "select",
+      "args": [
+        "quads"
+      ],
+      "result": "nd",
+      "attributes": {
+        "axis": "r3",
+        "index": 2
+      }
+    },
+    {
+      "id": 40,
+      "op": "select",
+      "args": [
+        "quads"
+      ],
+      "result": "nm",
+      "attributes": {
+        "axis": "r3",
+        "index": 3
+      }
+    },
+    {
+      "id": 41,
+      "op": "mul",
+      "args": [
+        "coherence",
+        "has_history"
+      ],
+      "result": "use_coherence",
+      "attributes": {}
+    },
+    {
+      "id": 42,
+      "op": "where",
+      "args": [
+        "use_coherence",
+        "acc_coherent",
+        "acc_plain"
+      ],
+      "result": "acc",
+      "attributes": {}
+    },
+    {
+      "id": 43,
+      "op": "clamp_min",
+      "args": [
+        "acc"
+      ],
+      "result": "acc0",
+      "attributes": {
+        "low": 0.0
+      }
+    },
+    {
+      "id": 44,
+      "op": "sqrt",
+      "args": [
+        "acc0"
+      ],
+      "result": "accroot",
+      "attributes": {}
+    },
+    {
+      "op": "gt",
+      "args": [
+        "base_rms",
+        "first_rms"
+      ],
+      "result": "channel_reference_larger",
+      "attributes": {},
+      "id": 45
+    },
+    {
+      "op": "where",
+      "args": [
+        "channel_reference_larger",
+        "base_rms",
+        "first_rms"
+      ],
+      "result": "channel_reference",
+      "attributes": {},
+      "id": 46
+    },
+    {
+      "op": "sub",
+      "args": [
+        "accroot",
+        "first_rms"
+      ],
+      "result": "growth",
+      "attributes": {},
+      "id": 47
+    },
+    {
+      "op": "clamp_min",
+      "args": [
+        "growth"
+      ],
+      "result": "positive_growth",
+      "attributes": {
+        "low": 0.0
+      },
+      "id": 48
+    },
+    {
+      "id": 49,
+      "op": "mul",
+      "args": [
+        "channel_reference",
+        "kappa"
+      ],
+      "result": "krms",
+      "attributes": {}
+    },
+    {
+      "id": 50,
+      "op": "add",
+      "args": [
+        "krms",
+        "eps"
+      ],
+      "result": "rmsden",
+      "attributes": {}
+    },
+    {
+      "id": 51,
+      "op": "div",
+      "args": [
+        "positive_growth",
+        "rmsden"
+      ],
+      "result": "aratio",
+      "attributes": {}
+    },
+    {
+      "id": 52,
+      "op": "pow",
+      "args": [
+        "point_five",
+        "aratio"
+      ],
+      "result": "qsize",
+      "attributes": {}
+    },
+    {
+      "id": 53,
+      "op": "clamp_min",
+      "args": [
+        "nd"
+      ],
+      "result": "nd0",
+      "attributes": {
+        "low": 0.0
+      }
+    },
+    {
+      "id": 54,
+      "op": "sqrt",
+      "args": [
+        "nd0"
+      ],
+      "result": "ndroot",
+      "attributes": {}
+    },
+    {
+      "id": 55,
+      "op": "clamp_min",
+      "args": [
+        "nm"
+      ],
+      "result": "nm0",
+      "attributes": {
+        "low": 0.0
+      }
+    },
+    {
+      "id": 56,
+      "op": "sqrt",
+      "args": [
+        "nm0"
+      ],
+      "result": "nmroot",
+      "attributes": {}
+    },
+    {
+      "id": 57,
+      "op": "mul",
+      "args": [
+        "ndroot",
+        "nmroot"
+      ],
+      "result": "norms",
+      "attributes": {}
+    },
+    {
+      "id": 58,
+      "op": "gt",
+      "args": [
+        "norms",
+        "eps"
+      ],
+      "result": "direction_exists",
+      "attributes": {}
+    },
+    {
+      "id": 59,
+      "op": "clamp_min",
+      "args": [
+        "norms"
+      ],
+      "result": "norms_safe",
+      "attributes": {
+        "low": 1e-06
+      }
+    },
+    {
+      "id": 60,
+      "op": "div",
+      "args": [
+        "dot",
+        "norms_safe"
+      ],
+      "result": "raw_cos",
+      "attributes": {}
+    },
+    {
+      "id": 61,
+      "op": "where",
+      "args": [
+        "direction_exists",
+        "raw_cos",
+        "one"
+      ],
+      "result": "cos",
+      "attributes": {}
+    },
+    {
+      "id": 62,
+      "op": "mul",
+      "args": [
+        "point_five",
+        "cos"
+      ],
+      "result": "coshalf",
+      "attributes": {}
+    },
+    {
+      "id": 63,
+      "op": "add",
+      "args": [
+        "point_five",
+        "coshalf"
+      ],
+      "result": "direction0",
+      "attributes": {}
+    },
+    {
+      "id": 64,
+      "op": "clamp",
+      "args": [
+        "direction0"
+      ],
+      "result": "direction",
+      "attributes": {
+        "low": 0.0,
+        "high": 1.0
+      }
+    },
+    {
+      "id": 65,
+      "op": "mul",
+      "args": [
+        "qsize",
+        "direction"
+      ],
+      "result": "qcoherent",
+      "attributes": {}
+    },
+    {
+      "id": 66,
+      "op": "where",
+      "args": [
+        "use_coherence",
+        "qcoherent",
+        "qsize"
+      ],
+      "result": "qchannel",
+      "attributes": {}
+    },
+    {
+      "op": "where",
+      "args": [
+        "first_step",
+        "one",
+        "qchannel"
+      ],
+      "result": "kept_channel",
+      "attributes": {},
+      "id": 67
+    },
+    {
+      "id": 68,
+      "op": "unsqueeze",
+      "args": [
+        "kept_channel"
+      ],
+      "result": "channel",
+      "attributes": {
+        "axis": "r1",
+        "before": "out",
+        "after": false
+      }
+    },
+    {
+      "id": 69,
+      "op": "mul",
+      "args": [
+        "point_five",
+        "prior_history"
+      ],
+      "result": "old",
+      "attributes": {}
+    },
+    {
+      "id": 70,
+      "op": "mul",
+      "args": [
+        "point_five",
+        "dz"
+      ],
+      "result": "new",
+      "attributes": {}
+    },
+    {
+      "id": 71,
+      "op": "add",
+      "args": [
+        "old",
+        "new"
+      ],
+      "result": "history",
+      "attributes": {}
+    }
+  ],
+  "identity": "2ec448aabcb3a99ec0da983e3c73133ab4773b8d0b9c280d8a415884a23d2665"
+}

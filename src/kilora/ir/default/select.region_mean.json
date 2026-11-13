@@ -1,0 +1,188 @@
+{
+  "name": "select.region_mean",
+  "part": "select",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "logits": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "region": {
+      "axes": [
+        "batch",
+        "tokens"
+      ],
+      "dtype": "float32"
+    },
+    "has_region": {
+      "axes": [],
+      "dtype": "bool"
+    },
+    "prior": {
+      "axes": [],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "mean_logits": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {
+    "zero": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 0.0
+    },
+    "floor": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": -1000000000.0
+    },
+    "false": {
+      "kind": "embedded",
+      "dtype": "bool",
+      "shape": [],
+      "axes": [],
+      "value": false
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "mean",
+      "args": [
+        "logits"
+      ],
+      "result": "mean",
+      "attributes": {
+        "axis": "tokens",
+        "keep": true
+      }
+    },
+    {
+      "id": 1,
+      "op": "mul",
+      "args": [
+        "logits",
+        "region"
+      ],
+      "result": "weighted",
+      "attributes": {}
+    },
+    {
+      "id": 2,
+      "op": "sum",
+      "args": [
+        "weighted"
+      ],
+      "result": "weighted_sum",
+      "attributes": {
+        "axis": "tokens",
+        "keep": true
+      }
+    },
+    {
+      "id": 3,
+      "op": "sum",
+      "args": [
+        "region"
+      ],
+      "result": "region_sum",
+      "attributes": {
+        "axis": "tokens",
+        "keep": true
+      }
+    },
+    {
+      "id": 4,
+      "op": "clamp",
+      "args": [
+        "region_sum"
+      ],
+      "result": "denominator",
+      "attributes": {
+        "low": 1.1754943508222875e-38,
+        "high": 3.4028234663852886e+38
+      }
+    },
+    {
+      "id": 5,
+      "op": "div",
+      "args": [
+        "weighted_sum",
+        "denominator"
+      ],
+      "result": "region_mean",
+      "attributes": {}
+    },
+    {
+      "id": 6,
+      "op": "where",
+      "args": [
+        "has_region",
+        "region_mean",
+        "mean"
+      ],
+      "result": "mean_selected",
+      "attributes": {}
+    },
+    {
+      "id": 7,
+      "op": "add",
+      "args": [
+        "mean_selected",
+        "prior"
+      ],
+      "result": "with_prior",
+      "attributes": {}
+    },
+    {
+      "id": 8,
+      "op": "le",
+      "args": [
+        "region_sum",
+        "zero"
+      ],
+      "result": "empty",
+      "attributes": {}
+    },
+    {
+      "id": 9,
+      "op": "where",
+      "args": [
+        "has_region",
+        "empty",
+        "false"
+      ],
+      "result": "is_empty",
+      "attributes": {}
+    },
+    {
+      "id": 10,
+      "op": "where",
+      "args": [
+        "is_empty",
+        "floor",
+        "with_prior"
+      ],
+      "result": "mean_logits",
+      "attributes": {}
+    }
+  ],
+  "identity": "6860b0267119119366d3ff6b67700a3ac7dd5ed844c86f7aee5587a5d1356359"
+}

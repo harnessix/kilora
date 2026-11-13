@@ -1,0 +1,66 @@
+{
+  "name": "iterate.accumulate",
+  "part": "iterate",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "previous_state": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "change": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "state": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "output": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "add",
+      "args": [
+        "previous_state",
+        "change"
+      ],
+      "result": "state",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "add",
+      "args": [
+        "previous_state",
+        "change"
+      ],
+      "result": "output",
+      "attributes": {}
+    }
+  ],
+  "identity": "c31a1dbf3ba4face9711f1bec265a7a37eef455394c3a9fd7445eaf95d90a61e"
+}

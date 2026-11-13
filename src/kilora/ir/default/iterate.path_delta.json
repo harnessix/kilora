@@ -1,0 +1,49 @@
+{
+  "name": "iterate.path_delta",
+  "part": "iterate",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "coefficients": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "up": {
+      "axes": [
+        "cols",
+        "out"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "delta": {
+      "axes": [
+        "batch",
+        "tokens",
+        "out"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "matmul",
+      "args": [
+        "coefficients",
+        "up"
+      ],
+      "result": "delta",
+      "attributes": {
+        "transpose_b": false
+      }
+    }
+  ],
+  "identity": "ac83366e1186c76dc7bb6f8369f14481d6345c9e603944f5de8acd939b54fed2"
+}

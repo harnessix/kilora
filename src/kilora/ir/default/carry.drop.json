@@ -1,0 +1,72 @@
+{
+  "name": "carry.drop",
+  "part": "carry",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "change": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "carried": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "mask": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "base_read": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "uniforms": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "state": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "mul",
+      "args": [
+        "mask",
+        "change"
+      ],
+      "result": "state",
+      "attributes": {}
+    }
+  ],
+  "identity": "2375bf84183bfb59d712989149e11d3a4d10d2e409dde85b2eb0ab38837ad2fc"
+}

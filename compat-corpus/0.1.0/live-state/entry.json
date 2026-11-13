@@ -1,0 +1,28 @@
+{
+  "created_with": "0.1.0",
+  "kind": "live",
+  "mod": "mod.kmod.safetensors",
+  "save": "saves/live-state/save-corpus.ksave",
+  "writes": {
+    "seeds": [
+      17,
+      18,
+      19
+    ],
+    "size": 0.05
+  },
+  "depth": 2,
+  "model": {
+    "class": "TinyDenoiser",
+    "family": "kilora-tiny-1",
+    "args": {
+      "channels": 4,
+      "width": 16,
+      "num_layers": 2,
+      "seed": 0
+    }
+  },
+  "tolerance": {
+    "relative": 1e-05
+  }
+}

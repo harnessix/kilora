@@ -1,0 +1,45 @@
+{
+  "name": "budget_auto_sum",
+  "part": "budget",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "previous": {
+      "axes": [
+        "batch",
+        "tokens"
+      ],
+      "dtype": "float32"
+    },
+    "alpha": {
+      "axes": [
+        "batch",
+        "tokens"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "total": {
+      "axes": [
+        "batch",
+        "tokens"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "add",
+      "args": [
+        "previous",
+        "alpha"
+      ],
+      "result": "total",
+      "attributes": {}
+    }
+  ],
+  "identity": "8655d1fb7daa2c98147407e6e4036f1c0ef7dbd386af9be93bf9403691fd58ef"
+}

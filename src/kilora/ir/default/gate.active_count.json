@@ -1,0 +1,63 @@
+{
+  "name": "gate.active_count",
+  "part": "gate",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "active": {
+      "axes": [
+        "batch",
+        "tokens",
+        "r1"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "token_count": {
+      "axes": [
+        "batch"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "sum",
+      "args": [
+        "active"
+      ],
+      "result": "active_sum",
+      "attributes": {
+        "axis": "tokens",
+        "keep": false
+      }
+    },
+    {
+      "id": 1,
+      "op": "clamp_min",
+      "args": [
+        "active_sum"
+      ],
+      "result": "active_clamped",
+      "attributes": {
+        "low": 1.0
+      }
+    },
+    {
+      "id": 2,
+      "op": "sum",
+      "args": [
+        "active_clamped"
+      ],
+      "result": "token_count",
+      "attributes": {
+        "axis": "r1",
+        "keep": false
+      }
+    }
+  ],
+  "identity": "78d3a71fdf0524db1c1cb1f8998895cb3d147ba71117f907cdac4e6057058054"
+}

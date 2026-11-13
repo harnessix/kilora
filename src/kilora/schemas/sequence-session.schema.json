@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kilora.local/schemas/sequence-session.schema.json",
+  "title": "Local sequence session",
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "type": {"const": "direction"},
+          "basis_id": {"type": "string", "minLength": 1},
+          "coefficients": {"type": "array", "minItems": 1, "items": {"type": "number"}},
+          "outcome": {"enum": ["keep", "discard"]}
+        },
+        "required": ["type", "basis_id", "coefficients", "outcome"],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {"const": "prompt_edit"},
+          "edit": {"type": "string"},
+          "outcome": {"enum": ["keep", "discard"]}
+        },
+        "required": ["type", "edit", "outcome"],
+        "additionalProperties": false
+      }
+    ]
+  }
+}

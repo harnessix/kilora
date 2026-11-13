@@ -1,0 +1,110 @@
+{
+  "name": "carry.dropped",
+  "part": "carry",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "change": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "carried": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "mask": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "base_read": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "uniforms": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "state": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {
+    "one": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1.0
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "sub",
+      "args": [
+        "one",
+        "mask"
+      ],
+      "result": "inverse",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "sub",
+      "args": [
+        "change",
+        "carried"
+      ],
+      "result": "difference",
+      "attributes": {}
+    },
+    {
+      "id": 2,
+      "op": "mul",
+      "args": [
+        "inverse",
+        "difference"
+      ],
+      "result": "update",
+      "attributes": {}
+    },
+    {
+      "id": 3,
+      "op": "add",
+      "args": [
+        "carried",
+        "update"
+      ],
+      "result": "state",
+      "attributes": {}
+    }
+  ],
+  "identity": "148c3d1200f4ad107a277e569586a5144d40644fcb2d28987d4122ee8a4ee6a4"
+}

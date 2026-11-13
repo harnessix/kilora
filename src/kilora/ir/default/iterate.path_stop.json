@@ -1,0 +1,57 @@
+{
+  "name": "iterate.path_stop",
+  "part": "iterate",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "stopped": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "bool"
+    },
+    "previous": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "state": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "result": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "where",
+      "args": [
+        "stopped",
+        "previous",
+        "state"
+      ],
+      "result": "result",
+      "attributes": {}
+    }
+  ],
+  "identity": "d48144376a53bb5f18d257bf4341247aa63eb30ad879ac8bcd60660749fcf6cc"
+}

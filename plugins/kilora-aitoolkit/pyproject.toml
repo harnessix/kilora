@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kilora-aitoolkit"
+version = "0.1.0"
+description = "Train static KiLoRA mods with AI Toolkit"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{ name = "harnessix" }]
+dependencies = ["kilora>=0.1.0"]
+
+[project.scripts]
+kilora-aitoolkit = "kilora_aitoolkit.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kilora_aitoolkit"]

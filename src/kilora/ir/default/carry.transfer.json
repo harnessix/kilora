@@ -1,0 +1,143 @@
+{
+  "name": "carry.transfer",
+  "part": "carry",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "change": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "per"
+      ],
+      "dtype": "float32"
+    },
+    "base_read": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "per"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "state": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "per"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {
+    "two": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 2.0
+    },
+    "delta": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1e-06
+    },
+    "decay_base": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 0.5
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "pow",
+      "args": [
+        "base_read",
+        "two"
+      ],
+      "result": "squared",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "mean",
+      "args": [
+        "squared"
+      ],
+      "result": "mean_square",
+      "attributes": {
+        "axis": "per",
+        "keep": true
+      }
+    },
+    {
+      "id": 2,
+      "op": "sqrt",
+      "args": [
+        "mean_square"
+      ],
+      "result": "rms",
+      "attributes": {}
+    },
+    {
+      "id": 3,
+      "op": "add",
+      "args": [
+        "rms",
+        "delta"
+      ],
+      "result": "sigma",
+      "attributes": {}
+    },
+    {
+      "id": 4,
+      "op": "abs",
+      "args": [
+        "change"
+      ],
+      "result": "magnitude",
+      "attributes": {}
+    },
+    {
+      "id": 5,
+      "op": "div",
+      "args": [
+        "magnitude",
+        "sigma"
+      ],
+      "result": "exponent",
+      "attributes": {}
+    },
+    {
+      "id": 6,
+      "op": "pow",
+      "args": [
+        "decay_base",
+        "exponent"
+      ],
+      "result": "probability",
+      "attributes": {}
+    },
+    {
+      "id": 7,
+      "op": "mul",
+      "args": [
+        "probability",
+        "change"
+      ],
+      "result": "state",
+      "attributes": {}
+    }
+  ],
+  "identity": "db2b8468ecd7eb46cf795920f189608f3873de24b679e42fe070fec8c5b42352"
+}

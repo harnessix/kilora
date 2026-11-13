@@ -1,0 +1,53 @@
+name: Bug report
+description: KiLoRA does not work as expected.
+labels: [bug]
+body:
+  - type: input
+    id: kilora-version
+    attributes:
+      label: KiLoRA version
+      description: The version in `pyproject.toml`, or the commit you installed.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: comfyui-version
+    attributes:
+      label: ComfyUI version
+      description: The ComfyUI version or commit. Write "none" if you use KiLoRA from Python.
+    validations:
+      required: true
+  - type: input
+    id: base-model
+    attributes:
+      label: Base model
+      description: The base model and its file name, for example Anima, Z-Image or Flux.
+    validations:
+      required: true
+  - type: textarea
+    id: loras
+    attributes:
+      label: LoRA files and mods
+      description: The LoRA files and KiLoRA mods you used, with their strengths and where you got them.
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Workflow
+      description: Attach the workflow JSON file (drag it into this field). Remove anything private from it first.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: What happened instead. Add images and the ComfyUI log if they help.
+    validations:
+      required: true

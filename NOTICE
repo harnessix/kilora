@@ -1,0 +1,30 @@
+KiLoRA
+Copyright 2026 harnessix
+
+This product is licensed under the Apache License, Version 2.0.
+See the LICENSE file for the full license text.
+
+Third-party software
+--------------------
+This repository contains no third-party source code. KiLoRA uses these packages at
+run time. They are not included here and keep their own licenses:
+
+  PyTorch        BSD-3-Clause
+  safetensors    Apache-2.0
+  NumPy          BSD-3-Clause
+  Diffusers      Apache-2.0 (optional)
+  PEFT           Apache-2.0 (development only)
+
+The ComfyUI nodes run inside ComfyUI, which is a separate program under its own
+license. This repository includes no ComfyUI code.
+
+Base models
+-----------
+KiLoRA ships no base model weights. You download a base model yourself and must
+follow its license and use terms.
+
+  Z-Image (Tongyi-MAI/Z-Image), https://huggingface.co/Tongyi-MAI/Z-Image
+  License on the model card: Apache-2.0.
+
+A mod trained on a base model is a derived set of weights. Check the base model's
+terms before you share a mod.

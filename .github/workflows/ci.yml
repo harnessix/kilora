@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ruff, test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
+      - name: SPDX headers
+        run: |
+          missing=$(git ls-files '*.py' '*.js' '*.mjs' | xargs -r grep -L 'SPDX-License-Identifier: Apache-2.0' || true)
+          [ -z "$missing" ] || { echo "Files without an SPDX header:"; echo "$missing"; exit 1; }
+      - name: Ruff
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Test
+        run: python -m pytest -q -m "not gpu"
+      - name: Plugin tests
+        run: |
+          for d in plugins/*/; do
+            PYTHONPATH="$PWD/src:$PWD/${d}src" python -m pytest -q -m "not gpu" "${d}tests"
+          done

@@ -1,0 +1,30 @@
+{
+  "created_with": "kilora 0.1.1",
+  "depth": 2,
+  "format": "kilora-pack",
+  "format_version": "1.0",
+  "mods": [
+    {
+      "digest": "sha256-11264dd65cb7b8adaac45d91046b8e17ac138a842a1f27a91890608912e09d01",
+      "enabled": true,
+      "file_sha256": "b018a0bd00dc3578fe5ac047c13a15efaee20f8782e38a4e83204e309e53ecc2",
+      "id": "keyed-single",
+      "prior": 1.0,
+      "source": null,
+      "strength": 0.6,
+      "version": "0.1.0"
+    },
+    {
+      "digest": "sha256-f67d85624a83c4e3611064fd5af6c63bd0298b671dc9fc97a000d146825557da",
+      "enabled": true,
+      "file_sha256": "bba8de41184c3ddc812f81e6b451cab0323d3cbd89ab2f23d8afdf1c178309f5",
+      "id": "imported-and-keyed",
+      "prior": 1.0,
+      "source": null,
+      "strength": -0.4,
+      "version": "0.1.0"
+    }
+  ],
+  "name": "corpus pack",
+  "requires_features": []
+}

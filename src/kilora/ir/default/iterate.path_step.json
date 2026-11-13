@@ -1,0 +1,60 @@
+{
+  "name": "iterate.path_step",
+  "part": "iterate",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "read": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "weight": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "state": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "mul",
+      "args": [
+        "read",
+        "weight"
+      ],
+      "result": "weighted",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "scale",
+      "args": [
+        "weighted"
+      ],
+      "result": "state",
+      "attributes": {
+        "value": 1.0,
+        "by_strength": true
+      }
+    }
+  ],
+  "identity": "a7065039d03f8eecc401e9aa2165f7ab304f32cdb2810b2ecd79ffb248f3e993"
+}

@@ -1,0 +1,1951 @@
+{
+  "KiLoRASelect": {
+    "display_name": "KiLoRA 模組清單：新增模組",
+    "description": "向模組清單新增一個模組。可串接多個，再把清單接到「KiLoRA 套用模組清單」。",
+    "inputs": {
+      "file": {
+        "name": "檔案",
+        "tooltip": "models/kilora 中的 KiLoRA 模組檔案。"
+      },
+      "strength": {
+        "name": "強度",
+        "tooltip": "1 是訓練時的強度。0 關閉模組。負值讓圖像遠離模組的效果。"
+      },
+      "prior": {
+        "name": "路由偏好",
+        "tooltip": "多個模組共用一層時，路由器對本模組的偏好。1 為中性。"
+      },
+      "sets": {
+        "name": "模組清單",
+        "tooltip": "來自另一個模組清單節點的清單。留空則開始新清單。"
+      },
+      "enabled": {
+        "name": "啟用",
+        "tooltip": "關閉時保留在清單中，但不載入。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模組清單",
+        "tooltip": "接到下一個模組清單節點，或 KiLoRA 套用模組清單。"
+      }
+    }
+  },
+  "KiLoRAImportLoRA": {
+    "display_name": "KiLoRA 模組清單：新增 LoRA",
+    "description": "向模組清單新增一個一般 LoRA 檔案。",
+    "inputs": {
+      "lora_name": {
+        "name": "LoRA 檔案",
+        "tooltip": "models/loras 中的 LoRA 檔案。"
+      },
+      "strength": {
+        "name": "強度",
+        "tooltip": "LoRA 權重，和 LoRA 載入器相同。KiLoRA 混合中的建議強度為 0.7。"
+      },
+      "sets": {
+        "name": "模組清單",
+        "tooltip": "來自另一個模組清單節點的清單。留空則開始新清單。"
+      },
+      "enabled": {
+        "name": "啟用",
+        "tooltip": "關閉時保留在清單中，但不載入。"
+      },
+      "lora_stack": {
+        "name": "LoRA stack",
+        "tooltip": "Optional. A LoRA stack: file, model strength, clip strength. Each entry is added with the model strength. When this is connected, it is used instead of the LoRA file above."
+      },
+      "axis": {
+        "name": "軸",
+        "tooltip": "auto: choose the axis from LoRA metadata, trigger words, tags or file name. creative: route with creative LoRAs. functional: apply as a plain LoRA on its own axis. ip: use the character or prop axis. shared: route with each active axis."
+      },
+      "size_norm": {
+        "name": "size norm",
+        "tooltip": "off：依給定的強度。weight：強度乘以整個檔案的一個數。這個數只縮小：比典型庫 LoRA 更大的檔案會降到該大小。較弱的檔案始終保持自身大小，radial budget 開啟時也一樣。檔案內部的比例不變。"
+      },
+      "start": {
+        "name": "開始",
+        "tooltip": "此 LoRA 開始生效的取樣進度（0 到 1，含端點）。"
+      },
+      "end": {
+        "name": "結束",
+        "tooltip": "此 LoRA 停止生效的取樣進度（0 到 1，含端點）。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模組清單",
+        "tooltip": "接到下一個模組清單節點，或 KiLoRA 套用模組清單。"
+      }
+    }
+  },
+  "KiLoRATriggerWords": {
+    "display_name": "KiLoRA Trigger Words",
+    "description": "Shows the trigger words of a LoRA file, from its metadata, its training tags and a Civitai sidecar.",
+    "inputs": {
+      "lora_name": {
+        "name": "LoRA 檔案",
+        "tooltip": "models/loras 中的 LoRA 檔案。"
+      },
+      "lora_stack": {
+        "name": "LoRA stack",
+        "tooltip": "Optional. A LoRA stack. Trigger words of those files are added after the LoRA file above."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "觸發詞",
+        "tooltip": "觸發詞。把它們加到提示詞中。"
+      }
+    }
+  },
+  "KiLoRAPalette": {
+    "display_name": "KiLoRA 調色盤",
+    "description": "把儲存的調色盤（帶強度、角色和觸發詞的 LoRA 與 mod 檔案）讀成 mod 清單。Shuffle 依每個 seed 選不同的組合。",
+    "inputs": {
+      "palette": {
+        "name": "調色盤",
+        "tooltip": "kilora_palettes 資料夾中的調色盤，或 models/kilora 中的 mod 包。"
+      },
+      "shuffle": {
+        "name": "隨機組合",
+        "tooltip": "開啟：依 seed 選調色盤的一部分，強度在範圍內隨機。"
+      },
+      "pick_min": {
+        "name": "最少選擇",
+        "tooltip": "Shuffle：最少選幾項。"
+      },
+      "pick_max": {
+        "name": "最多選擇",
+        "tooltip": "Shuffle：最多選幾項。"
+      },
+      "strength_min": {
+        "name": "最小強度",
+        "tooltip": "Shuffle：所選項的最小強度。"
+      },
+      "strength_max": {
+        "name": "最大強度",
+        "tooltip": "Shuffle：所選項的最大強度。"
+      },
+      "seed": {
+        "name": "seed",
+        "tooltip": "Shuffle：相同 seed 得到相同選擇。"
+      },
+      "sets": {
+        "name": "模組清單",
+        "tooltip": "可選。調色盤的項加到這個 mod 清單後。"
+      },
+      "mask_a": {
+        "name": "遮罩 a",
+        "tooltip": "可選。區域 a 的項所用的區域。"
+      },
+      "mask_b": {
+        "name": "遮罩 b",
+        "tooltip": "可選。區域 b 的項所用的區域。"
+      },
+      "mode": {
+        "name": "mode",
+        "tooltip": "Shuffle: random picks or picks based on local counts."
+      },
+      "reset_state": {
+        "name": "reset state",
+        "tooltip": "Clear the local Shuffle counts for this palette."
+      },
+      "reward": {
+        "name": "reward",
+        "tooltip": "Learn mode: rate the seeded pick. Restore the image seed and settings, with no intervening state changes; use fixed seed, then set reward back to none."
+      },
+      "embedding_model_path": {
+        "name": "embedding model path",
+        "tooltip": "Path to the local embedding model used by Shuffle in embedding mode."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模組清單",
+        "tooltip": "接到下一個模組清單節點，或 KiLoRA 套用模組清單。"
+      },
+      "1": {
+        "name": "觸發詞",
+        "tooltip": "已讀入項的觸發詞，用於提示詞。"
+      },
+      "2": {
+        "name": "settings",
+        "tooltip": "調色盤的設定，連接到 KiLoRA Apply Mod List。"
+      },
+      "3": {
+        "name": "報告",
+        "tooltip": "發生了什麼，以及提示。"
+      }
+    }
+  },
+  "KiLoRASavePalette": {
+    "display_name": "KiLoRA 儲存調色盤",
+    "description": "把 mod 清單存為不含權重的調色盤檔案，例如一次 Shuffle 的選擇。",
+    "inputs": {
+      "sets": {
+        "name": "模組清單",
+        "tooltip": "要儲存的 mod 清單，例如 KiLoRA 調色盤的 sets 輸出。"
+      },
+      "name": {
+        "name": "名稱",
+        "tooltip": "調色盤的顯示名稱。"
+      },
+      "filename": {
+        "name": "檔名",
+        "tooltip": "不帶副檔名的檔名。"
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "可選。與調色盤一起儲存的 KiLoRA Apply 設定。"
+      }
+    }
+  },
+  "KiLoRASuggestions": {
+    "display_name": "KiLoRA Mod List: Suggest LoRAs",
+    "description": "Lists installed LoRAs by co-usage or embedding similarity.",
+    "inputs": {
+      "sets": {
+        "name": "模組清單",
+        "tooltip": "The current mod list used to find related LoRAs."
+      },
+      "model_path": {
+        "name": "embedding model path",
+        "tooltip": "Path to a saved LayerChain model directory. The library basis must match the basis used to train it."
+      },
+      "suggest_by": {
+        "name": "suggest by",
+        "tooltip": "Choose co-usage, similarity, a missing direction, or similarity to kept entries. Complementary scores the uncovered embedding norm times cosine with the current mean."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "suggestions",
+        "tooltip": "Up to five installed LoRA files and their scores."
+      }
+    }
+  },
+  "KiLoRALoadOrder": {
+    "display_name": "KiLoRA 模組清單：檢查",
+    "description": "顯示載入順序和問題。模型不會改變。",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "清單將載入到的模型。它不會改變。"
+      },
+      "sets": {
+        "name": "模組清單",
+        "tooltip": "要檢查的模組清單。"
+      },
+      "depth": {
+        "name": "深度",
+        "tooltip": "迭代次數。-1 使用模組建議的深度。"
+      }
+    }
+  },
+  "KiLoRAApply": {
+    "display_name": "KiLoRA 套用模組清單",
+    "description": "把模組清單中的所有模組載入到模型副本中。",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "要載入到的模型。原模型不會改變。"
+      },
+      "sets": {
+        "name": "模組清單",
+        "tooltip": "最後一個模組清單節點輸出的清單。"
+      },
+      "depth": {
+        "name": "深度",
+        "tooltip": "迭代次數。-1 使用模組建議的深度。"
+      },
+      "iteration": {
+        "name": "迭代方式",
+        "tooltip": "深度各輪的運作方式。mod：使用模組選擇的方式。accumulate：每一輪疊加自己的變化。path：每一輪選擇下一個專家，結果是該專家的變化。"
+      },
+      "depth_schedule": {
+        "name": "深度計畫",
+        "tooltip": "選用。一個 KiLoRA 深度計畫。它取代深度輸入和模組的預設計畫。"
+      },
+      "routing_scope": {
+        "name": "路由範圍",
+        "tooltip": "由哪些 logits 選擇專家。mod：使用每個模組儲存的範圍。token：每個 token 各自選擇。tensor：所有 token 的平均，整個張量一個選擇。"
+      },
+      "routing_select": {
+        "name": "路由選擇",
+        "tooltip": "logits 如何變成專家權重。mod：使用每個模組儲存的選擇。sparsemax：權重之和為 1，弱專家為 0。top1：只用最好的專家。"
+      },
+      "output_gate": {
+        "name": "輸出門",
+        "tooltip": "如何限制每個模組的變化。mod：使用模組選擇的方式。auto：adaptive，模組帶有訓練過的門時為 both。adaptive：每個輸出通道和 token 對相對自身基準尺度過大或方向反覆的變化保留得更少。learned：只用模組訓練過的門。both：兩者的乘積。none：不用門。"
+      },
+      "gate_kappa": {
+        "name": "門 kappa",
+        "tooltip": "自適應門的尺度。等於基準尺度 kappa 倍的變化以 0.5 的機率保留。值越小限制越強。0 使用模組的值。"
+      },
+      "path_width": {
+        "name": "路徑寬度",
+        "tooltip": "僅用於路徑迭代。行走的條數：從第一步排名靠前的專家出發，每條行走從自己的查詢繼續。寬度越大，第一步選錯後越能找到正確的專家。0 使用模組的值（預設 1：一條行走）。"
+      },
+      "path_select": {
+        "name": "路徑選擇",
+        "tooltip": "僅用於路徑迭代。每個 token 如何選擇一條行走的結果。mod：模組的選擇。converged：到達不動點的行走優先，其次是路徑得分更高的。score：只看路徑得分。mix：按路徑得分加權混合各條行走。"
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "可選。模組和 LoRA 檔案中的文字編碼器層會作用到這個 CLIP 上，方式與 ComfyUI 的 LoRA 載入器相同。提示詞請使用 clip 輸出。"
+      },
+      "route_freeze": {
+        "name": "凍結路由",
+        "tooltip": "速度。從這個取樣進度起（0.4：完成 40% 的步數後），每一層停止路由：把這一步的專家權重和門保存為固定尺度，只算一次低秩乘積，速度接近普通 LoRA。0 使用模組的值（預設關閉）。"
+      },
+      "timeline": {
+        "name": "時間線",
+        "tooltip": "可选。來自 KiLoRA 時間線的隨時間變化的值。不接時不做任何改變。"
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional. KiLoRA settings. An input of this node that is not at its default replaces the value of the settings."
+      },
+      "depth_map": {
+        "name": "depth_map",
+        "tooltip": "選用。來自 KiLoRA 深度圖的每區域深度。從其起始進度開始，取代影像 token 的深度。"
+      },
+      "linear_jump": {
+        "name": "linear jump",
+        "tooltip": "Approximate later depth passes with a fitted map. Off by default; image quality can change."
+      },
+      "jump_threshold": {
+        "name": "jump residual limit",
+        "tooltip": "Maximum relative fitting error for using the approximation at a layer. Higher errors keep the full loop."
+      },
+      "axis_alpha": {
+        "name": "axis_alpha",
+        "tooltip": "Off is the default. Creative and IP share one budget per token. Auto blends them using previous-step trigger attention, or alpha_mask when connected."
+      },
+      "alpha_mask": {
+        "name": "alpha mask",
+        "tooltip": "Optional IP alpha mask when axis_alpha is auto. It replaces trigger maps and its edge is feathered over 16 pixels. With axis_alpha off it has no effect."
+      },
+      "gate_history": {
+        "name": "gate history",
+        "tooltip": "full updates the adaptive gate at every depth step. head:k fixes its keep rates after the first k steps (k must be at least 1)."
+      },
+      "expert_text": {
+        "name": "expert_text",
+        "tooltip": "Auto prepares separate text conditioning for experts in layered mode. Off keeps the shared text path."
+      },
+      "variation": {
+        "name": "variation",
+        "tooltip": "Entry sampling temperature for derived routing. Zero selects deterministically."
+      },
+      "record_history": {
+        "name": "record history",
+        "tooltip": "Record file hashes and date locally. Turn off to stop recording."
+      },
+      "candidates": {
+        "name": "Candidates",
+        "tooltip": "Choose this many experts before routing. 0 or at least the expert count uses every expert."
+      },
+      "attention_route": {
+        "name": "attention route (deprecated)",
+        "tooltip": "Deprecated and ignored. Attention projections use the same routing and depth as other mounts."
+      },
+      "attention_route_cap": {
+        "name": "attention route cap (deprecated)",
+        "tooltip": "Deprecated and ignored. Kept to preserve saved workflow widget positions."
+      },
+      "size_norm": {
+        "name": "size norm",
+        "tooltip": "off：每個 LoRA 項目使用自己的 size norm 設定。weight：鏈中每個 LoRA 項目依檔案得到一個大小數。這個數只縮小：比典型庫 LoRA 更大的檔案會降到該大小。較弱的檔案始終保持自身大小，radial budget 開啟時也一樣。報告列出每個檔案的規則。Mod 和包保留其儲存的強度。"
+      },
+      "radial_step": {
+        "name": "徑向步長",
+        "tooltip": "累積深度迴圈。之後每個深度步中沿目前方向改變變化大小的部分的步長。1 按原樣相加。0 保持大小，只改變方向。設為 1、1 且預算為 0 時，深度步與以前相同。預設值為 0.5。"
+      },
+      "orthogonal_step": {
+        "name": "正交步長",
+        "tooltip": "累積深度迴圈。之後每個深度步中改變變化方向的部分的步長。1 按原樣相加。0 保持方向，只改變大小。"
+      },
+      "radial_budget": {
+        "name": "徑向預算",
+        "tooltip": "累積深度迴圈。徑向步的大小上限（每個 token）：第一個深度步之後變化大小的這個倍數。正交部分不截斷。0 為關閉。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模型",
+        "tooltip": "載入了模組的模型。"
+      },
+      "1": {
+        "name": "報告",
+        "tooltip": "發生了什麼，以及提示。"
+      },
+      "2": {
+        "name": "clip",
+        "tooltip": "帶有模組文字編碼器層的 CLIP。沒有文字編碼器層時，就是你連接的那個 CLIP。"
+      }
+    }
+  },
+  "KiLoRAClearHistory": {
+    "display_name": "KiLoRA Clear Local History",
+    "description": "Remove the local history of applied chains.",
+    "inputs": {},
+    "outputs": {
+      "0": {
+        "name": "報告",
+        "tooltip": "發生了什麼，以及提示。"
+      }
+    }
+  },
+  "KiLoRAClear": {
+    "display_name": "KiLoRA 移除模組",
+    "description": "從模型中移除所有 KiLoRA 模組。",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "要移除 KiLoRA 模組的模型。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模型",
+        "tooltip": "移除了 KiLoRA 模組的模型。"
+      }
+    }
+  },
+  "KiLoRALiveSave": {
+    "display_name": "KiLoRA 即時：復原、重設、儲存",
+    "description": "即時模組的復原、重設、存檔點和讀取。",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "來自 KiLoRA 載入模組或 KiLoRA 套用模組清單的模型，其中有即時模組。"
+      },
+      "action": {
+        "name": "操作",
+        "tooltip": "undo：退一步。reset：回到開始（undo 可還原）。save point、load：命名存檔。"
+      },
+      "name": {
+        "name": "名稱",
+        "tooltip": "存檔點的名稱。"
+      },
+      "mod": {
+        "name": "模組",
+        "tooltip": "即時模組的 ID，或 all。"
+      }
+    }
+  },
+  "KiLoRALiveOptions": {
+    "display_name": "KiLoRA 即時：設定",
+    "description": "開啟或關閉學習，並設定學習速度。",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "放在取樣器之前，記錄即時模組或匯入的 LoRA，無需即時模組也可使用。"
+      },
+      "mod": {
+        "name": "模組",
+        "tooltip": "即時模組的 ID。只載入一個時留空。"
+      },
+      "learning": {
+        "name": "學習",
+        "tooltip": "開：模組從你的圖中學習。關：保持目前狀態。"
+      },
+      "speed": {
+        "name": "速度",
+        "tooltip": "學習速度。-1 使用模組預設值。值越大，模組變化越快。"
+      },
+      "keep_previous": {
+        "name": "保留上一張圖",
+        "tooltip": "on：即時狀態同時保留上一張圖和它的提示詞，供比較兩張圖的編輯器使用。unchanged：保持目前設定。"
+      },
+      "measure_size": {
+        "name": "學習尺寸（專家）",
+        "tooltip": "專家設定。學習所測量副本的長邊像素數：256 到 4096，以 16 取整。輸入影像尺寸即以原尺寸測量（較慢）。0：不變。預設 512。"
+      },
+      "reduce_with": {
+        "name": "縮小方式",
+        "tooltip": "縮小副本的產生方式。latent：快，不需要 VAE。decode-resize-encode：需要寫入節點的 VAE 輸入。unchanged：保持目前設定。"
+      },
+      "pin": {
+        "name": "pin",
+        "tooltip": "Keep rendering the current state while learning continues. Off follows the latest write; unchanged keeps the current setting."
+      },
+      "controller": {
+        "name": "控制器",
+        "tooltip": "r1：基準寫入規則（預設）。rprop：符號控制器。unchanged 保持目前選擇。"
+      },
+      "measure": {
+        "name": "measurement budget",
+        "tooltip": "How the imported editor measures its moves. compressed: a fixed number of random combinations of all moves per write, two passes each, then an estimate of every slope. full: two passes per move, slower. unchanged: keep the current choice. The default is compressed."
+      },
+      "measure_combos": {
+        "name": "combinations per write",
+        "tooltip": "The number of random combinations that the compressed measurement uses per write. A write costs two passes per combination. 0: unchanged. The default is 8."
+      },
+      "edits": {
+        "name": "編輯",
+        "tooltip": "編輯會變更每個 LoRA 各層的核心矩陣和強度，以及套件中的項。絕不寫入來源檔案。off 精確還原匯入的 LoRA。unchanged 保持目前選擇。"
+      },
+      "measure_samples": {
+        "name": "samples per write measurement",
+        "tooltip": "Samples per write measurement: the same noise and timesteps for every trial. More samples measure more steadily and cost more time. 1 = one sample at the middle timestep."
+      },
+      "learn": {
+        "name": "學習訊號",
+        "tooltip": "寫入的學習方式。measure：以額外的前向傳播測量斜率（預設）。prediction：根據生成時記錄的預測誤差以閉式求解更新，不做測量傳播；守衛在下一次生成時執行。unchanged 保持目前選擇。"
+      }
+    }
+  },
+  "KiLoRALivePacks": {
+    "display_name": "KiLoRA Live：編輯器套件",
+    "description": "列出已安裝的編輯器套件，開啟或關閉各個套件，並顯示已載入存檔所用的套件。",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "來自 KiLoRA 載入模組或 KiLoRA 套用模組清單的模型，其中有即時模組。"
+      },
+      "mod": {
+        "name": "模組",
+        "tooltip": "即時模組的 ID。只載入一個時留空。"
+      },
+      "packs": {
+        "name": "套件",
+        "tooltip": "auto：通用套件和該模組所屬系列的套件。common only：只用通用套件。pinned：已載入存檔所用的套件版本。"
+      },
+      "turned_off": {
+        "name": "關閉的套件",
+        "tooltip": "要關閉的套件 ID，以逗號分隔。"
+      },
+      "editor_kind": {
+        "name": "編輯器",
+        "tooltip": "這些套件所屬的編輯器。如果只安裝了一個編輯器的套件，可以留空。"
+      },
+      "measurement": {
+        "name": "測量方式",
+        "tooltip": "編輯器測量每個方向的方式。central：兩次前向，更準確。one-sided：一次前向加一次共用基準前向，更快。unchanged：保持目前設定。"
+      },
+      "time_bins": {
+        "name": "時間分段",
+        "tooltip": "編輯器測量的雜訊等級數：1 或 2。unchanged：保持目前設定。"
+      },
+      "families": {
+        "name": "families",
+        "tooltip": "Optional. Family packs to use next to the common pack, as a comma list of family names (for example ink_line). Empty: auto takes the mod's family pack, or all installed family packs."
+      },
+      "path_merge": {
+        "name": "路徑合併",
+        "tooltip": "將觀測到的專家路徑合併到編輯器狀態。預設開啟。unchanged 保持目前選擇。"
+      },
+      "path_angle": {
+        "name": "path rotation angle",
+        "tooltip": "Rotation angle in radians for editor path merging. Default: 0.05."
+      },
+      "cross_layer": {
+        "name": "cross-layer links",
+        "tooltip": "Use recorded links in the path merge. Off by default. unchanged keeps the current choice."
+      },
+      "keep_merge_pairs": {
+        "name": "keep merge pairs",
+        "tooltip": "Keep before and after coefficients for up to 32 merges per branch. Off by default."
+      },
+      "merge_residual": {
+        "name": "merge residual",
+        "tooltip": "Keep the part outside the direction set, or drop it. Default: keep."
+      },
+      "term_budget": {
+        "name": "term budget",
+        "tooltip": "Compact a node after its term count exceeds this number. Default: 64."
+      },
+      "explore": {
+        "name": "explore",
+        "tooltip": "Favor less-used directions in inspiration draws. Zero turns this off. Explore draws keep no path-merge residuals, even with merge residual set to keep."
+      }
+    }
+  },
+  "KiLoRAFreeze": {
+    "display_name": "KiLoRA 即時：凍結為靜態模組",
+    "description": "把即時模組目前的狀態儲存為新的靜態模組。",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "來自 KiLoRA 載入模組或 KiLoRA 套用模組清單的模型，其中有即時模組。"
+      },
+      "mod": {
+        "name": "模組",
+        "tooltip": "即時模組的 ID。只載入一個時留空。"
+      },
+      "new_id": {
+        "name": "新 ID",
+        "tooltip": "新模組的 ID。使用小寫字母、數字、點、底線或連字號。"
+      }
+    }
+  },
+  "KiLoRAModInfo": {
+    "display_name": "KiLoRA 模組資訊",
+    "description": "顯示作者給模組的提示：強度、觸發詞、範例提示詞和深度。",
+    "inputs": {
+      "file": {
+        "name": "檔案",
+        "tooltip": "models/kilora 中的 KiLoRA 模組檔案。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "強度",
+        "tooltip": "建議強度。可接到強度輸入。"
+      },
+      "1": {
+        "name": "觸發詞",
+        "tooltip": "觸發詞。把它們加到提示詞中。"
+      },
+      "2": {
+        "name": "範例提示詞",
+        "tooltip": "作者提供的範例提示詞。"
+      },
+      "3": {
+        "name": "深度",
+        "tooltip": "建議深度。"
+      },
+      "4": {
+        "name": "資訊",
+        "tooltip": "文字形式的模組卡片。"
+      }
+    }
+  },
+  "KiLoRALiveExport": {
+    "display_name": "KiLoRA 即時：匯出分享",
+    "description": "儲存即時模組以便分享。預設不含它從你這裡學到的內容。",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "來自 KiLoRA 載入模組或 KiLoRA 套用模組清單的模型，其中有即時模組。"
+      },
+      "mod": {
+        "name": "模組",
+        "tooltip": "即時模組的 ID。只載入一個時留空。"
+      },
+      "include_learned_state": {
+        "name": "包含學到的狀態",
+        "tooltip": "關：分享時不含它從你這裡學到的內容。"
+      },
+      "new_id": {
+        "name": "新 ID",
+        "tooltip": "分享模組的 ID。留空則保留原 ID。"
+      },
+      "format": {
+        "name": "format",
+        "tooltip": "Choose a KiLoRA mod or a plain LoRA export."
+      }
+    }
+  },
+  "KiLoRALoadMod": {
+    "display_name": "KiLoRA 載入模組",
+    "description": "把一個 KiLoRA 模組載入到模型副本中。用法和 LoRA 載入器相同。",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "要載入到的模型。原模型不會改變。"
+      },
+      "file": {
+        "name": "檔案",
+        "tooltip": "models/kilora 中的 KiLoRA 模組檔案。"
+      },
+      "strength": {
+        "name": "強度",
+        "tooltip": "1 是訓練時的強度。0 關閉模組。負值讓圖像遠離模組的效果。"
+      },
+      "depth": {
+        "name": "深度",
+        "tooltip": "迭代次數。-1 使用模組建議的深度。"
+      },
+      "iteration": {
+        "name": "迭代方式",
+        "tooltip": "深度各輪的運作方式。mod：使用模組選擇的方式。accumulate：每一輪疊加自己的變化。path：每一輪選擇下一個專家，結果是該專家的變化。"
+      },
+      "routing_scope": {
+        "name": "路由範圍",
+        "tooltip": "由哪些 logits 選擇專家。mod：使用每個模組儲存的範圍。token：每個 token 各自選擇。tensor：所有 token 的平均，整個張量一個選擇。"
+      },
+      "routing_select": {
+        "name": "路由選擇",
+        "tooltip": "logits 如何變成專家權重。mod：使用每個模組儲存的選擇。sparsemax：權重之和為 1，弱專家為 0。top1：只用最好的專家。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模型",
+        "tooltip": "載入了模組的模型。"
+      },
+      "1": {
+        "name": "報告",
+        "tooltip": "發生了什麼，以及提示。"
+      }
+    }
+  },
+  "KiLoRALiveRecord": {
+    "display_name": "KiLoRA 即時：1. 記錄（取樣器之前）",
+    "description": "放在取樣器之前，記錄即時模組或匯入的 LoRA，無需即時模組也可使用。",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "放在取樣器之前，記錄即時模組或匯入的 LoRA，無需即時模組也可使用。"
+      },
+      "editor": {
+        "name": "編輯器",
+        "tooltip": "models/kilora 中的即時模式編輯器檔案（.kedit），須為該基礎模型而做。 對於匯入的 LoRA，選擇 Imported LoRAs；無需即時模組或編輯器檔案。"
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "文字編碼器。即時量測取提示詞和空描述兩種條件下損失的平均，空描述用它編碼。未連接時，用帶引導取樣器的負面提示詞代替。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模型",
+        "tooltip": "把這個模型接到取樣器。"
+      },
+      "1": {
+        "name": "記錄",
+        "tooltip": "接到「KiLoRA 即時：2. 寫入」。"
+      }
+    }
+  },
+  "KiLoRALiveWrite": {
+    "display_name": "KiLoRA 即時：2. 寫入（取樣器之後）",
+    "description": "即時模式第 2 步。放在取樣器之後。編輯器更新即時模組，可以復原。守衛會拒絕降低提示詞遵循度或使影像崩塌的寫入。Record 上沒有接 CLIP 時，守衛關閉。",
+    "inputs": {
+      "path": {
+        "name": "記錄",
+        "tooltip": "「KiLoRA 即時：1. 記錄」的記錄輸出。"
+      },
+      "samples": {
+        "name": "潛空間",
+        "tooltip": "取樣器輸出的潛空間，原樣傳出。"
+      },
+      "vae": {
+        "name": "VAE",
+        "tooltip": "選用。用於 decode-resize-encode 縮小方式的 VAE。"
+      },
+      "mask": {
+        "name": "遮罩",
+        "tooltip": "白色區域接受改動，黑色區域保持不變。柔和邊緣會融合。"
+      },
+      "region_caption": {
+        "name": "region caption",
+        "tooltip": "Optional. A caption for the marked region. It names the concept, so later generations can find it. It needs the CLIP on Record."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "潛空間",
+        "tooltip": "取樣器輸出的潛空間，未改變。"
+      },
+      "1": {
+        "name": "報告",
+        "tooltip": "發生了什麼，以及提示。"
+      }
+    }
+  },
+  "KiLoRALiveLearnFromImages": {
+    "display_name": "KiLoRA 即時：從圖像學習",
+    "description": "把一組圖像的共同部分學習到即時狀態中，作為新分支上的一次提交。每五張圖像留出一張用於檢查變更。您需對所用圖像的權利負責。",
+    "inputs": {
+      "path": {
+        "name": "記錄",
+        "tooltip": "「KiLoRA 即時：1. 記錄」的記錄輸出。"
+      },
+      "vae": {
+        "name": "VAE",
+        "tooltip": "將影像編碼為所連接模型潛在格式的 VAE。"
+      },
+      "cue": {
+        "name": "提示詞",
+        "tooltip": "附加到每條說明文字的提示詞，例如一個風格詞。"
+      },
+      "ignore_guard": {
+        "name": "忽略檢查",
+        "tooltip": "即使留出圖像的損失上升或漂移超出界限，也提交變更。報告中會加入警告。"
+      },
+      "images": {
+        "name": "影像",
+        "tooltip": "IMAGE 批次。影像與資料夾只能擇一。使用者需自行負責這些影像的權利。"
+      },
+      "captions": {
+        "name": "描述",
+        "tooltip": "每張影像一行描述。留空則所有影像僅使用提示詞。"
+      },
+      "folder": {
+        "name": "資料夾",
+        "tooltip": "影像資料夾，可附上同名 .txt 描述檔。資料夾與影像只能擇一。"
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "用於說明文字和漂移檢查提示詞的文字編碼器。必要。"
+      },
+      "mounts": {
+        "name": "掛載點",
+        "tooltip": "選用的掛載點名稱模式，每行一個或以逗號分隔，例如 transformer_blocks.1*。只有相符的掛載點會改變。留空：全部。"
+      },
+      "t_min": {
+        "name": "t 最小",
+        "tooltip": "樣本的最低取樣器時間，從 0（最後一步，雜訊少）到 1（第一步，雜訊多）。低雜訊改變細節與質感。"
+      },
+      "t_max": {
+        "name": "t 最大",
+        "tooltip": "樣本的最高取樣器時間，從 0 到 1。高雜訊改變構圖與整體風格。取 0 與 1 時使用所有步。"
+      },
+      "mask": {
+        "name": "遮罩",
+        "tooltip": "選用的區域遮罩，縮放到潛空間 token。只有白色區域產生改變；黑色區域的誤差設為 0。"
+      },
+      "axis": {
+        "name": "軸",
+        "tooltip": "選用的編輯器軸。只有該軸上 LoRA 的幀產生項。all：所有軸。"
+      },
+      "single_image": {
+        "name": "單張影像",
+        "tooltip": "只從一張影像學習。不取集合平均，也沒有保留影像的檢查。報告會警告結果可能複製影像內容。漂移檢查維持開啟。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "記錄",
+        "tooltip": "同一記錄，供下一個即時節點使用。"
+      },
+      "1": {
+        "name": "報告",
+        "tooltip": "留出圖像在無變更和有變更時的損失、相對增益、漂移、寫入範數、分支和時間。"
+      }
+    }
+  },
+  "KiLoRARegion": {
+    "display_name": "KiLoRA 模組列表：區域",
+    "description": "將模組列表中的模組限制在影像的遮罩區域內。每個模組從該區域選擇專家。串接帶不同遮罩的列表，可把模組放在不同區域。",
+    "inputs": {
+      "sets": {
+        "name": "模組清單",
+        "tooltip": "來自另一個模組清單節點的清單。留空則開始新清單。"
+      },
+      "mask": {
+        "name": "遮罩",
+        "tooltip": "白色區域接受改動，黑色區域保持不變。柔和邊緣會融合。"
+      },
+      "apply_to": {
+        "name": "套用於",
+        "tooltip": "整個列表：輸入列表中的每個模組。最後一個模組：僅最後加入的模組。"
+      },
+      "caption": {
+        "name": "區域文本",
+        "tooltip": "可選。該區域的文本編碼（來自 CLIP Text Encode）。在 KiLoRA 區域注意力中開啟區域文本後，該區域遵循此文本而非提示詞。"
+      },
+      "segs": {
+        "name": "segs",
+        "tooltip": "Optional. Regions from Impact Pack (SEGS). Their masks are joined into one mask and used as the region instead of the mask."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模組清單",
+        "tooltip": "接到下一個模組清單節點，或 KiLoRA 套用模組清單。"
+      }
+    }
+  },
+  "KiLoRADepthSchedule": {
+    "display_name": "KiLoRA 深度計畫",
+    "description": "用清單、預設或公式設定每個區塊的深度,也可隨取樣進度變化。連接到 KiLoRA 套用模組清單。",
+    "inputs": {
+      "schedule": {
+        "name": "計畫",
+        "tooltip": "清單(每區塊一個深度,最後一個值重複)、預設名稱,或使用 i、n、t、self、cross、mlp 的公式。空白時使用預設。"
+      },
+      "preset": {
+        "name": "預設",
+        "tooltip": "計畫文字空白時使用。none:沒有計畫,使用深度輸入。"
+      },
+      "blocks": {
+        "name": "區塊數",
+        "tooltip": "預覽中的區塊數。"
+      },
+      "preview_kind": {
+        "name": "預覽層類型",
+        "tooltip": "預覽顯示的層類型。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "深度計畫",
+        "tooltip": "計畫。連接到 KiLoRA 套用模組清單。"
+      },
+      "1": {
+        "name": "預覽",
+        "tooltip": "熱圖:橫向為區塊,縱向為取樣進度。黑色為深度 0,黃色為最深值。"
+      }
+    }
+  },
+  "KiLoRARegionAttention": {
+    "display_name": "KiLoRA 模組列表：區域注意力",
+    "description": "實驗功能。讓每個 KiLoRA 區域的改動留在該區域內。在構圖形成之後的一段採樣窗口中，區域內的 token 對區域外 token 的注意力減弱（soft）或完全屏蔽（hard）。接在 KiLoRA Apply 之後。",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "要載入到的模型。原模型不會改變。"
+      },
+      "mode": {
+        "name": "模式",
+        "tooltip": "off：不改變。soft：區域較少關注圖像其餘部分。hard：區域不關注圖像其餘部分。"
+      },
+      "strength": {
+        "name": "強度",
+        "tooltip": "soft 模式下區域對外部關注的減弱程度。建議從低值開始：高值會改變畫面。"
+      },
+      "until": {
+        "name": "截止",
+        "tooltip": "窗口結束的位置（採樣步數比例）。0.6：在 60% 的步數之後停止限制。"
+      },
+      "outside_region": {
+        "name": "區域外视为區域",
+        "tooltip": "開啟：所有區域之外的部分也算作一個區域，不再關注各區域。適用於單個區域。"
+      },
+      "start": {
+        "name": "開始",
+        "tooltip": "窗口開始的位置（採樣步數比例）。之前的步數完全不變，構圖可自由形成。0.3：在前 30% 的步數之後開始。"
+      },
+      "region_captions": {
+        "name": "區域文本",
+        "tooltip": "開啟：帶文本的區域在同一採樣窗口內遵循各自的文本（區域提示）。圖像其餘部分遵循提示詞。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模型",
+        "tooltip": "載入了模組的模型。"
+      },
+      "1": {
+        "name": "報告",
+        "tooltip": "發生了什麼，以及提示。"
+      }
+    }
+  },
+  "KiLoRASimple": {
+    "display_name": "KiLoRA Settings (Simple)",
+    "description": "KiLoRA settings with one choice: how the LoRAs mix. Connect it to the settings input of KiLoRA Apply or a KiLoRA LoRA node. The mix values: balanced: the defaults of KiLoRA Apply, with depth and routing from each mod. keep_each_strong: each token takes only its best LoRA, at full strength (routing scope token, routing select top1). subtle: one pass and one smooth blend per layer (depth 1, routing scope tensor, routing select sparsemax). stack: KiLoRA LoRA Loader does not route and gives the same output as Load LoRA. The other nodes use the balanced values for stack.",
+    "inputs": {
+      "mix": {
+        "name": "mix",
+        "tooltip": "How the LoRAs mix. balanced: the defaults of KiLoRA Apply, with depth and routing from each mod. keep_each_strong: each token takes only its best LoRA, at full strength (routing scope token, routing select top1). subtle: one pass and one smooth blend per layer (depth 1, routing scope tensor, routing select sparsemax). stack: KiLoRA LoRA Loader does not route and gives the same output as Load LoRA. The other nodes use the balanced values for stack. balanced 時，LoRA 檔案以深度 3 路由，並在 0.4 的步數處凍結路由；stack 只做一輪。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "settings",
+        "tooltip": "The settings. Connect them to KiLoRA Apply or a KiLoRA LoRA node."
+      }
+    }
+  },
+  "KiLoRASettings": {
+    "display_name": "KiLoRA Settings",
+    "description": "KiLoRA settings: a mix, and single values that replace the values of the mix. Connect it to the settings input of KiLoRA Apply or a KiLoRA LoRA node. Content keys default to per_expert; mix is the compatibility choice. Fused gate statistics are faster; torch reproduces images made before this release.",
+    "inputs": {
+      "mix": {
+        "name": "mix",
+        "tooltip": "How the LoRAs mix. balanced: the defaults of KiLoRA Apply, with depth and routing from each mod. keep_each_strong: each token takes only its best LoRA, at full strength (routing scope token, routing select top1). subtle: one pass and one smooth blend per layer (depth 1, routing scope tensor, routing select sparsemax). stack: KiLoRA LoRA Loader does not route and gives the same output as Load LoRA. The other nodes use the balanced values for stack. balanced 時，LoRA 檔案以深度 3 路由，並在 0.4 的步數處凍結路由；stack 只做一輪。"
+      },
+      "depth": {
+        "name": "深度",
+        "tooltip": "Number of passes. -2 takes the depth of the mix. -1 uses the depth that the mods recommend."
+      },
+      "iteration": {
+        "name": "迭代方式",
+        "tooltip": "How depth passes work. from mix: the value of the mix. mod: the mode the mod chose. accumulate: each pass adds its change. path: each pass picks the next expert, and the result is that expert's change."
+      },
+      "routing_scope": {
+        "name": "路由範圍",
+        "tooltip": "Which logits choose the experts. from mix: the value of the mix. mod: the scope stored in each mod. token: each token on its own. tensor: the mean over all tokens, one choice for the whole tensor."
+      },
+      "routing_select": {
+        "name": "路由選擇",
+        "tooltip": "How the logits become expert weights. from mix: the value of the mix. mod: the selection stored in each mod. sparsemax: weights that sum to 1, weak experts at 0. top1: only the best expert."
+      },
+      "depth_schedule": {
+        "name": "深度計畫",
+        "tooltip": "選用。一個 KiLoRA 深度計畫。它取代深度輸入和模組的預設計畫。"
+      },
+      "lycoris_apply": {
+        "name": "LyCORIS apply",
+        "tooltip": "For routed LoKr and LoHa files, truncated applies the low-rank change; exact applies the whole change."
+      },
+      "candidates": {
+        "name": "Candidates",
+        "tooltip": "Choose this many experts before routing. 0 or at least the expert count uses every expert."
+      },
+      "candidate_summary": {
+        "name": "candidate summary",
+        "tooltip": "Choose content keys or leading read-map directions to select candidates."
+      },
+      "content_keys": {
+        "name": "content keys",
+        "tooltip": "per_expert (default) caches keys for each LoRA. mix is the compatibility choice. KILORA_CONTENT_KEYS overrides this setting."
+      },
+      "gate_stats": {
+        "name": "gate statistics",
+        "tooltip": "fused (default) is faster. torch reproduces images made before this release. KILORA_GATE_STATS overrides this setting."
+      },
+      "routing_features": {
+        "name": "routing features",
+        "tooltip": "Collect optional inputs for routing scores."
+      },
+      "cross_token_region": {
+        "name": "token region cross",
+        "tooltip": "Weight for the token and region routing score product."
+      },
+      "cross_token_prompt": {
+        "name": "token prompt cross",
+        "tooltip": "Weight for the token and prompt routing score product."
+      },
+      "cross_token_timestep": {
+        "name": "token timestep cross",
+        "tooltip": "Weight for the token and timestep routing score product."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "settings",
+        "tooltip": "The settings. Connect them to KiLoRA Apply or a KiLoRA LoRA node."
+      }
+    }
+  },
+  "KiLoRALoRALoader": {
+    "display_name": "KiLoRA LoRA Loader",
+    "description": "Use it in place of Load LoRA. It patches CLIP like Load LoRA. The model LoRAs of all chained KiLoRA LoRA Loaders are routed together when sampling starts. With mix set to stack, the output is the same as Load LoRA.",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "要載入到的模型。原模型不會改變。"
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "The text encoder. It gets the LoRA the same way as with Load LoRA."
+      },
+      "lora_name": {
+        "name": "LoRA 檔案",
+        "tooltip": "models/loras 中的 LoRA 檔案。"
+      },
+      "strength_model": {
+        "name": "strength model",
+        "tooltip": "The LoRA weight on the model, as in Load LoRA. Routing keeps this strength for each LoRA."
+      },
+      "strength_clip": {
+        "name": "strength clip",
+        "tooltip": "The LoRA weight on the text encoder, as in Load LoRA."
+      },
+      "lora_stack": {
+        "name": "LoRA stack",
+        "tooltip": "Optional. More LoRAs as a list of (LoRA file, strength model, strength clip). They load before the LoRA of this node."
+      },
+      "timeline": {
+        "name": "時間線",
+        "tooltip": "可选。來自 KiLoRA 時間線的隨時間變化的值。不接時不做任何改變。"
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional. KiLoRA settings. Without them, the defaults apply."
+      },
+      "depth_map": {
+        "name": "depth_map",
+        "tooltip": "選用。來自 KiLoRA 深度圖的每區域深度。從其起始進度開始，取代影像 token 的深度。"
+      },
+      "axis_alpha": {
+        "name": "axis_alpha",
+        "tooltip": "Off is the default. Creative and IP share one budget per token. Auto blends them using previous-step trigger attention, or alpha_mask when connected."
+      },
+      "alpha_mask": {
+        "name": "alpha mask",
+        "tooltip": "Optional IP alpha mask when axis_alpha is auto. It replaces trigger maps and its edge is feathered over 16 pixels. With axis_alpha off it has no effect."
+      },
+      "expert_text": {
+        "name": "expert_text",
+        "tooltip": "Auto prepares separate text conditioning for experts in layered mode. Off keeps the shared text path."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模型",
+        "tooltip": "The model. The LoRAs are routed when sampling starts."
+      },
+      "1": {
+        "name": "clip",
+        "tooltip": "The text encoder with the LoRA."
+      }
+    }
+  },
+  "KiLoRARouteLoaded": {
+    "display_name": "KiLoRA Route Loaded LoRAs",
+    "description": "Put it after your LoRA loaders. It takes the LoRAs that the loaders put on the model and routes them with KiLoRA. Each LoRA keeps its model strength. CLIP is not changed. If the LoRAs cannot be told apart, they stay as loaded and the report says so.",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "The model after your LoRA loaders. The original model is not changed."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional. KiLoRA settings. Without them, the defaults apply."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模型",
+        "tooltip": "The model with the loaded LoRAs routed."
+      },
+      "1": {
+        "name": "報告",
+        "tooltip": "發生了什麼，以及提示。"
+      }
+    }
+  },
+  "KiLoRARouteRecord": {
+    "display_name": "KiLoRA Route Record",
+    "description": "Records where each LoRA acts while the sampler runs. Connect its model to the sampler and its routes to KiLoRA Route Map.",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "The model with KiLoRA routing (after KiLoRA Apply or a KiLoRA loader)."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模型",
+        "tooltip": "The model that records the routing. Connect it to the sampler."
+      },
+      "1": {
+        "name": "routes",
+        "tooltip": "The recorded routing shares. Connect them to KiLoRA Route Map."
+      }
+    }
+  },
+  "KiLoRARouteMap": {
+    "display_name": "KiLoRA Route Map",
+    "description": "Shows where each LoRA acted in the last sampled image: one colored panel per LoRA, with a legend. Connect the routes of KiLoRA Route Record and the decoded image.",
+    "inputs": {
+      "routes": {
+        "name": "routes",
+        "tooltip": "The routes of KiLoRA Route Record."
+      },
+      "image": {
+        "name": "image",
+        "tooltip": "The decoded image of the same sampler run."
+      },
+      "labels": {
+        "name": "labels",
+        "tooltip": "The LoRA names, separated by commas, in load order. Missing names become LoRA 1, LoRA 2, and so on."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "map",
+        "tooltip": "One panel per LoRA: the image, colored where the LoRA acted. A stronger color is a larger share."
+      },
+      "1": {
+        "name": "報告",
+        "tooltip": "發生了什麼，以及提示。"
+      }
+    }
+  },
+  "KiLoRATokenRoles": {
+    "display_name": "KiLoRA Mod List: Token Roles",
+    "description": "Sets which tokens the mods of a mod list change in an editing workflow: the target image, the reference images or the text. Other tokens keep the base weights.",
+    "inputs": {
+      "sets": {
+        "name": "模組清單",
+        "tooltip": "來自另一個模組清單節點的清單。留空則開始新清單。"
+      },
+      "roles": {
+        "name": "roles",
+        "tooltip": "auto: the mod's own policy, else the LoRA file's, else the target tokens when reference images are present. target: the image being made. reference: the reference images. all: every token, as without roles."
+      },
+      "apply_to": {
+        "name": "套用於",
+        "tooltip": "整個列表：輸入列表中的每個模組。最後一個模組：僅最後加入的模組。"
+      },
+      "custom": {
+        "name": "custom roles",
+        "tooltip": "Optional. A role list that replaces the choice above, for example reference:0+text for the first reference image and the text."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模組清單",
+        "tooltip": "接到下一個模組清單節點，或 KiLoRA 套用模組清單。"
+      }
+    }
+  },
+  "KiLoRATwoPanels": {
+    "display_name": "KiLoRA Mod List: Two Panels",
+    "description": "Marks a two-panel canvas. One panel holds the reference picture and the other is the image being made. Mods on auto roles change only the target panel. Applies to every mod of the list.",
+    "inputs": {
+      "sets": {
+        "name": "模組清單",
+        "tooltip": "來自另一個模組清單節點的清單。留空則開始新清單。"
+      },
+      "reference_side": {
+        "name": "reference side",
+        "tooltip": "The side of the canvas that holds the reference picture."
+      },
+      "split": {
+        "name": "split",
+        "tooltip": "The part of the canvas width (left, right) or height (top, bottom) that the reference panel covers."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模組清單",
+        "tooltip": "接到下一個模組清單節點，或 KiLoRA 套用模組清單。"
+      }
+    }
+  },
+  "KiLoRARegionIsolation": {
+    "display_name": "KiLoRA 模組列表：區域隔離",
+    "description": "實驗功能。讓 KiLoRA 區域之外的部分保持基礎模型生成的樣子。在採樣前段，一個只用基礎模型的分支與採樣器並行運行，區域外跟隨它。這一段每步多一次模型調用。接在 KiLoRA Apply 之後。",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "要載入到的模型。原模型不會改變。"
+      },
+      "strength": {
+        "name": "強度",
+        "tooltip": "區域外跟隨基礎模型的程度。1：完全跟隨，0：關閉。"
+      },
+      "until": {
+        "name": "截止",
+        "tooltip": "隔離作用的採樣步數比例（從開始算）。之後畫面自由收斂，邊緣可以癒合。"
+      },
+      "feather": {
+        "name": "羽化",
+        "tooltip": "區域邊緣的柔和寬度（像素）。數值越大，邊緣過渡帶越寬。"
+      },
+      "sets": {
+        "name": "模組清單",
+        "tooltip": "可選。要隔離其區域的模組列表（與 KiLoRA Apply 上的列表相同）。不接時使用 KiLoRA Apply 載入的列表中的區域。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模型",
+        "tooltip": "載入了模組的模型。"
+      },
+      "1": {
+        "name": "報告",
+        "tooltip": "發生了什麼，以及提示。"
+      }
+    }
+  },
+  "KiLoRATimeline": {
+    "display_name": "KiLoRA 時間線",
+    "description": "設定一個值在整個采样過程中的變化，例如模組的強度或何時啟用。串聯多個時間線節點可添加多行，最後一個接到 KiLoRA Apply 或 LoRA 載入器。預覽会畫出每一行。",
+    "inputs": {
+      "target": {
+        "name": "目标",
+        "tooltip": "all, an axis (creative, functional or ip), or the file name of a mod or LoRA in the mod list, without the extension."
+      },
+      "quantity": {
+        "name": "數量",
+        "tooltip": "這一行設定什么。strength 乘以強度。active 開啟（1）或關閉（0）模組。route_freeze 和 gate_kappa 替换 KiLoRA Apply 的對應输入。區域相關的數量設定该效果隨時間的強度。depth_map 和 depth_base 控制深度圖（目標為 all）。"
+      },
+      "curve": {
+        "name": "曲線",
+        "tooltip": "關鍵幀，如 0:1, 0.3:0.6, 1:0.2（位置:數值），或使用 t、step、steps、sigma 的表達式，例如 1 - t。"
+      },
+      "clock": {
+        "name": "時鐘",
+        "tooltip": "關鍵幀位置的含義。progress：第一步為 0，最後一步為 1。step：步数編號。sigma：噪聲水平。"
+      },
+      "interpolation": {
+        "name": "插值",
+        "tooltip": "linear：關鍵幀之間平滑過渡。step：每個值保持到下一個關鍵幀。"
+      },
+      "timeline": {
+        "name": "時間線",
+        "tooltip": "可选。來自另一個時間線節點的行；本節點把自己的行加在後面。"
+      },
+      "more_rows": {
+        "name": "更多行",
+        "tooltip": "可选。更多行，每行一條：目标 | 數量 | 曲線，之后可选 | 時鐘 和 | 插值。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "時間線",
+        "tooltip": "所有行。接到 KiLoRA Apply 或下一個時間線節點。"
+      },
+      "1": {
+        "name": "預覽",
+        "tooltip": "每一行在整個過程中的值：横軸為進度，纵軸為數值。"
+      }
+    }
+  },
+  "KiLoRADepthMap": {
+    "display_name": "KiLoRA 深度圖",
+    "description": "從遮罩（SAM2 等分割器）或影像（其亮度：ControlNet 前處理器輸出的深度、線稿或姿勢圖）為影像的每個區域設定深度。在 start 之前，所有區域使用同一個深度，因此構圖照常形成。之後每個區域使用自己的深度。連接到 KiLoRA Apply 或 KiLoRA LoRA Loader。",
+    "inputs": {
+      "min_depth": {
+        "name": "min_depth",
+        "tooltip": "圖中為 0（黑色）處的深度。"
+      },
+      "max_depth": {
+        "name": "max_depth",
+        "tooltip": "圖中為 1（白色）處的深度。"
+      },
+      "invert": {
+        "name": "invert",
+        "tooltip": "在設定深度前交換黑白。"
+      },
+      "gamma": {
+        "name": "gamma",
+        "tooltip": "在設定深度前調整圖的形狀：大於 1 時更多區域靠近 min_depth，小於 1 時靠近 max_depth。"
+      },
+      "feather": {
+        "name": "羽化",
+        "tooltip": "圖的柔和邊緣，單位為像素。柔和邊緣可避免不同深度之間出現明顯接縫。"
+      },
+      "start": {
+        "name": "start",
+        "tooltip": "圖開始生效的取樣進度（0.3：30% 的步數之後）。在此之前所有區域使用 base，因此構圖與單一深度時相同。"
+      },
+      "base": {
+        "name": "base",
+        "tooltip": "start 之前所有區域的深度，以及文字 token 的深度。-1：圖的平均深度，四捨五入。"
+      },
+      "mask": {
+        "name": "遮罩",
+        "tooltip": "遮罩，例如來自 SAM2。1 對應 max_depth。如果同時連接了影像，使用遮罩。"
+      },
+      "image": {
+        "name": "image",
+        "tooltip": "影像。其亮度即為深度圖，例如深度、線稿或姿勢前處理器的輸出。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "深度圖",
+        "tooltip": "深度圖。連接到 KiLoRA Apply 或 KiLoRA LoRA Loader 的 depth_map 輸入。"
+      },
+      "1": {
+        "name": "預覽",
+        "tooltip": "以影像顯示的深度圖：黑色為 min_depth，白色為 max_depth。"
+      }
+    }
+  },
+  "KiLoRALayerConditioning": {
+    "display_name": "KiLoRA Layer",
+    "description": "Selects the axes for this conditioning and sets its mask.",
+    "inputs": {
+      "conditioning": {
+        "name": "conditioning",
+        "tooltip": "The conditioning for this layer."
+      },
+      "layer": {
+        "name": "layer",
+        "tooltip": "The axis for this layer. creative also runs functional."
+      },
+      "mask": {
+        "name": "遮罩",
+        "tooltip": "Optional mask for this layer."
+      },
+      "alpha_source": {
+        "name": "alpha source",
+        "tooltip": "mask uses the connected mask. attention uses the previous step’s trigger maps for IP and the complement for creative."
+      },
+      "feather": {
+        "name": "羽化",
+        "tooltip": "區域邊緣的柔和寬度（像素）。數值越大，邊緣過渡帶越寬。"
+      },
+      "crop": {
+        "name": "crop",
+        "tooltip": "off: the whole image. auto: faster, crops the late steps with surrounding context."
+      },
+      "batch": {
+        "name": "batch",
+        "tooltip": "Run this layer in one batched model call with the other layers. Off: each layer runs as its own call, which is exact and at 1024 pixels faster. Turn it on for all layers to batch them."
+      },
+      "compose": {
+        "name": "compose",
+        "tooltip": "separate: each layer runs as its own model call. single: all layers run in one model call per guidance branch, and each image area reads its own layer text. Select single on every layer. The crop input is not used with single."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "conditioning",
+        "tooltip": "Conditioning for this layer."
+      }
+    }
+  },
+  "KiLoRALayerFilter": {
+    "display_name": "KiLoRA Layer Filter",
+    "description": "Limit added model function patches to one layer. Weight and object patches remain global.",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "The model after the plugin."
+      },
+      "before": {
+        "name": "before",
+        "tooltip": "The model before the plugin."
+      },
+      "layer": {
+        "name": "layer",
+        "tooltip": "The layer where the plugin runs."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模型",
+        "tooltip": "載入了模組的模型。"
+      },
+      "1": {
+        "name": "報告",
+        "tooltip": "發生了什麼，以及提示。"
+      }
+    }
+  },
+  "KiLoRASaveRecipe": {
+    "display_name": "KiLoRA Save Recipe",
+    "description": "Saves a mod list and settings as references without copying the weights.",
+    "inputs": {
+      "sets": {
+        "name": "模組清單",
+        "tooltip": "The mod list to save."
+      },
+      "filename": {
+        "name": "檔名",
+        "tooltip": "The name of the recipe file."
+      },
+      "name": {
+        "name": "名稱",
+        "tooltip": "The name shown for the recipe."
+      },
+      "license": {
+        "name": "license",
+        "tooltip": "The license for the recipe."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional settings to save with the recipe."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "報告",
+        "tooltip": "發生了什麼，以及提示。"
+      }
+    }
+  },
+  "KiLoRADirectionNodes": {
+    "display_name": "KiLoRA Direction Nodes",
+    "description": "Add direction nodes from a stored library basis or one complete direction file.",
+    "inputs": {
+      "strength": {
+        "name": "強度",
+        "tooltip": "Strength of the direction nodes."
+      },
+      "chunk": {
+        "name": "chunk",
+        "tooltip": "Number of output directions per node."
+      },
+      "sets": {
+        "name": "模組清單",
+        "tooltip": "來自另一個模組清單節點的清單。留空則開始新清單。"
+      },
+      "library_path": {
+        "name": "library path",
+        "tooltip": "Library index folder; empty uses the default."
+      },
+      "fine": {
+        "name": "Fine mode",
+        "tooltip": "Allow up to 64 depth steps for direction nodes."
+      },
+      "candidates": {
+        "name": "Candidates",
+        "tooltip": "Maximum direction nodes scored per token in fine mode."
+      },
+      "direction_file": {
+        "name": "Direction file",
+        "tooltip": "Optional path to a LoRA direction file with kilora_directions metadata. When set, use one node with the full saved change at each mount. Library path, chunk, fine and candidates apply only to the library basis."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模組清單",
+        "tooltip": "接到下一個模組清單節點，或 KiLoRA 套用模組清單。"
+      }
+    }
+  },
+  "KiLoRALoRALibrary": {
+    "display_name": "KiLoRA LoRA Library",
+    "description": "Select LoRAs at the first sampling step and save a recipe.",
+    "inputs": {
+      "model": {
+        "name": "模型",
+        "tooltip": "要載入到的模型。原模型不會改變。"
+      },
+      "folders": {
+        "name": "folders",
+        "tooltip": "One LoRA folder path per line."
+      },
+      "prompt": {
+        "name": "prompt",
+        "tooltip": "Text used to find matching LoRAs."
+      },
+      "count": {
+        "name": "count",
+        "tooltip": "Maximum number of LoRAs to select."
+      },
+      "strength": {
+        "name": "強度",
+        "tooltip": "Strength of each selected LoRA."
+      },
+      "seed": {
+        "name": "seed",
+        "tooltip": "Seed for selection."
+      },
+      "min_relevance": {
+        "name": "min relevance",
+        "tooltip": "Minimum relevance score."
+      },
+      "include_tags": {
+        "name": "include tags",
+        "tooltip": "Include tags, separated by commas."
+      },
+      "exclude_tags": {
+        "name": "exclude tags",
+        "tooltip": "Exclude tags, separated by commas."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "Optional text encoder for selection."
+      },
+      "mask_a": {
+        "name": "遮罩 a",
+        "tooltip": "可選。區域 a 的項所用的區域。"
+      },
+      "mask_b": {
+        "name": "遮罩 b",
+        "tooltip": "可選。區域 b 的項所用的區域。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "模型",
+        "tooltip": "載入了模組的模型。"
+      },
+      "1": {
+        "name": "報告",
+        "tooltip": "發生了什麼，以及提示。"
+      },
+      "2": {
+        "name": "recipe",
+        "tooltip": "Path of the recipe written after the first sampling step."
+      }
+    }
+  },
+  "KiLoRASimilarLoRAs": {
+    "display_name": "KiLoRA Similar LoRAs",
+    "description": "Find installed LoRAs with similar content features in the same base family.",
+    "inputs": {
+      "lora": {
+        "name": "LoRA 檔案",
+        "tooltip": "models/loras 中的 LoRA 檔案。"
+      },
+      "count": {
+        "name": "Count",
+        "tooltip": "Maximum number of similar LoRAs to list."
+      },
+      "similar_space": {
+        "name": "similarity space",
+        "tooltip": "Compare pooled content keys or vectors from a trained model."
+      },
+      "model_path": {
+        "name": "embedding model path",
+        "tooltip": "Path to a saved LayerChain model directory. The library basis must match the basis used to train it."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "報告",
+        "tooltip": "發生了什麼，以及提示。"
+      }
+    }
+  },
+  "KiLoRAPrepareLoRAs": {
+    "display_name": "KiLoRA 準備 LoRA",
+    "description": "準備支援的 LoRA 檔案和路由鍵。連接模型可準備依列出順序的組合。",
+    "inputs": {
+      "paths": {
+        "name": "檔案或資料夾",
+        "tooltip": "每行輸入一個相對於 LoRA 資料夾的路徑。留空可選取所有檔案。"
+      },
+      "model": {
+        "name": "模型",
+        "tooltip": "可選模型，用於為此模型和組合準備 金鑰。"
+      },
+      "family": {
+        "name": "模型系列",
+        "tooltip": "不使用模型準備檔案時可選的模型系列。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "報告",
+        "tooltip": "發生了什麼，以及提示。"
+      }
+    }
+  },
+  "KiLoRAMentionPrompt": {
+    "display_name": "KiLoRA 提及提示詞",
+    "description": "編碼一個提示詞，其中 @name 呼叫庫中的 LoRA。提及在文字編碼器之前被移除，並加入 Mod 清單。",
+    "inputs": {
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "文字編碼器。"
+      },
+      "text": {
+        "name": "文字",
+        "tooltip": "提示詞。寫 @name 或 @name:0.5，依檔名呼叫 LoRA 檔案。不寫數值時強度為 0.7。"
+      },
+      "sets": {
+        "name": "模組清單",
+        "tooltip": "選用。被提及的 LoRA 會加入這個 Mod 清單。"
+      },
+      "layer": {
+        "name": "layer",
+        "tooltip": "global：被提及的 LoRA 使用自身的軸。選一個軸：被提及的 LoRA 跟隨該層的遮罩。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "conditioning",
+        "tooltip": "去掉提及後文字的 conditioning。"
+      },
+      "1": {
+        "name": "模組清單",
+        "tooltip": "每個提及一項的 Mod 清單。連接到 KiLoRA Apply Mod List。"
+      },
+      "2": {
+        "name": "報告",
+        "tooltip": "每個提及使用的檔案，以及加入提示詞的觸發詞。"
+      }
+    }
+  },
+  "KiLoRAPromptSet": {
+    "display_name": "KiLoRA Prompt Set",
+    "description": "Build prompt pairs from subjects, style and cue, or JSON. Chain nodes to add concepts.",
+    "inputs": {
+      "subjects": {
+        "name": "Subjects",
+        "tooltip": "One subject per line. An LLM node can supply this text."
+      },
+      "style": {
+        "name": "Style",
+        "tooltip": "Full style description used by the target prompt."
+      },
+      "cue": {
+        "name": "Cue",
+        "tooltip": "Short cue in the student prompt and the exported trigger words."
+      },
+      "label": {
+        "name": "Concept label",
+        "tooltip": "Letters, numbers, underscores or dashes. Used in the output filename."
+      },
+      "json": {
+        "name": "Prompt set JSON",
+        "tooltip": "Optional JSON concepts or explicit pairs. Overrides the text fields."
+      },
+      "prompt_set": {
+        "name": "Prompt set",
+        "tooltip": "Concepts and prompt pairs. Chain Prompt Set nodes to add concepts."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Prompt set",
+        "tooltip": "Validated concepts and prompt pairs."
+      },
+      "1": {
+        "name": "Report",
+        "tooltip": "Concept labels and pair counts."
+      }
+    }
+  },
+  "KiLoRASolveFromPrompts": {
+    "display_name": "KiLoRA Solve LoRA From Prompts",
+    "description": "Solve plain LoRAs from prompt sets with the connected model and CLIP. Files go to models/loras/kilora-solved/.",
+    "inputs": {
+      "model": {
+        "name": "Model",
+        "tooltip": "Base model used for sampling and fitting the LoRA."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "Text encoder for target, student and negative prompts."
+      },
+      "prompt_set": {
+        "name": "Prompt set",
+        "tooltip": "Concepts and prompt pairs. Chain Prompt Set nodes to add concepts."
+      },
+      "name": {
+        "name": "Name",
+        "tooltip": "Output file stem. Batch sets with one shared name receive numbered stems."
+      },
+      "mode": {
+        "name": "Mode",
+        "tooltip": "single writes one LoRA per concept; joint fits all concepts into one LoRA."
+      },
+      "rank": {
+        "name": "Rank",
+        "tooltip": "Rank of each fitted projection. Default 16."
+      },
+      "steps": {
+        "name": "Steps",
+        "tooltip": "Target trajectory steps. 0 uses the model family's default."
+      },
+      "size": {
+        "name": "Size",
+        "tooltip": "Square image size in pixels, a multiple of 16. 0 uses the model family's default."
+      },
+      "cfg": {
+        "name": "CFG",
+        "tooltip": "Guidance strength of the target trajectories. -1 uses the model family's default."
+      },
+      "seeds": {
+        "name": "Seeds",
+        "tooltip": "Space- or comma-separated integers. Default 811 1811."
+      },
+      "negative_prompt": {
+        "name": "Negative prompt",
+        "tooltip": "Negative conditioning for the target trajectories."
+      },
+      "overwrite": {
+        "name": "Overwrite",
+        "tooltip": "取代同名的現有檔案。否則重複使用相符的檔案，並將新輸入儲存為名稱含有短雜湊值的檔案。"
+      },
+      "output": {
+        "name": "Output",
+        "tooltip": "lora writes plain LoRAs; kmod writes KiLoRA mods; both lists both formats."
+      },
+      "sets": {
+        "name": "Mod list",
+        "tooltip": "Append solved files at strength 0.7 to this mod list."
+      },
+      "preview": {
+        "name": "Preview",
+        "tooltip": "The first image is stored as the preview in each solved mod."
+      },
+      "overlap_penalty": {
+        "name": "重疊懲罰",
+        "tooltip": "0 為關閉。在 single 模式下有多個概念時，每個概念會再求解一次，並對其他概念的輸入方向施加懲罰。值越大，概念之間的重疊越少。"
+      },
+      "deflate": {
+        "name": "逐次扣除",
+        "tooltip": "預設關閉。在 single 模式下依序求解概念。每個後面的概念擬合其目標減去前面概念的變化。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Paths",
+        "tooltip": "One completed LoRA path per line."
+      },
+      "1": {
+        "name": "Mod list",
+        "tooltip": "Solved LoRAs imported at strength 0.7, ready for KiLoRA Apply."
+      },
+      "2": {
+        "name": "Report",
+        "tooltip": "Memory estimate, written files and reused files."
+      }
+    }
+  },
+  "KiLoRASolveFromImages": {
+    "display_name": "KiLoRA 從影像求解 LoRA",
+    "description": "從至少三張共有同一外觀的影像求解 LoRA，例如一種風格。未通過保留影像檢查的集合不會儲存。檔案儲存於 models/loras/kilora-solved/。使用者需自行負責所用影像的權利。",
+    "inputs": {
+      "model": {
+        "name": "Model",
+        "tooltip": "Base model used for sampling and fitting the LoRA."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "Text encoder for target, student and negative prompts."
+      },
+      "vae": {
+        "name": "VAE",
+        "tooltip": "將影像編碼為所連接模型潛在格式的 VAE。"
+      },
+      "name": {
+        "name": "名稱",
+        "tooltip": "不含副檔名的檔名，只能使用字母、數字、底線或連字號。"
+      },
+      "cue": {
+        "name": "提示詞",
+        "tooltip": "與每張影像的描述一起用於兩側，並儲存為 LoRA 的觸發詞。"
+      },
+      "rank": {
+        "name": "Rank",
+        "tooltip": "Rank of each fitted projection. Default 16."
+      },
+      "steps": {
+        "name": "Steps",
+        "tooltip": "Target trajectory steps. 0 uses the model family's default."
+      },
+      "cfg": {
+        "name": "CFG",
+        "tooltip": "Guidance strength of the target trajectories. -1 uses the model family's default."
+      },
+      "size": {
+        "name": "Size",
+        "tooltip": "Square image size in pixels, a multiple of 16. 0 uses the model family's default."
+      },
+      "seeds": {
+        "name": "Seeds",
+        "tooltip": "Space- or comma-separated integers. Default 811 1811."
+      },
+      "ignore_guard": {
+        "name": "忽略檢查",
+        "tooltip": "即使保留影像的去雜訊損失沒有改善也儲存，並在報告中加入警告。"
+      },
+      "overwrite": {
+        "name": "Overwrite",
+        "tooltip": "取代同名的現有檔案。否則重複使用相符的檔案，並將新輸入儲存為名稱含有短雜湊值的檔案。"
+      },
+      "images": {
+        "name": "影像",
+        "tooltip": "IMAGE 批次。影像與資料夾只能擇一。使用者需自行負責這些影像的權利。"
+      },
+      "captions": {
+        "name": "描述",
+        "tooltip": "每張影像一行描述。留空則所有影像僅使用提示詞。"
+      },
+      "folder": {
+        "name": "資料夾",
+        "tooltip": "影像資料夾，可附上同名 .txt 描述檔。資料夾與影像只能擇一。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Paths",
+        "tooltip": "One completed LoRA path per line."
+      },
+      "1": {
+        "name": "Mod list",
+        "tooltip": "Solved LoRAs imported at strength 0.7, ready for KiLoRA Apply."
+      },
+      "2": {
+        "name": "Report",
+        "tooltip": "影像數、保留影像數、求解耗時、兩項檢查損失、相對增益及儲存或重用的路徑。"
+      }
+    }
+  },
+  "KiLoRAPack": {
+    "display_name": "KiLoRA Pack",
+    "description": "Bundle mods into models/kilora/<name>.kpack.json. Copy the pack and mods into one folder for sharing.",
+    "inputs": {
+      "mods": {
+        "name": "Mods",
+        "tooltip": "One mod filename or path per line. Accepts solve paths; plain LoRA lines are ignored."
+      },
+      "name": {
+        "name": "Name",
+        "tooltip": "Pack name and filename stem."
+      },
+      "strength": {
+        "name": "Strength",
+        "tooltip": "Strength for every mod entry. Default 0.7."
+      },
+      "depth": {
+        "name": "Depth",
+        "tooltip": "-1 uses the mod settings; zero or greater stores a pack depth."
+      },
+      "copy_mods": {
+        "name": "Copy mods",
+        "tooltip": "Copy the mods and pack into models/kilora/<name>/ for sharing."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Pack path",
+        "tooltip": "Saved .kpack.json file. Load it with KiLoRA Palette."
+      },
+      "1": {
+        "name": "Report",
+        "tooltip": "Each mod ID, version, cue and preview availability."
+      }
+    }
+  },
+  "KiLoRABuildEditorPack": {
+    "display_name": "KiLoRA Live: Build Editor Pack",
+    "description": "Build editor packs for live mode from the connected model and CLIP. The packs go to models/kilora/<name>/. Needs the plugin kilora-editor-chunk.",
+    "inputs": {
+      "model": {
+        "name": "Model",
+        "tooltip": "The base model. With one live mod on it, the packs are for that mod. Without a live mod, they are for the base model."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "The text encoder of the model. It encodes each prompt and the empty caption."
+      },
+      "name": {
+        "name": "Name",
+        "tooltip": "The folder name in models/kilora. A new build with the same name replaces the folder."
+      },
+      "prompts": {
+        "name": "Prompts",
+        "tooltip": "JSON that maps each family name to a list of prompts. A family name that starts with _ adds to the common pack only."
+      },
+      "base_family": {
+        "name": "Base family",
+        "tooltip": "The base model family. auto uses the family of the loaded model."
+      },
+      "draws": {
+        "name": "Noise draws",
+        "tooltip": "Noise draws per prompt and caption. More draws give smoother directions and take longer."
+      },
+      "common": {
+        "name": "Common directions",
+        "tooltip": "The number of directions in the common pack."
+      },
+      "family": {
+        "name": "Family directions",
+        "tooltip": "The number of directions in each family pack."
+      },
+      "loras": {
+        "name": "LoRAs",
+        "tooltip": "LoRA files from models/loras that are applied while the packs are built. One name per line, optionally name:strength."
+      },
+      "orthogonalize": {
+        "name": "Orthogonalize",
+        "tooltip": "Remove the common directions and the earlier family packs from each family pack."
+      },
+      "size": {
+        "name": "Size",
+        "tooltip": "Image size in pixels. 0 uses the default of the base family."
+      },
+      "steps": {
+        "name": "Steps",
+        "tooltip": "Sampler steps per image. 0 uses the default of the base family."
+      },
+      "seed": {
+        "name": "Seed",
+        "tooltip": "The first seed of the images and noise draws."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Pack folder",
+        "tooltip": "The folder with the packs and the editor file. KiLoRA Live Packs finds the packs there."
+      },
+      "1": {
+        "name": "Report",
+        "tooltip": "Packs, directions per pack, events, seconds and the memory estimate."
+      }
+    }
+  }
+}

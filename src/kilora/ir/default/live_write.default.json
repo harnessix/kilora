@@ -1,0 +1,221 @@
+{
+  "name": "live_write.default",
+  "part": "live_write",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "slopes": {
+      "axes": [
+        "r1",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "shares": {
+      "axes": [
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "coefficients": {
+      "axes": [
+        "experts",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "multiplier": {
+      "axes": [
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "retention": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "write_scale": {
+      "axes": [],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "update": {
+      "axes": [
+        "experts",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {
+    "zero": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 0.0
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "eq",
+      "args": [
+        "slopes",
+        "slopes"
+      ],
+      "result": "valid",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "where",
+      "args": [
+        "valid",
+        "slopes",
+        "zero"
+      ],
+      "result": "clean",
+      "attributes": {}
+    },
+    {
+      "id": 2,
+      "op": "sum",
+      "args": [
+        "clean"
+      ],
+      "result": "total",
+      "attributes": {
+        "axis": "r1",
+        "keep": false
+      }
+    },
+    {
+      "id": 3,
+      "op": "cast",
+      "args": [
+        "valid"
+      ],
+      "result": "valid_float",
+      "attributes": {
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": 4,
+      "op": "sum",
+      "args": [
+        "valid_float"
+      ],
+      "result": "count",
+      "attributes": {
+        "axis": "r1",
+        "keep": false
+      }
+    },
+    {
+      "id": 5,
+      "op": "div",
+      "args": [
+        "total",
+        "count"
+      ],
+      "result": "average",
+      "attributes": {}
+    },
+    {
+      "id": 6,
+      "op": "eq",
+      "args": [
+        "average",
+        "average"
+      ],
+      "result": "average_valid",
+      "attributes": {}
+    },
+    {
+      "id": 7,
+      "op": "where",
+      "args": [
+        "average_valid",
+        "average",
+        "zero"
+      ],
+      "result": "finite_mean",
+      "attributes": {}
+    },
+    {
+      "id": 8,
+      "op": "clamp",
+      "args": [
+        "finite_mean"
+      ],
+      "result": "bounded_mean",
+      "attributes": {
+        "low": -3.4028234663852886e+38,
+        "high": 3.4028234663852886e+38
+      }
+    },
+    {
+      "id": 9,
+      "op": "neg",
+      "args": [
+        "bounded_mean"
+      ],
+      "result": "negative",
+      "attributes": {}
+    },
+    {
+      "id": 10,
+      "op": "mul",
+      "args": [
+        "negative",
+        "multiplier"
+      ],
+      "result": "step",
+      "attributes": {}
+    },
+    {
+      "id": 11,
+      "op": "mul",
+      "args": [
+        "shares",
+        "step"
+      ],
+      "result": "split",
+      "attributes": {}
+    },
+    {
+      "id": 12,
+      "op": "mul",
+      "args": [
+        "write_scale",
+        "split"
+      ],
+      "result": "scaled",
+      "attributes": {}
+    },
+    {
+      "id": 13,
+      "op": "mul",
+      "args": [
+        "retention",
+        "coefficients"
+      ],
+      "result": "retained",
+      "attributes": {}
+    },
+    {
+      "id": 14,
+      "op": "add",
+      "args": [
+        "retained",
+        "scaled"
+      ],
+      "result": "update",
+      "attributes": {}
+    }
+  ],
+  "identity": "5bba28791932ccaf07684393ca5575a4eb519f63a79a3e17f8621ae0c24e5982"
+}

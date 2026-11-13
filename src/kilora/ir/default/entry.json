@@ -1,0 +1,172 @@
+{
+  "name": "entry",
+  "part": "entry",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "hooks": [],
+  "inputs": {
+    "reads": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "per"
+      ],
+      "dtype": "float32"
+    },
+    "energy": {
+      "axes": [
+        "batch",
+        "tokens"
+      ],
+      "dtype": "float32"
+    },
+    "rows": {
+      "axes": [
+        "experts"
+      ],
+      "dtype": "int64"
+    },
+    "key_width": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "tau": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "epsilon": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "temperature_in": {
+      "axes": [],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "logits": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "temperature": {
+      "axes": [],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "mul",
+      "args": [
+        "reads",
+        "reads"
+      ],
+      "result": "squared",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "sum",
+      "args": [
+        "squared"
+      ],
+      "result": "projected",
+      "attributes": {
+        "axis": "per",
+        "keep": false
+      }
+    },
+    {
+      "id": 2,
+      "op": "mul",
+      "args": [
+        "tau",
+        "projected"
+      ],
+      "result": "scaled",
+      "attributes": {}
+    },
+    {
+      "id": 3,
+      "op": "add",
+      "args": [
+        "energy",
+        "epsilon"
+      ],
+      "result": "denominator",
+      "attributes": {}
+    },
+    {
+      "id": 4,
+      "op": "div",
+      "args": [
+        "scaled",
+        "denominator"
+      ],
+      "result": "normalized",
+      "attributes": {}
+    },
+    {
+      "id": 5,
+      "op": "cast",
+      "args": [
+        "rows"
+      ],
+      "result": "row_float",
+      "attributes": {
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": 6,
+      "op": "clamp",
+      "args": [
+        "row_float"
+      ],
+      "result": "row_min",
+      "attributes": {
+        "low": 1.0,
+        "high": 1e+30
+      }
+    },
+    {
+      "id": 7,
+      "op": "div",
+      "args": [
+        "row_min",
+        "key_width"
+      ],
+      "result": "row_scale",
+      "attributes": {}
+    },
+    {
+      "id": 8,
+      "op": "div",
+      "args": [
+        "normalized",
+        "row_scale"
+      ],
+      "result": "logits",
+      "attributes": {}
+    },
+    {
+      "id": 9,
+      "op": "scale",
+      "args": [
+        "temperature_in"
+      ],
+      "result": "temperature",
+      "attributes": {
+        "value": 1.0,
+        "by_strength": false
+      }
+    }
+  ],
+  "identity": "5d1663ca2a4339ba9842a3be063790030ecc3d12a315c484cb35df0629797acf"
+}

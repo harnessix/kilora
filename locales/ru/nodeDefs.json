@@ -1,0 +1,1951 @@
+{
+  "KiLoRASelect": {
+    "display_name": "KiLoRA Список модов: добавить мод",
+    "description": "Добавляет мод в список модов. Соедините несколько и подключите список к KiLoRA Применить список модов.",
+    "inputs": {
+      "file": {
+        "name": "файл",
+        "tooltip": "Файл мода KiLoRA из models/kilora."
+      },
+      "strength": {
+        "name": "сила",
+        "tooltip": "1 — сила обучения. 0 выключает мод. Отрицательные значения уводят от мода."
+      },
+      "prior": {
+        "name": "предпочтение маршрутизатора",
+        "tooltip": "Насколько маршрутизатор предпочитает этот мод, когда несколько модов делят слой. 1 — нейтрально."
+      },
+      "sets": {
+        "name": "список модов",
+        "tooltip": "Список модов из другого узла списка. Оставьте пустым, чтобы начать новый список."
+      },
+      "enabled": {
+        "name": "включено",
+        "tooltip": "Выключено: остаётся в списке, но не загружается."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "список модов",
+        "tooltip": "Подключите к следующему узлу списка или к KiLoRA Применить список модов."
+      }
+    }
+  },
+  "KiLoRAImportLoRA": {
+    "display_name": "KiLoRA Список модов: добавить LoRA",
+    "description": "Добавляет обычный файл LoRA в список модов.",
+    "inputs": {
+      "lora_name": {
+        "name": "файл LoRA",
+        "tooltip": "Файл LoRA из models/loras."
+      },
+      "strength": {
+        "name": "сила",
+        "tooltip": "Вес LoRA, как в загрузчике LoRA. Рекомендуемая сила в смеси KiLoRA — 0,7."
+      },
+      "sets": {
+        "name": "список модов",
+        "tooltip": "Список модов из другого узла списка. Оставьте пустым, чтобы начать новый список."
+      },
+      "enabled": {
+        "name": "включено",
+        "tooltip": "Выключено: остаётся в списке, но не загружается."
+      },
+      "lora_stack": {
+        "name": "LoRA stack",
+        "tooltip": "Optional. A LoRA stack: file, model strength, clip strength. Each entry is added with the model strength. When this is connected, it is used instead of the LoRA file above."
+      },
+      "axis": {
+        "name": "ось",
+        "tooltip": "auto: choose the axis from LoRA metadata, trigger words, tags or file name. creative: route with creative LoRAs. functional: a plain LoRA on its own axis. ip: the character or prop axis: a plain LoRA on its own axis, and several IP LoRAs route together. shared: route with each active axis."
+      },
+      "size_norm": {
+        "name": "size norm",
+        "tooltip": "off: сила как задана. weight: сила умножается на одно число для всего файла. Число только уменьшает: файл крупнее типичной LoRA из библиотеки приводится к этой величине. Более слабый файл всегда сохраняет свою величину, также при включённом radial budget. Соотношения внутри файла не меняются."
+      },
+      "start": {
+        "name": "начало",
+        "tooltip": "Прогресс семплирования, с которого действует эта LoRA (от 0 до 1 включительно)."
+      },
+      "end": {
+        "name": "конец",
+        "tooltip": "Прогресс семплирования, до которого действует эта LoRA (от 0 до 1 включительно)."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "список модов",
+        "tooltip": "Подключите к следующему узлу списка или к KiLoRA Применить список модов."
+      }
+    }
+  },
+  "KiLoRATriggerWords": {
+    "display_name": "KiLoRA Trigger Words",
+    "description": "Shows the trigger words of a LoRA file, from its metadata, its training tags and a Civitai sidecar.",
+    "inputs": {
+      "lora_name": {
+        "name": "файл LoRA",
+        "tooltip": "Файл LoRA из models/loras."
+      },
+      "lora_stack": {
+        "name": "LoRA stack",
+        "tooltip": "Optional. A LoRA stack. Trigger words of those files are added after the LoRA file above."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "триггерные слова",
+        "tooltip": "Триггерные слова. Добавьте их в промпт."
+      }
+    }
+  },
+  "KiLoRAPalette": {
+    "display_name": "KiLoRA Палитра",
+    "description": "Загружает сохранённую палитру (файлы LoRA и модов с силой, ролями и триггер-словами) как список модов. Shuffle выбирает другой набор для каждого seed.",
+    "inputs": {
+      "palette": {
+        "name": "палитра",
+        "tooltip": "Палитра из папки kilora_palettes или пакет модов из models/kilora."
+      },
+      "shuffle": {
+        "name": "перемешать",
+        "tooltip": "Вкл.: выбор части палитры по seed со случайной силой в диапазоне."
+      },
+      "pick_min": {
+        "name": "выбор мин",
+        "tooltip": "Shuffle: наименьшее число записей."
+      },
+      "pick_max": {
+        "name": "выбор макс",
+        "tooltip": "Shuffle: наибольшее число записей."
+      },
+      "strength_min": {
+        "name": "сила мин",
+        "tooltip": "Shuffle: наименьшая сила записи."
+      },
+      "strength_max": {
+        "name": "сила макс",
+        "tooltip": "Shuffle: наибольшая сила записи."
+      },
+      "seed": {
+        "name": "seed",
+        "tooltip": "Shuffle: один и тот же seed даёт тот же выбор."
+      },
+      "sets": {
+        "name": "список модов",
+        "tooltip": "Необязательно. Записи палитры добавляются к этому списку модов."
+      },
+      "mask_a": {
+        "name": "маска a",
+        "tooltip": "Необязательно. Область записей с областью a."
+      },
+      "mask_b": {
+        "name": "маска b",
+        "tooltip": "Необязательно. Область записей с областью b."
+      },
+      "mode": {
+        "name": "mode",
+        "tooltip": "Shuffle: random picks or picks based on local counts."
+      },
+      "reset_state": {
+        "name": "reset state",
+        "tooltip": "Clear the local Shuffle counts for this palette."
+      },
+      "reward": {
+        "name": "reward",
+        "tooltip": "Learn mode: rate the seeded pick. Restore the image seed and settings, with no intervening state changes; use fixed seed, then set reward back to none."
+      },
+      "embedding_model_path": {
+        "name": "embedding model path",
+        "tooltip": "Path to the local embedding model used by Shuffle in embedding mode."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "список модов",
+        "tooltip": "Подключите к следующему узлу списка или к KiLoRA Применить список модов."
+      },
+      "1": {
+        "name": "триггерные слова",
+        "tooltip": "Триггер-слова загруженных записей для промпта."
+      },
+      "2": {
+        "name": "settings",
+        "tooltip": "Настройки палитры. Подключите их к KiLoRA Apply Mod List."
+      },
+      "3": {
+        "name": "отчёт",
+        "tooltip": "Что произошло, и предупреждения."
+      }
+    }
+  },
+  "KiLoRASavePalette": {
+    "display_name": "KiLoRA Сохранить палитру",
+    "description": "Сохраняет список модов как файл палитры без весов, например выбор Shuffle.",
+    "inputs": {
+      "sets": {
+        "name": "список модов",
+        "tooltip": "Список модов для сохранения, например выход sets узла KiLoRA Палитра."
+      },
+      "name": {
+        "name": "имя",
+        "tooltip": "Имя палитры."
+      },
+      "filename": {
+        "name": "имя файла",
+        "tooltip": "Имя файла без расширения."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Необязательно. Настройки KiLoRA Apply, сохраняемые с палитрой."
+      }
+    }
+  },
+  "KiLoRASuggestions": {
+    "display_name": "KiLoRA Mod List: Suggest LoRAs",
+    "description": "Lists installed LoRAs by co-usage or embedding similarity.",
+    "inputs": {
+      "sets": {
+        "name": "список модов",
+        "tooltip": "The current mod list used to find related LoRAs."
+      },
+      "model_path": {
+        "name": "embedding model path",
+        "tooltip": "Path to a saved LayerChain model directory. The library basis must match the basis used to train it."
+      },
+      "suggest_by": {
+        "name": "suggest by",
+        "tooltip": "Choose co-usage, similarity, a missing direction, or similarity to kept entries. Complementary scores the uncovered embedding norm times cosine with the current mean."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "suggestions",
+        "tooltip": "Up to five installed LoRA files and their scores."
+      }
+    }
+  },
+  "KiLoRALoadOrder": {
+    "display_name": "KiLoRA Список модов: проверить",
+    "description": "Показывает порядок загрузки и проблемы. Модель не меняется.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "Модель, в которую загрузился бы список. Она не меняется."
+      },
+      "sets": {
+        "name": "список модов",
+        "tooltip": "Список модов для проверки."
+      },
+      "depth": {
+        "name": "глубина",
+        "tooltip": "Число проходов. -1 берёт глубину, которую советует мод."
+      }
+    }
+  },
+  "KiLoRAApply": {
+    "display_name": "KiLoRA Применить список модов",
+    "description": "Загружает все моды из списка в копию модели.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "Модель, в которую загружать. Оригинал не меняется."
+      },
+      "sets": {
+        "name": "список модов",
+        "tooltip": "Список модов из последнего узла списка."
+      },
+      "depth": {
+        "name": "глубина",
+        "tooltip": "Число проходов. -1 берёт глубину, которую советует мод."
+      },
+      "iteration": {
+        "name": "итерация",
+        "tooltip": "Как работают проходы глубины. mod: режим, выбранный модом. accumulate: каждый проход добавляет своё изменение. path: каждый проход выбирает следующего эксперта, и результат — изменение этого эксперта."
+      },
+      "depth_schedule": {
+        "name": "план глубины",
+        "tooltip": "Необязательно. KiLoRA План глубины. Заменяет глубину и план модов по умолчанию."
+      },
+      "routing_scope": {
+        "name": "область маршрутизации",
+        "tooltip": "Какие логиты выбирают экспертов. mod: область, сохранённая в каждом моде. token: каждый токен сам. tensor: среднее по всем токенам, один выбор для всего тензора."
+      },
+      "routing_select": {
+        "name": "выбор маршрутизации",
+        "tooltip": "Как логиты становятся весами экспертов. mod: выбор, сохранённый в каждом моде. sparsemax: веса с суммой 1, слабые эксперты на 0. top1: только лучший эксперт."
+      },
+      "output_gate": {
+        "name": "выходной затвор",
+        "tooltip": "Как ограничивается изменение каждого мода. mod: режим, выбранный модом. auto: adaptive или both, если у мода есть обученный затвор. adaptive: каждый выходной канал и токен сохраняет меньше от изменения, которое велико относительно его собственного базового масштаба или меняет направление. learned: только обученный затвор мода. both: произведение. none: без затвора."
+      },
+      "gate_kappa": {
+        "name": "каппа затвора",
+        "tooltip": "Масштаб адаптивного затвора. Изменение в каппа раз больше базового масштаба сохраняется с вероятностью 0,5. Меньшие значения ограничивают сильнее. 0 использует значение мода."
+      },
+      "path_width": {
+        "name": "ширина пути",
+        "tooltip": "Только для итерации по пути. Число проходов: они начинаются с лучших экспертов первого шага, и каждый проход продолжается от своего запроса. Большая ширина находит нужного эксперта после неверного первого шага. 0 использует значение мода (по умолчанию 1: один проход)."
+      },
+      "path_select": {
+        "name": "выбор пути",
+        "tooltip": "Только для итерации по пути. Как каждый токен выбирает результат одного прохода. mod: выбор мода. converged: побеждает проход, достигший неподвижной точки, затем более высокая оценка пути. score: только оценка пути. mix: смесь проходов с весами по их оценкам."
+      },
+      "clip": {
+        "name": "clip",
+        "tooltip": "Optional. The text encoder layers of the mods and LoRA files apply to this CLIP, as ComfyUI's LoRA loader does. Use the clip output for the prompt."
+      },
+      "route_freeze": {
+        "name": "заморозка маршрутизации",
+        "tooltip": "Скорость. С этого прогресса сэмплирования (0,4: после 40% шагов) каждый слой перестаёт маршрутизировать: он сохраняет веса экспертов и затвор этого шага как фиксированные масштабы и считает одно низкоранговое произведение, почти так же быстро, как обычная LoRA. 0 использует значение мода (по умолчанию выключено)."
+      },
+      "timeline": {
+        "name": "timeline",
+        "tooltip": "Optional. Time-dependent values from KiLoRA Timeline. Without it nothing changes."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional. KiLoRA settings. An input of this node that is not at its default replaces the value of the settings."
+      },
+      "depth_map": {
+        "name": "depth_map",
+        "tooltip": "Необязательно. Глубина для каждой области изображения из KiLoRA Карта глубины. С её начального прогресса она заменяет глубину токенов изображения."
+      },
+      "linear_jump": {
+        "name": "linear jump",
+        "tooltip": "Approximate later depth passes with a fitted map. Off by default; image quality can change."
+      },
+      "jump_threshold": {
+        "name": "jump residual limit",
+        "tooltip": "Maximum relative fitting error for using the approximation at a layer. Higher errors keep the full loop."
+      },
+      "axis_alpha": {
+        "name": "axis_alpha",
+        "tooltip": "Off is the default. Creative and IP share one budget per token. Auto blends them using previous-step trigger attention, or alpha_mask when connected."
+      },
+      "alpha_mask": {
+        "name": "alpha mask",
+        "tooltip": "Optional IP alpha mask when axis_alpha is auto. It replaces trigger maps and its edge is feathered over 16 pixels. With axis_alpha off it has no effect."
+      },
+      "gate_history": {
+        "name": "gate history",
+        "tooltip": "full updates the adaptive gate at every depth step. head:k fixes its keep rates after the first k steps (k must be at least 1)."
+      },
+      "expert_text": {
+        "name": "expert_text",
+        "tooltip": "Auto prepares separate text conditioning for experts in layered mode. Off keeps the shared text path."
+      },
+      "variation": {
+        "name": "variation",
+        "tooltip": "Entry sampling temperature for derived routing. Zero selects deterministically."
+      },
+      "record_history": {
+        "name": "record history",
+        "tooltip": "Record file hashes and date locally. Turn off to stop recording."
+      },
+      "candidates": {
+        "name": "Candidates",
+        "tooltip": "Choose this many experts before routing. 0 or at least the expert count uses every expert."
+      },
+      "attention_route": {
+        "name": "attention route (deprecated)",
+        "tooltip": "Deprecated and ignored. Attention projections use the same routing and depth as other mounts."
+      },
+      "attention_route_cap": {
+        "name": "attention route cap (deprecated)",
+        "tooltip": "Deprecated and ignored. Kept to preserve saved workflow widget positions."
+      },
+      "size_norm": {
+        "name": "size norm",
+        "tooltip": "off: каждая запись LoRA использует свою настройку size norm. weight: каждая запись LoRA в цепочке получает одно число величины на файл. Число только уменьшает: файл крупнее типичной LoRA из библиотеки приводится к этой величине. Более слабый файл всегда сохраняет свою величину, также при включённом radial budget. Отчёт называет правило для каждого файла. Моды и паки сохраняют свою сохранённую силу."
+      },
+      "radial_step": {
+        "name": "радиальный шаг",
+        "tooltip": "Накопительный цикл глубины. Размер шага той части каждого следующего шага глубины, которая меняет величину изменения вдоль его текущего направления. 1 добавляет её как есть. 0 сохраняет величину, меняется только направление. При 1, 1 и бюджете 0 шаги складываются как раньше. Значение по умолчанию — 0.5."
+      },
+      "orthogonal_step": {
+        "name": "ортогональный шаг",
+        "tooltip": "Накопительный цикл глубины. Размер шага той части каждого следующего шага глубины, которая меняет направление изменения. 1 добавляет её как есть. 0 сохраняет направление, меняется только величина."
+      },
+      "radial_budget": {
+        "name": "радиальный бюджет",
+        "tooltip": "Накопительный цикл глубины. Предел величины для радиального шага, на токен: столько раз величина изменения после первого шага глубины. Ортогональная часть не обрезается. 0 выключает."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "модель",
+        "tooltip": "Модель с модами."
+      },
+      "1": {
+        "name": "отчёт",
+        "tooltip": "Что произошло, и предупреждения."
+      },
+      "2": {
+        "name": "clip",
+        "tooltip": "The CLIP with the text encoder layers of the mods. Without text encoder layers it is the CLIP you connected."
+      }
+    }
+  },
+  "KiLoRAClearHistory": {
+    "display_name": "KiLoRA Clear Local History",
+    "description": "Remove the local history of applied chains.",
+    "inputs": {},
+    "outputs": {
+      "0": {
+        "name": "отчёт",
+        "tooltip": "Что произошло, и предупреждения."
+      }
+    }
+  },
+  "KiLoRAClear": {
+    "display_name": "KiLoRA Убрать моды",
+    "description": "Убирает все моды KiLoRA из модели.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "Модель, из которой убрать моды KiLoRA."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "модель",
+        "tooltip": "Модель без модов KiLoRA."
+      }
+    }
+  },
+  "KiLoRALiveSave": {
+    "display_name": "KiLoRA Живой режим: отмена, сброс, сохранение",
+    "description": "Отмена, сброс, точки сохранения и загрузка для живого мода.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "Модель из KiLoRA Загрузить мод или KiLoRA Применить список модов, с живым модом."
+      },
+      "action": {
+        "name": "действие",
+        "tooltip": "undo: шаг назад. reset: к началу (undo вернёт). save point, load: именованные сохранения."
+      },
+      "name": {
+        "name": "имя",
+        "tooltip": "Имя точки сохранения."
+      },
+      "mod": {
+        "name": "мод",
+        "tooltip": "ID живого мода или all."
+      }
+    }
+  },
+  "KiLoRALiveOptions": {
+    "display_name": "KiLoRA Живой режим: настройки",
+    "description": "Включает или выключает обучение и задаёт его скорость.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "Поставьте перед сэмплером для записи live-мода или импортированных LoRA, даже без live-мода."
+      },
+      "mod": {
+        "name": "мод",
+        "tooltip": "ID живого мода. Оставьте пустым, если загружен только один."
+      },
+      "learning": {
+        "name": "обучение",
+        "tooltip": "Включено: мод учится на ваших изображениях. Выключено: сохраняет своё состояние."
+      },
+      "speed": {
+        "name": "скорость",
+        "tooltip": "Скорость обучения. -1 берёт значение мода. Большие значения меняют мод быстрее."
+      },
+      "keep_previous": {
+        "name": "хранить последнее изображение",
+        "tooltip": "on: живое состояние хранит и последнее изображение с его промптом, для редакторов, которые сравнивают два изображения. unchanged: оставить текущий выбор."
+      },
+      "measure_size": {
+        "name": "размер обучения (эксперт)",
+        "tooltip": "Для экспертов. Длинная сторона копии в пикселях, которую измеряет обучение: от 256 до 4096, округляется до 16. Введите размер изображения, чтобы измерять в полном размере (медленнее). 0: без изменений. По умолчанию 512."
+      },
+      "reduce_with": {
+        "name": "уменьшать через",
+        "tooltip": "Как делается уменьшенная копия. latent: быстро, без VAE. decode-resize-encode: нужен вход VAE узла записи. unchanged: оставить текущий выбор."
+      },
+      "pin": {
+        "name": "pin",
+        "tooltip": "Keep rendering the current state while learning continues. Off follows the latest write; unchanged keeps the current setting."
+      },
+      "controller": {
+        "name": "контроллер",
+        "tooltip": "r1: базовое правило записи (по умолчанию). rprop: знаковый контроллер. unchanged сохраняет текущий выбор."
+      },
+      "measure": {
+        "name": "measurement budget",
+        "tooltip": "How the imported editor measures its moves. compressed: a fixed number of random combinations of all moves per write, two passes each, then an estimate of every slope. full: two passes per move, slower. unchanged: keep the current choice. The default is compressed."
+      },
+      "measure_combos": {
+        "name": "combinations per write",
+        "tooltip": "The number of random combinations that the compressed measurement uses per write. A write costs two passes per combination. 0: unchanged. The default is 8."
+      },
+      "edits": {
+        "name": "правки",
+        "tooltip": "Правки меняют центральную матрицу и силу каждой LoRA по слоям, а также слагаемые пакетов. Исходные файлы никогда не записываются. off точно восстанавливает импортированные LoRA. unchanged сохраняет текущий выбор."
+      },
+      "measure_samples": {
+        "name": "samples per write measurement",
+        "tooltip": "Samples per write measurement: the same noise and timesteps for every trial. More samples measure more steadily and cost more time. 1 = one sample at the middle timestep."
+      },
+      "learn": {
+        "name": "сигнал обучения",
+        "tooltip": "Как учится запись. measure: измеряет наклоны дополнительными прямыми проходами (по умолчанию). prediction: решает изменение в замкнутой форме по ошибкам предсказания, записанным при генерации, без измерительного прохода; проверка выполняется при следующей генерации. unchanged сохраняет текущий выбор."
+      }
+    }
+  },
+  "KiLoRALivePacks": {
+    "display_name": "KiLoRA Live: пакеты редактора",
+    "description": "Показывает установленные пакеты редактора, включает и выключает пакеты и показывает пакеты загруженного сохранения.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "Модель из KiLoRA Загрузить мод или KiLoRA Применить список модов, с живым модом."
+      },
+      "mod": {
+        "name": "мод",
+        "tooltip": "ID живого мода. Оставьте пустым, если загружен только один."
+      },
+      "packs": {
+        "name": "пакеты",
+        "tooltip": "auto: общий пакет и пакет семейства мода. common only: только общий пакет. pinned: версии пакетов загруженного сохранения."
+      },
+      "turned_off": {
+        "name": "выключены",
+        "tooltip": "ID пакетов, которые нужно выключить, через запятую."
+      },
+      "editor_kind": {
+        "name": "редактор",
+        "tooltip": "Редактор пакетов. Оставьте пустым, если установлены пакеты только одного редактора."
+      },
+      "measurement": {
+        "name": "измерение",
+        "tooltip": "Как редактор измеряет каждое направление. central: два прохода, точнее. one-sided: один проход и общий базовый проход, быстрее. unchanged: оставить текущий выбор."
+      },
+      "time_bins": {
+        "name": "временные интервалы",
+        "tooltip": "Число уровней шума, на которых измеряет редактор: 1 или 2. unchanged: оставить текущий выбор."
+      },
+      "families": {
+        "name": "families",
+        "tooltip": "Optional. Family packs to use next to the common pack, as a comma list of family names (for example ink_line). Empty: auto takes the mod's family pack, or all installed family packs."
+      },
+      "path_merge": {
+        "name": "объединение путей",
+        "tooltip": "Объединять наблюдаемые пути экспертов в состоянии редактора. По умолчанию включено. unchanged сохраняет текущий выбор."
+      },
+      "path_angle": {
+        "name": "path rotation angle",
+        "tooltip": "Rotation angle in radians for editor path merging. Default: 0.05."
+      },
+      "cross_layer": {
+        "name": "cross-layer links",
+        "tooltip": "Use recorded links in the path merge. Off by default. unchanged keeps the current choice."
+      },
+      "keep_merge_pairs": {
+        "name": "keep merge pairs",
+        "tooltip": "Keep before and after coefficients for up to 32 merges per branch. Off by default."
+      },
+      "merge_residual": {
+        "name": "merge residual",
+        "tooltip": "Keep the part outside the direction set, or drop it. Default: keep."
+      },
+      "term_budget": {
+        "name": "term budget",
+        "tooltip": "Compact a node after its term count exceeds this number. Default: 64."
+      },
+      "explore": {
+        "name": "explore",
+        "tooltip": "Favor less-used directions in inspiration draws. Zero turns this off. Explore draws keep no path-merge residuals, even with merge residual set to keep."
+      }
+    }
+  },
+  "KiLoRAFreeze": {
+    "display_name": "KiLoRA Живой режим: закрепить как статический мод",
+    "description": "Сохраняет текущее состояние живого мода как новый статический мод.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "Модель из KiLoRA Загрузить мод или KiLoRA Применить список модов, с живым модом."
+      },
+      "mod": {
+        "name": "мод",
+        "tooltip": "ID живого мода. Оставьте пустым, если загружен только один."
+      },
+      "new_id": {
+        "name": "новый ID",
+        "tooltip": "ID нового мода. Строчные буквы, цифры, точка, подчёркивание или дефис."
+      }
+    }
+  },
+  "KiLoRAModInfo": {
+    "display_name": "KiLoRA Сведения о моде",
+    "description": "Показывает советы автора: сила, ключевые слова, пример промпта и глубина.",
+    "inputs": {
+      "file": {
+        "name": "файл",
+        "tooltip": "Файл мода KiLoRA из models/kilora."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "сила",
+        "tooltip": "Рекомендуемая сила. Подключите к входу силы."
+      },
+      "1": {
+        "name": "триггерные слова",
+        "tooltip": "Триггерные слова. Добавьте их в промпт."
+      },
+      "2": {
+        "name": "пример промпта",
+        "tooltip": "Пример промпта от автора."
+      },
+      "3": {
+        "name": "глубина",
+        "tooltip": "Рекомендуемая глубина."
+      },
+      "4": {
+        "name": "сведения",
+        "tooltip": "Карточка мода в виде текста."
+      }
+    }
+  },
+  "KiLoRALiveExport": {
+    "display_name": "KiLoRA Живой режим: экспорт для обмена",
+    "description": "Сохраняет живой мод для обмена. По умолчанию без того, чему он научился у вас.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "Модель из KiLoRA Загрузить мод или KiLoRA Применить список модов, с живым модом."
+      },
+      "mod": {
+        "name": "мод",
+        "tooltip": "ID живого мода. Оставьте пустым, если загружен только один."
+      },
+      "include_learned_state": {
+        "name": "включить выученное",
+        "tooltip": "Выключено: поделиться модом без того, чему он научился у вас."
+      },
+      "new_id": {
+        "name": "новый ID",
+        "tooltip": "ID мода для обмена. Оставьте пустым, чтобы сохранить ID."
+      },
+      "format": {
+        "name": "format",
+        "tooltip": "Choose a KiLoRA mod or a plain LoRA export."
+      }
+    }
+  },
+  "KiLoRALoadMod": {
+    "display_name": "KiLoRA Загрузить мод",
+    "description": "Загружает мод KiLoRA в копию модели. Работает как загрузчик LoRA.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "Модель, в которую загружать. Оригинал не меняется."
+      },
+      "file": {
+        "name": "файл",
+        "tooltip": "Файл мода KiLoRA из models/kilora."
+      },
+      "strength": {
+        "name": "сила",
+        "tooltip": "1 — сила обучения. 0 выключает мод. Отрицательные значения уводят от мода."
+      },
+      "depth": {
+        "name": "глубина",
+        "tooltip": "Число проходов. -1 берёт глубину, которую советует мод."
+      },
+      "iteration": {
+        "name": "итерация",
+        "tooltip": "Как работают проходы глубины. mod: режим, выбранный модом. accumulate: каждый проход добавляет своё изменение. path: каждый проход выбирает следующего эксперта, и результат — изменение этого эксперта."
+      },
+      "routing_scope": {
+        "name": "область маршрутизации",
+        "tooltip": "Какие логиты выбирают экспертов. mod: область, сохранённая в каждом моде. token: каждый токен сам. tensor: среднее по всем токенам, один выбор для всего тензора."
+      },
+      "routing_select": {
+        "name": "выбор маршрутизации",
+        "tooltip": "Как логиты становятся весами экспертов. mod: выбор, сохранённый в каждом моде. sparsemax: веса с суммой 1, слабые эксперты на 0. top1: только лучший эксперт."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "модель",
+        "tooltip": "Модель с модами."
+      },
+      "1": {
+        "name": "отчёт",
+        "tooltip": "Что произошло, и предупреждения."
+      }
+    }
+  },
+  "KiLoRALiveRecord": {
+    "display_name": "KiLoRA Живой режим: 1. Запись (перед сэмплером)",
+    "description": "Поставьте перед сэмплером для записи live-мода или импортированных LoRA, даже без live-мода.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "Поставьте перед сэмплером для записи live-мода или импортированных LoRA, даже без live-мода."
+      },
+      "editor": {
+        "name": "редактор",
+        "tooltip": "Файл редактора живого режима (.kedit) из models/kilora, сделанный для этой базовой модели. Для импортированных LoRA выберите Imported LoRAs; live-мод и файл редактора не нужны."
+      },
+      "clip": {
+        "name": "clip",
+        "tooltip": "Текстовый энкодер. Живое измерение усредняет потерю для промпта и для пустой подписи, которую кодирует им. Без него вместо неё берётся негативный промпт сэмплера с guidance."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "модель",
+        "tooltip": "Подключите эту модель к сэмплеру."
+      },
+      "1": {
+        "name": "запись",
+        "tooltip": "Подключите к KiLoRA Живой режим: 2. Запись."
+      }
+    }
+  },
+  "KiLoRALiveWrite": {
+    "display_name": "KiLoRA Живой режим: 2. Запись (после сэмплера)",
+    "description": "Живой режим, шаг 2. Ставьте после сэмплера. Редактор обновляет живой мод. Можно отменить. Защита отклоняет запись, которая снижает следование промпту или вызывает коллапс изображения. Без CLIP на Record защита выключена.",
+    "inputs": {
+      "path": {
+        "name": "запись",
+        "tooltip": "Выход записи из KiLoRA Живой режим: 1. Запись."
+      },
+      "samples": {
+        "name": "латент",
+        "tooltip": "Латент из сэмплера. Проходит без изменений."
+      },
+      "vae": {
+        "name": "VAE",
+        "tooltip": "Необязательно. VAE для уменьшения decode-resize-encode."
+      },
+      "mask": {
+        "name": "маска",
+        "tooltip": "Белые области получают изменение, чёрные остаются как есть. Мягкие края смешиваются."
+      },
+      "region_caption": {
+        "name": "region caption",
+        "tooltip": "Optional. A caption for the marked region. It names the concept, so later generations can find it. It needs the CLIP on Record."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "латент",
+        "tooltip": "Латент из сэмплера без изменений."
+      },
+      "1": {
+        "name": "отчёт",
+        "tooltip": "Что произошло, и предупреждения."
+      }
+    }
+  },
+  "KiLoRALiveLearnFromImages": {
+    "display_name": "KiLoRA Живой режим: Обучение по изображениям",
+    "description": "Записывает общее для набора изображений в живое состояние одним коммитом в новой ветке. Каждое пятое изображение откладывается для проверки изменения. Вы несёте ответственность за права на используемые изображения.",
+    "inputs": {
+      "path": {
+        "name": "запись",
+        "tooltip": "Выход записи из KiLoRA Живой режим: 1. Запись."
+      },
+      "vae": {
+        "name": "VAE",
+        "tooltip": "VAE для кодирования изображений в латентный формат подключённой модели."
+      },
+      "cue": {
+        "name": "Ключевое слово",
+        "tooltip": "Ключевое слово, добавляемое к каждой подписи, например слово стиля."
+      },
+      "ignore_guard": {
+        "name": "Игнорировать проверку",
+        "tooltip": "Сохранить изменение, даже если потеря на отложенных изображениях растёт или дрейф выше границы. Добавляет предупреждение в отчёт."
+      },
+      "images": {
+        "name": "Изображения",
+        "tooltip": "Пакет IMAGE. Используйте изображения или папку. Вы отвечаете за права на эти изображения."
+      },
+      "captions": {
+        "name": "Подписи",
+        "tooltip": "Одна подпись на изображение, по одной в строке. Пустое поле использует только ключевое слово."
+      },
+      "folder": {
+        "name": "Папка",
+        "tooltip": "Папка изображений с необязательными одноимёнными подписями .txt. Используйте папку или изображения."
+      },
+      "clip": {
+        "name": "clip",
+        "tooltip": "Текстовый энкодер для подписей и промптов проверки дрейфа. Обязателен."
+      },
+      "mounts": {
+        "name": "Точки подключения",
+        "tooltip": "Необязательные шаблоны имён точек подключения, по одному в строке или через запятую, например transformer_blocks.1*. Меняются только подходящие. Пусто: все."
+      },
+      "t_min": {
+        "name": "t мин",
+        "tooltip": "Наименьшее время сэмплера для выборок, от 0 (последний шаг, мало шума) до 1 (первый шаг, много шума). Мало шума меняет детали и текстуру."
+      },
+      "t_max": {
+        "name": "t макс",
+        "tooltip": "Наибольшее время сэмплера для выборок, от 0 до 1. Много шума меняет композицию и общий стиль. При 0 и 1 используются все шаги."
+      },
+      "mask": {
+        "name": "маска",
+        "tooltip": "Необязательная маска области, приведённая к латентным токенам. Изменение дают только белые области; ошибка в чёрных областях обнуляется."
+      },
+      "axis": {
+        "name": "ось",
+        "tooltip": "Необязательная ось редактора. Члены дают только кадры LoRA на этой оси. all: все оси."
+      },
+      "single_image": {
+        "name": "Одно изображение",
+        "tooltip": "Учиться ровно на одном изображении. Без среднего по набору и без проверки на отложенных изображениях. Отчёт предупреждает, что результат может копировать содержимое изображения. Проверка дрейфа остаётся включённой."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "запись",
+        "tooltip": "Та же запись, для следующего узла живого режима."
+      },
+      "1": {
+        "name": "отчёт",
+        "tooltip": "Потеря на отложенных изображениях без изменения и с ним, относительный выигрыш, дрейф, норма записи, ветка и время."
+      }
+    }
+  },
+  "KiLoRARegion": {
+    "display_name": "KiLoRA Список модов: область",
+    "description": "Ограничивает моды списка маскированной областью изображения. Каждый мод выбирает экспертов по этой области. Соединяйте списки с разными масками, чтобы разместить моды в разных областях.",
+    "inputs": {
+      "sets": {
+        "name": "список модов",
+        "tooltip": "Список модов из другого узла списка. Оставьте пустым, чтобы начать новый список."
+      },
+      "mask": {
+        "name": "маска",
+        "tooltip": "Белые области получают изменение, чёрные остаются как есть. Мягкие края смешиваются."
+      },
+      "apply_to": {
+        "name": "применить к",
+        "tooltip": "весь список: каждый мод входящего списка. последний мод: только последний добавленный мод."
+      },
+      "caption": {
+        "name": "caption",
+        "tooltip": "Optional. A text encoding for this region (from CLIP Text Encode). With region captions on in KiLoRA Region Attention, the region follows this caption instead of the prompt."
+      },
+      "segs": {
+        "name": "segs",
+        "tooltip": "Optional. Regions from Impact Pack (SEGS). Their masks are joined into one mask and used as the region instead of the mask."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "список модов",
+        "tooltip": "Подключите к следующему узлу списка или к KiLoRA Применить список модов."
+      }
+    }
+  },
+  "KiLoRADepthSchedule": {
+    "display_name": "KiLoRA План глубины",
+    "description": "Задаёт глубину каждого блока, также по ходу сэмплирования, списком, пресетом или выражением. Подключите к KiLoRA Применить список модов.",
+    "inputs": {
+      "schedule": {
+        "name": "план",
+        "tooltip": "Список (одна глубина на блок, последнее значение повторяется), имя пресета или выражение с i, n, t, self, cross и mlp. Пусто: действует пресет."
+      },
+      "preset": {
+        "name": "пресет",
+        "tooltip": "Действует, если текст плана пуст. none: без плана, действует глубина."
+      },
+      "blocks": {
+        "name": "блоки",
+        "tooltip": "Число блоков в превью."
+      },
+      "preview_kind": {
+        "name": "тип слоя превью",
+        "tooltip": "Тип слоя, который показывает превью."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "план глубины",
+        "tooltip": "План. Подключите к KiLoRA Применить список модов."
+      },
+      "1": {
+        "name": "превью",
+        "tooltip": "Тепловая карта: блоки по ширине, ход сэмплирования по высоте. Чёрный — глубина 0, жёлтый — наибольшая глубина."
+      }
+    }
+  },
+  "KiLoRARegionAttention": {
+    "display_name": "KiLoRA Mod List: Region Attention",
+    "description": "Experimental. Keeps the change of each KiLoRA region inside its region. In a window of sampling after the layout forms, the tokens of a region attend less (soft) or not at all (hard) to tokens outside it. Connect it after KiLoRA Apply.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "Модель, в которую загружать. Оригинал не меняется."
+      },
+      "mode": {
+        "name": "mode",
+        "tooltip": "off: no change. soft: a region looks less at the rest of the image. hard: a region does not look at the rest of the image."
+      },
+      "strength": {
+        "name": "strength",
+        "tooltip": "How much less a region looks outside itself in soft mode. Start low: high values change the image."
+      },
+      "until": {
+        "name": "until",
+        "tooltip": "Where the window ends, as a part of the sampler steps. 0.6: the limit stops after 60% of the steps."
+      },
+      "outside_region": {
+        "name": "outside region",
+        "tooltip": "On: the area outside every region counts as one more region, so it does not look into the regions. Use it for a single region."
+      },
+      "start": {
+        "name": "start",
+        "tooltip": "Where the window starts, as a part of the sampler steps. Steps before it never change, so the layout forms freely. 0.3: after the first 30% of the steps."
+      },
+      "region_captions": {
+        "name": "region captions",
+        "tooltip": "On: regions with a caption follow their own caption in the same window of steps (regional prompting). The rest of the image follows the prompt."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "модель",
+        "tooltip": "Модель с модами."
+      },
+      "1": {
+        "name": "отчёт",
+        "tooltip": "Что произошло, и предупреждения."
+      }
+    }
+  },
+  "KiLoRASimple": {
+    "display_name": "KiLoRA Settings (Simple)",
+    "description": "KiLoRA settings with one choice: how the LoRAs mix. Connect it to the settings input of KiLoRA Apply or a KiLoRA LoRA node. The mix values: balanced: the defaults of KiLoRA Apply, with depth and routing from each mod. keep_each_strong: each token takes only its best LoRA, at full strength (routing scope token, routing select top1). subtle: one pass and one smooth blend per layer (depth 1, routing scope tensor, routing select sparsemax). stack: KiLoRA LoRA Loader does not route and gives the same output as Load LoRA. The other nodes use the balanced values for stack.",
+    "inputs": {
+      "mix": {
+        "name": "mix",
+        "tooltip": "How the LoRAs mix. balanced: the defaults of KiLoRA Apply, with depth and routing from each mod. keep_each_strong: each token takes only its best LoRA, at full strength (routing scope token, routing select top1). subtle: one pass and one smooth blend per layer (depth 1, routing scope tensor, routing select sparsemax). stack: KiLoRA LoRA Loader does not route and gives the same output as Load LoRA. The other nodes use the balanced values for stack. При balanced файлы LoRA маршрутизируются с глубиной 3 и замораживают маршрутизацию на 0,4 шагов; stack — один проход."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "settings",
+        "tooltip": "The settings. Connect them to KiLoRA Apply or a KiLoRA LoRA node."
+      }
+    }
+  },
+  "KiLoRASettings": {
+    "display_name": "KiLoRA Settings",
+    "description": "KiLoRA settings: a mix, and single values that replace the values of the mix. Connect it to the settings input of KiLoRA Apply or a KiLoRA LoRA node. Content keys default to per_expert; mix is the compatibility choice. Fused gate statistics are faster; torch reproduces images made before this release.",
+    "inputs": {
+      "mix": {
+        "name": "mix",
+        "tooltip": "How the LoRAs mix. balanced: the defaults of KiLoRA Apply, with depth and routing from each mod. keep_each_strong: each token takes only its best LoRA, at full strength (routing scope token, routing select top1). subtle: one pass and one smooth blend per layer (depth 1, routing scope tensor, routing select sparsemax). stack: KiLoRA LoRA Loader does not route and gives the same output as Load LoRA. The other nodes use the balanced values for stack. При balanced файлы LoRA маршрутизируются с глубиной 3 и замораживают маршрутизацию на 0,4 шагов; stack — один проход."
+      },
+      "depth": {
+        "name": "глубина",
+        "tooltip": "Number of passes. -2 takes the depth of the mix. -1 uses the depth that the mods recommend."
+      },
+      "iteration": {
+        "name": "итерация",
+        "tooltip": "How depth passes work. from mix: the value of the mix. mod: the mode the mod chose. accumulate: each pass adds its change. path: each pass picks the next expert, and the result is that expert's change."
+      },
+      "routing_scope": {
+        "name": "область маршрутизации",
+        "tooltip": "Which logits choose the experts. from mix: the value of the mix. mod: the scope stored in each mod. token: each token on its own. tensor: the mean over all tokens, one choice for the whole tensor."
+      },
+      "routing_select": {
+        "name": "выбор маршрутизации",
+        "tooltip": "How the logits become expert weights. from mix: the value of the mix. mod: the selection stored in each mod. sparsemax: weights that sum to 1, weak experts at 0. top1: only the best expert."
+      },
+      "depth_schedule": {
+        "name": "план глубины",
+        "tooltip": "Необязательно. KiLoRA План глубины. Заменяет глубину и план модов по умолчанию."
+      },
+      "lycoris_apply": {
+        "name": "LyCORIS apply",
+        "tooltip": "For routed LoKr and LoHa files, truncated applies the low-rank change; exact applies the whole change."
+      },
+      "candidates": {
+        "name": "Candidates",
+        "tooltip": "Choose this many experts before routing. 0 or at least the expert count uses every expert."
+      },
+      "candidate_summary": {
+        "name": "candidate summary",
+        "tooltip": "Choose content keys or leading read-map directions to select candidates."
+      },
+      "content_keys": {
+        "name": "content keys",
+        "tooltip": "per_expert (default) caches keys for each LoRA. mix is the compatibility choice. KILORA_CONTENT_KEYS overrides this setting."
+      },
+      "gate_stats": {
+        "name": "gate statistics",
+        "tooltip": "fused (default) is faster. torch reproduces images made before this release. KILORA_GATE_STATS overrides this setting."
+      },
+      "routing_features": {
+        "name": "routing features",
+        "tooltip": "Collect optional inputs for routing scores."
+      },
+      "cross_token_region": {
+        "name": "token region cross",
+        "tooltip": "Weight for the token and region routing score product."
+      },
+      "cross_token_prompt": {
+        "name": "token prompt cross",
+        "tooltip": "Weight for the token and prompt routing score product."
+      },
+      "cross_token_timestep": {
+        "name": "token timestep cross",
+        "tooltip": "Weight for the token and timestep routing score product."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "settings",
+        "tooltip": "The settings. Connect them to KiLoRA Apply or a KiLoRA LoRA node."
+      }
+    }
+  },
+  "KiLoRALoRALoader": {
+    "display_name": "KiLoRA LoRA Loader",
+    "description": "Use it in place of Load LoRA. It patches CLIP like Load LoRA. The model LoRAs of all chained KiLoRA LoRA Loaders are routed together when sampling starts. With mix set to stack, the output is the same as Load LoRA.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "Модель, в которую загружать. Оригинал не меняется."
+      },
+      "clip": {
+        "name": "clip",
+        "tooltip": "The text encoder. It gets the LoRA the same way as with Load LoRA."
+      },
+      "lora_name": {
+        "name": "файл LoRA",
+        "tooltip": "Файл LoRA из models/loras."
+      },
+      "strength_model": {
+        "name": "strength model",
+        "tooltip": "The LoRA weight on the model, as in Load LoRA. Routing keeps this strength for each LoRA."
+      },
+      "strength_clip": {
+        "name": "strength clip",
+        "tooltip": "The LoRA weight on the text encoder, as in Load LoRA."
+      },
+      "lora_stack": {
+        "name": "LoRA stack",
+        "tooltip": "Optional. More LoRAs as a list of (LoRA file, strength model, strength clip). They load before the LoRA of this node."
+      },
+      "timeline": {
+        "name": "timeline",
+        "tooltip": "Optional. Time-dependent values from KiLoRA Timeline. Without it nothing changes."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional. KiLoRA settings. Without them, the defaults apply."
+      },
+      "depth_map": {
+        "name": "depth_map",
+        "tooltip": "Необязательно. Глубина для каждой области изображения из KiLoRA Карта глубины. С её начального прогресса она заменяет глубину токенов изображения."
+      },
+      "axis_alpha": {
+        "name": "axis_alpha",
+        "tooltip": "Off is the default. Creative and IP share one budget per token. Auto blends them using previous-step trigger attention, or alpha_mask when connected."
+      },
+      "alpha_mask": {
+        "name": "alpha mask",
+        "tooltip": "Optional IP alpha mask when axis_alpha is auto. It replaces trigger maps and its edge is feathered over 16 pixels. With axis_alpha off it has no effect."
+      },
+      "expert_text": {
+        "name": "expert_text",
+        "tooltip": "Auto prepares separate text conditioning for experts in layered mode. Off keeps the shared text path."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "модель",
+        "tooltip": "The model. The LoRAs are routed when sampling starts."
+      },
+      "1": {
+        "name": "clip",
+        "tooltip": "The text encoder with the LoRA."
+      }
+    }
+  },
+  "KiLoRARouteLoaded": {
+    "display_name": "KiLoRA Route Loaded LoRAs",
+    "description": "Put it after your LoRA loaders. It takes the LoRAs that the loaders put on the model and routes them with KiLoRA. Each LoRA keeps its model strength. CLIP is not changed. If the LoRAs cannot be told apart, they stay as loaded and the report says so.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "The model after your LoRA loaders. The original model is not changed."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional. KiLoRA settings. Without them, the defaults apply."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "модель",
+        "tooltip": "The model with the loaded LoRAs routed."
+      },
+      "1": {
+        "name": "отчёт",
+        "tooltip": "Что произошло, и предупреждения."
+      }
+    }
+  },
+  "KiLoRARouteRecord": {
+    "display_name": "KiLoRA Route Record",
+    "description": "Records where each LoRA acts while the sampler runs. Connect its model to the sampler and its routes to KiLoRA Route Map.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "The model with KiLoRA routing (after KiLoRA Apply or a KiLoRA loader)."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "модель",
+        "tooltip": "The model that records the routing. Connect it to the sampler."
+      },
+      "1": {
+        "name": "routes",
+        "tooltip": "The recorded routing shares. Connect them to KiLoRA Route Map."
+      }
+    }
+  },
+  "KiLoRARouteMap": {
+    "display_name": "KiLoRA Route Map",
+    "description": "Shows where each LoRA acted in the last sampled image: one colored panel per LoRA, with a legend. Connect the routes of KiLoRA Route Record and the decoded image.",
+    "inputs": {
+      "routes": {
+        "name": "routes",
+        "tooltip": "The routes of KiLoRA Route Record."
+      },
+      "image": {
+        "name": "image",
+        "tooltip": "The decoded image of the same sampler run."
+      },
+      "labels": {
+        "name": "labels",
+        "tooltip": "The LoRA names, separated by commas, in load order. Missing names become LoRA 1, LoRA 2, and so on."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "map",
+        "tooltip": "One panel per LoRA: the image, colored where the LoRA acted. A stronger color is a larger share."
+      },
+      "1": {
+        "name": "отчёт",
+        "tooltip": "Что произошло, и предупреждения."
+      }
+    }
+  },
+  "KiLoRATokenRoles": {
+    "display_name": "KiLoRA Mod List: Token Roles",
+    "description": "Sets which tokens the mods of a mod list change in an editing workflow: the target image, the reference images or the text. Other tokens keep the base weights.",
+    "inputs": {
+      "sets": {
+        "name": "список модов",
+        "tooltip": "Список модов из другого узла списка. Оставьте пустым, чтобы начать новый список."
+      },
+      "roles": {
+        "name": "roles",
+        "tooltip": "auto: the mod's own policy, else the LoRA file's, else the target tokens when reference images are present. target: the image being made. reference: the reference images. all: every token, as without roles."
+      },
+      "apply_to": {
+        "name": "применить к",
+        "tooltip": "весь список: каждый мод входящего списка. последний мод: только последний добавленный мод."
+      },
+      "custom": {
+        "name": "custom roles",
+        "tooltip": "Optional. A role list that replaces the choice above, for example reference:0+text for the first reference image and the text."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "список модов",
+        "tooltip": "Подключите к следующему узлу списка или к KiLoRA Применить список модов."
+      }
+    }
+  },
+  "KiLoRATwoPanels": {
+    "display_name": "KiLoRA Mod List: Two Panels",
+    "description": "Marks a two-panel canvas. One panel holds the reference picture and the other is the image being made. Mods on auto roles change only the target panel. Applies to every mod of the list.",
+    "inputs": {
+      "sets": {
+        "name": "список модов",
+        "tooltip": "Список модов из другого узла списка. Оставьте пустым, чтобы начать новый список."
+      },
+      "reference_side": {
+        "name": "reference side",
+        "tooltip": "The side of the canvas that holds the reference picture."
+      },
+      "split": {
+        "name": "split",
+        "tooltip": "The part of the canvas width (left, right) or height (top, bottom) that the reference panel covers."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "список модов",
+        "tooltip": "Подключите к следующему узлу списка или к KiLoRA Применить список модов."
+      }
+    }
+  },
+  "KiLoRARegionIsolation": {
+    "display_name": "KiLoRA Mod List: Region Isolation",
+    "description": "Experimental. Keeps the area outside the KiLoRA regions as the base model makes it. In the first part of sampling, a base-only branch runs next to the sampler, and the outside follows it. Each step in that part costs one extra model call. Connect it after KiLoRA Apply.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "Модель, в которую загружать. Оригинал не меняется."
+      },
+      "strength": {
+        "name": "strength",
+        "tooltip": "How far the outside follows the base model. 1: fully, 0: off."
+      },
+      "until": {
+        "name": "until",
+        "tooltip": "The part of the sampler steps that the isolation acts in, from the start. After it, the image settles freely, so the edge can heal."
+      },
+      "feather": {
+        "name": "feather",
+        "tooltip": "The soft edge of the regions, in pixels. Larger values blend the edge over a wider band."
+      },
+      "sets": {
+        "name": "список модов",
+        "tooltip": "Optional. The mod list whose regions to isolate (the same list as on KiLoRA Apply). Without it, the regions of the list that KiLoRA Apply loaded."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "модель",
+        "tooltip": "Модель с модами."
+      },
+      "1": {
+        "name": "отчёт",
+        "tooltip": "Что произошло, и предупреждения."
+      }
+    }
+  },
+  "KiLoRATimeline": {
+    "display_name": "KiLoRA Timeline",
+    "description": "Sets one value over the run: the strength of a mod, or when it is active, for example. Chain Timeline nodes to add rows, and connect the last one to KiLoRA Apply or the LoRA loader. The preview plots every row.",
+    "inputs": {
+      "target": {
+        "name": "target",
+        "tooltip": "all, an axis (creative, functional or ip), or the file name of a mod or LoRA in the mod list, without the extension."
+      },
+      "quantity": {
+        "name": "quantity",
+        "tooltip": "What the row sets. strength multiplies the strength. active turns the mod on (1) or off (0). route_freeze and gate_kappa replace the inputs of KiLoRA Apply. The region quantities set the strength of that effect over time. depth_map and depth_base control the depth map (target all)."
+      },
+      "curve": {
+        "name": "curve",
+        "tooltip": "Keyframes such as 0:1, 0.3:0.6, 1:0.2 (position:value), or an expression with t, step, steps and sigma, for example 1 - t."
+      },
+      "clock": {
+        "name": "clock",
+        "tooltip": "What the keyframe positions mean. progress: 0 at the first step, 1 at the last. step: the step number. sigma: the noise level."
+      },
+      "interpolation": {
+        "name": "interpolation",
+        "tooltip": "linear: values blend between keyframes. step: each value holds until the next keyframe."
+      },
+      "timeline": {
+        "name": "timeline",
+        "tooltip": "Optional. Rows from another Timeline node; this node adds its rows after them."
+      },
+      "more_rows": {
+        "name": "more rows",
+        "tooltip": "Optional. More rows, one per line: target | quantity | curve, then optional | clock and | interpolation."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "timeline",
+        "tooltip": "All rows. Connect it to KiLoRA Apply or to the next Timeline node."
+      },
+      "1": {
+        "name": "превью",
+        "tooltip": "Every row over the run: progress across, value up."
+      }
+    }
+  },
+  "KiLoRADepthMap": {
+    "display_name": "KiLoRA Карта глубины",
+    "description": "Глубина для каждой области изображения из маски (SAM2 и другие сегментаторы) или изображения (его яркость: карты глубины, lineart или позы от препроцессоров ControlNet). До start каждая область работает с одной глубиной, поэтому композиция складывается как обычно. Затем каждая область работает со своей глубиной. Подключите к KiLoRA Apply или KiLoRA LoRA Loader.",
+    "inputs": {
+      "min_depth": {
+        "name": "min_depth",
+        "tooltip": "Глубина там, где карта равна 0 (чёрный)."
+      },
+      "max_depth": {
+        "name": "max_depth",
+        "tooltip": "Глубина там, где карта равна 1 (белый)."
+      },
+      "invert": {
+        "name": "invert",
+        "tooltip": "Меняет местами чёрный и белый перед заданием глубин."
+      },
+      "gamma": {
+        "name": "gamma",
+        "tooltip": "Формирует карту перед заданием глубин: выше 1 больше остаётся около min_depth, ниже 1 около max_depth."
+      },
+      "feather": {
+        "name": "feather",
+        "tooltip": "Мягкий край карты в пикселях. Мягкий край убирает видимый шов между глубинами."
+      },
+      "start": {
+        "name": "start",
+        "tooltip": "Прогресс сэмплирования, с которого действует карта (0,3: после 30% шагов). До него каждая область работает с base, поэтому композиция остаётся как с одной глубиной."
+      },
+      "base": {
+        "name": "base",
+        "tooltip": "Глубина каждой области до start и текстовых токенов. -1: средняя глубина карты, округлённая."
+      },
+      "mask": {
+        "name": "маска",
+        "tooltip": "Маска, например от SAM2. 1 даёт max_depth. Если подключено и изображение, используется маска."
+      },
+      "image": {
+        "name": "image",
+        "tooltip": "Изображение. Его яркость и есть карта, например выход препроцессора глубины, lineart или позы."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "карта глубины",
+        "tooltip": "Карта глубины. Подключите её ко входу depth_map в KiLoRA Apply или KiLoRA LoRA Loader."
+      },
+      "1": {
+        "name": "превью",
+        "tooltip": "Карта как изображение: чёрный — min_depth, белый — max_depth."
+      }
+    }
+  },
+  "KiLoRALayerConditioning": {
+    "display_name": "KiLoRA Layer",
+    "description": "Selects the axes for this conditioning and sets its mask.",
+    "inputs": {
+      "conditioning": {
+        "name": "conditioning",
+        "tooltip": "The conditioning for this layer."
+      },
+      "layer": {
+        "name": "layer",
+        "tooltip": "The axis for this layer. creative also runs functional."
+      },
+      "mask": {
+        "name": "маска",
+        "tooltip": "Optional mask for this layer."
+      },
+      "alpha_source": {
+        "name": "alpha source",
+        "tooltip": "mask uses the connected mask. attention uses the previous step’s trigger maps for IP and the complement for creative."
+      },
+      "feather": {
+        "name": "feather",
+        "tooltip": "The soft edge of the regions, in pixels. Larger values blend the edge over a wider band."
+      },
+      "crop": {
+        "name": "crop",
+        "tooltip": "off: the whole image. auto: faster, crops the late steps with surrounding context."
+      },
+      "batch": {
+        "name": "batch",
+        "tooltip": "Run this layer in one batched model call with the other layers. Off: each layer runs as its own call, which is exact and at 1024 pixels faster. Turn it on for all layers to batch them."
+      },
+      "compose": {
+        "name": "compose",
+        "tooltip": "separate: each layer runs as its own model call. single: all layers run in one model call per guidance branch, and each image area reads its own layer text. Select single on every layer. The crop input is not used with single."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "conditioning",
+        "tooltip": "Conditioning for this layer."
+      }
+    }
+  },
+  "KiLoRALayerFilter": {
+    "display_name": "KiLoRA Layer Filter",
+    "description": "Limit added model function patches to one layer. Weight and object patches remain global.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "The model after the plugin."
+      },
+      "before": {
+        "name": "before",
+        "tooltip": "The model before the plugin."
+      },
+      "layer": {
+        "name": "layer",
+        "tooltip": "The layer where the plugin runs."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "модель",
+        "tooltip": "Модель с модами."
+      },
+      "1": {
+        "name": "отчёт",
+        "tooltip": "Что произошло, и предупреждения."
+      }
+    }
+  },
+  "KiLoRASaveRecipe": {
+    "display_name": "KiLoRA Save Recipe",
+    "description": "Saves a mod list and settings as references without copying the weights.",
+    "inputs": {
+      "sets": {
+        "name": "список модов",
+        "tooltip": "The mod list to save."
+      },
+      "filename": {
+        "name": "имя файла",
+        "tooltip": "The name of the recipe file."
+      },
+      "name": {
+        "name": "имя",
+        "tooltip": "The name shown for the recipe."
+      },
+      "license": {
+        "name": "license",
+        "tooltip": "The license for the recipe."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional settings to save with the recipe."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "отчёт",
+        "tooltip": "Что произошло, и предупреждения."
+      }
+    }
+  },
+  "KiLoRADirectionNodes": {
+    "display_name": "KiLoRA Direction Nodes",
+    "description": "Add direction nodes from a stored library basis or one complete direction file.",
+    "inputs": {
+      "strength": {
+        "name": "сила",
+        "tooltip": "Strength of the direction nodes."
+      },
+      "chunk": {
+        "name": "chunk",
+        "tooltip": "Number of output directions per node."
+      },
+      "sets": {
+        "name": "список модов",
+        "tooltip": "Список модов из другого узла списка. Оставьте пустым, чтобы начать новый список."
+      },
+      "library_path": {
+        "name": "library path",
+        "tooltip": "Library index folder; empty uses the default."
+      },
+      "fine": {
+        "name": "Fine mode",
+        "tooltip": "Allow up to 64 depth steps for direction nodes."
+      },
+      "candidates": {
+        "name": "Candidates",
+        "tooltip": "Maximum direction nodes scored per token in fine mode."
+      },
+      "direction_file": {
+        "name": "Direction file",
+        "tooltip": "Optional path to a LoRA direction file with kilora_directions metadata. When set, use one node with the full saved change at each mount. Library path, chunk, fine and candidates apply only to the library basis."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "список модов",
+        "tooltip": "Подключите к следующему узлу списка или к KiLoRA Применить список модов."
+      }
+    }
+  },
+  "KiLoRALoRALibrary": {
+    "display_name": "KiLoRA LoRA Library",
+    "description": "Select LoRAs at the first sampling step and save a recipe.",
+    "inputs": {
+      "model": {
+        "name": "модель",
+        "tooltip": "Модель, в которую загружать. Оригинал не меняется."
+      },
+      "folders": {
+        "name": "folders",
+        "tooltip": "One LoRA folder path per line."
+      },
+      "prompt": {
+        "name": "prompt",
+        "tooltip": "Text used to find matching LoRAs."
+      },
+      "count": {
+        "name": "count",
+        "tooltip": "Maximum number of LoRAs to select."
+      },
+      "strength": {
+        "name": "сила",
+        "tooltip": "Strength of each selected LoRA."
+      },
+      "seed": {
+        "name": "seed",
+        "tooltip": "Seed for selection."
+      },
+      "min_relevance": {
+        "name": "min relevance",
+        "tooltip": "Minimum relevance score."
+      },
+      "include_tags": {
+        "name": "include tags",
+        "tooltip": "Include tags, separated by commas."
+      },
+      "exclude_tags": {
+        "name": "exclude tags",
+        "tooltip": "Exclude tags, separated by commas."
+      },
+      "clip": {
+        "name": "clip",
+        "tooltip": "Optional text encoder for selection."
+      },
+      "mask_a": {
+        "name": "маска a",
+        "tooltip": "Необязательно. Область записей с областью a."
+      },
+      "mask_b": {
+        "name": "маска b",
+        "tooltip": "Необязательно. Область записей с областью b."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "модель",
+        "tooltip": "Модель с модами."
+      },
+      "1": {
+        "name": "отчёт",
+        "tooltip": "Что произошло, и предупреждения."
+      },
+      "2": {
+        "name": "recipe",
+        "tooltip": "Path of the recipe written after the first sampling step."
+      }
+    }
+  },
+  "KiLoRASimilarLoRAs": {
+    "display_name": "KiLoRA Similar LoRAs",
+    "description": "Find installed LoRAs with similar content features in the same base family.",
+    "inputs": {
+      "lora": {
+        "name": "файл LoRA",
+        "tooltip": "Файл LoRA из models/loras."
+      },
+      "count": {
+        "name": "Count",
+        "tooltip": "Maximum number of similar LoRAs to list."
+      },
+      "similar_space": {
+        "name": "similarity space",
+        "tooltip": "Compare pooled content keys or vectors from a trained model."
+      },
+      "model_path": {
+        "name": "embedding model path",
+        "tooltip": "Path to a saved LayerChain model directory. The library basis must match the basis used to train it."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "отчёт",
+        "tooltip": "Что произошло, и предупреждения."
+      }
+    }
+  },
+  "KiLoRAPrepareLoRAs": {
+    "display_name": "KiLoRA Подготовить LoRA",
+    "description": "Подготавливает поддерживаемые файлы LoRA и ключи маршрутизации. Подключите модель для подготовки набора в указанном порядке.",
+    "inputs": {
+      "paths": {
+        "name": "файлы или папки",
+        "tooltip": "Один путь в строке относительно папки LoRA. Пустое поле выбирает все файлы."
+      },
+      "model": {
+        "name": "модель",
+        "tooltip": "Необязательная модель для подготовки ключей для этой модели и этого набора."
+      },
+      "family": {
+        "name": "Семейство",
+        "tooltip": "Необязательное семейство модели для подготовки файлов без модели."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "отчёт",
+        "tooltip": "Что произошло, и предупреждения."
+      }
+    }
+  },
+  "KiLoRAMentionPrompt": {
+    "display_name": "KiLoRA Промпт с упоминаниями",
+    "description": "Кодирует промпт, в котором @name вызывает LoRA из библиотеки. Упоминания удаляются до текстового энкодера и добавляются в список модов.",
+    "inputs": {
+      "clip": {
+        "name": "clip",
+        "tooltip": "Текстовый энкодер."
+      },
+      "text": {
+        "name": "текст",
+        "tooltip": "Промпт. Напишите @name или @name:0.5, чтобы вызвать файл LoRA по имени файла. Без значения сила равна 0.7."
+      },
+      "sets": {
+        "name": "список модов",
+        "tooltip": "Необязательно. Упомянутые LoRA добавляются в этот список модов."
+      },
+      "layer": {
+        "name": "layer",
+        "tooltip": "global: упомянутые LoRA используют свою ось. Ось: упомянутые LoRA следуют маске этого слоя."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "conditioning",
+        "tooltip": "Conditioning текста без упоминаний."
+      },
+      "1": {
+        "name": "список модов",
+        "tooltip": "Список модов с одной записью на каждое упоминание. Подключите его к KiLoRA Apply Mod List."
+      },
+      "2": {
+        "name": "отчёт",
+        "tooltip": "Какой файл использует каждое упоминание и какие триггерные слова добавлены в промпт."
+      }
+    }
+  },
+  "KiLoRAPromptSet": {
+    "display_name": "KiLoRA Prompt Set",
+    "description": "Build prompt pairs from subjects, style and cue, or JSON. Chain nodes to add concepts.",
+    "inputs": {
+      "subjects": {
+        "name": "Subjects",
+        "tooltip": "One subject per line. An LLM node can supply this text."
+      },
+      "style": {
+        "name": "Style",
+        "tooltip": "Full style description used by the target prompt."
+      },
+      "cue": {
+        "name": "Cue",
+        "tooltip": "Short cue in the student prompt and the exported trigger words."
+      },
+      "label": {
+        "name": "Concept label",
+        "tooltip": "Letters, numbers, underscores or dashes. Used in the output filename."
+      },
+      "json": {
+        "name": "Prompt set JSON",
+        "tooltip": "Optional JSON concepts or explicit pairs. Overrides the text fields."
+      },
+      "prompt_set": {
+        "name": "Prompt set",
+        "tooltip": "Concepts and prompt pairs. Chain Prompt Set nodes to add concepts."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Prompt set",
+        "tooltip": "Validated concepts and prompt pairs."
+      },
+      "1": {
+        "name": "Report",
+        "tooltip": "Concept labels and pair counts."
+      }
+    }
+  },
+  "KiLoRASolveFromPrompts": {
+    "display_name": "KiLoRA Solve LoRA From Prompts",
+    "description": "Solve plain LoRAs from prompt sets with the connected model and CLIP. Files go to models/loras/kilora-solved/.",
+    "inputs": {
+      "model": {
+        "name": "Model",
+        "tooltip": "Base model used for sampling and fitting the LoRA."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "Text encoder for target, student and negative prompts."
+      },
+      "prompt_set": {
+        "name": "Prompt set",
+        "tooltip": "Concepts and prompt pairs. Chain Prompt Set nodes to add concepts."
+      },
+      "name": {
+        "name": "Name",
+        "tooltip": "Output file stem. Batch sets with one shared name receive numbered stems."
+      },
+      "mode": {
+        "name": "Mode",
+        "tooltip": "single writes one LoRA per concept; joint fits all concepts into one LoRA."
+      },
+      "rank": {
+        "name": "Rank",
+        "tooltip": "Rank of each fitted projection. Default 16."
+      },
+      "steps": {
+        "name": "Steps",
+        "tooltip": "Target trajectory steps. 0 uses the model family's default."
+      },
+      "size": {
+        "name": "Size",
+        "tooltip": "Square image size in pixels, a multiple of 16. 0 uses the model family's default."
+      },
+      "cfg": {
+        "name": "CFG",
+        "tooltip": "Guidance strength of the target trajectories. -1 uses the model family's default."
+      },
+      "seeds": {
+        "name": "Seeds",
+        "tooltip": "Space- or comma-separated integers. Default 811 1811."
+      },
+      "negative_prompt": {
+        "name": "Negative prompt",
+        "tooltip": "Negative conditioning for the target trajectories."
+      },
+      "overwrite": {
+        "name": "Overwrite",
+        "tooltip": "Заменить существующий файл с тем же именем. Иначе использовать совпадающий файл повторно, а новые входные данные сохранить под именем с коротким хешем."
+      },
+      "output": {
+        "name": "Output",
+        "tooltip": "lora writes plain LoRAs; kmod writes KiLoRA mods; both lists both formats."
+      },
+      "sets": {
+        "name": "Mod list",
+        "tooltip": "Append solved files at strength 0.7 to this mod list."
+      },
+      "preview": {
+        "name": "Preview",
+        "tooltip": "The first image is stored as the preview in each solved mod."
+      },
+      "overlap_penalty": {
+        "name": "Штраф перекрытия",
+        "tooltip": "0 выключает. При нескольких концептах в режиме single каждый концепт решается ещё раз со штрафом на входные направления других концептов. Большие значения уменьшают перекрытие."
+      },
+      "deflate": {
+        "name": "Дефляция",
+        "tooltip": "По умолчанию выключена. В режиме single концепты решаются по порядку. Каждый следующий концепт подгоняет свою цель минус изменения предыдущих концептов."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Paths",
+        "tooltip": "One completed LoRA path per line."
+      },
+      "1": {
+        "name": "Mod list",
+        "tooltip": "Solved LoRAs imported at strength 0.7, ready for KiLoRA Apply."
+      },
+      "2": {
+        "name": "Report",
+        "tooltip": "Memory estimate, written files and reused files."
+      }
+    }
+  },
+  "KiLoRASolveFromImages": {
+    "display_name": "KiLoRA Решить LoRA по изображениям",
+    "description": "Создаёт LoRA с общим видом не менее трёх изображений, например стиля. Набор, не прошедший проверку на отложенных изображениях, не сохраняется. Файлы: models/loras/kilora-solved/. Вы отвечаете за права на используемые изображения.",
+    "inputs": {
+      "model": {
+        "name": "Model",
+        "tooltip": "Base model used for sampling and fitting the LoRA."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "Text encoder for target, student and negative prompts."
+      },
+      "vae": {
+        "name": "VAE",
+        "tooltip": "VAE для кодирования изображений в латентный формат подключённой модели."
+      },
+      "name": {
+        "name": "Имя",
+        "tooltip": "Имя файла без расширения: буквы, цифры, подчёркивания или дефисы."
+      },
+      "cue": {
+        "name": "Ключевое слово",
+        "tooltip": "Добавляется к каждой подписи с обеих сторон и сохраняется как триггер LoRA."
+      },
+      "rank": {
+        "name": "Rank",
+        "tooltip": "Rank of each fitted projection. Default 16."
+      },
+      "steps": {
+        "name": "Steps",
+        "tooltip": "Target trajectory steps. 0 uses the model family's default."
+      },
+      "cfg": {
+        "name": "CFG",
+        "tooltip": "Guidance strength of the target trajectories. -1 uses the model family's default."
+      },
+      "size": {
+        "name": "Size",
+        "tooltip": "Square image size in pixels, a multiple of 16. 0 uses the model family's default."
+      },
+      "seeds": {
+        "name": "Seeds",
+        "tooltip": "Space- or comma-separated integers. Default 811 1811."
+      },
+      "ignore_guard": {
+        "name": "Игнорировать проверку",
+        "tooltip": "Сохранить, даже если ошибка шумоподавления на отложенных изображениях не уменьшилась. В отчёте появится предупреждение."
+      },
+      "overwrite": {
+        "name": "Overwrite",
+        "tooltip": "Заменить существующий файл с тем же именем. Иначе использовать совпадающий файл повторно, а новые входные данные сохранить под именем с коротким хешем."
+      },
+      "images": {
+        "name": "Изображения",
+        "tooltip": "Пакет IMAGE. Используйте изображения или папку. Вы отвечаете за права на эти изображения."
+      },
+      "captions": {
+        "name": "Подписи",
+        "tooltip": "Одна подпись на изображение, по одной в строке. Пустое поле использует только ключевое слово."
+      },
+      "folder": {
+        "name": "Папка",
+        "tooltip": "Папка изображений с необязательными одноимёнными подписями .txt. Используйте папку или изображения."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Paths",
+        "tooltip": "One completed LoRA path per line."
+      },
+      "1": {
+        "name": "Mod list",
+        "tooltip": "Solved LoRAs imported at strength 0.7, ready for KiLoRA Apply."
+      },
+      "2": {
+        "name": "Report",
+        "tooltip": "Число изображений и отложенных примеров, время, обе ошибки проверки, относительное улучшение и путь сохранения или повторного использования."
+      }
+    }
+  },
+  "KiLoRAPack": {
+    "display_name": "KiLoRA Pack",
+    "description": "Bundle mods into models/kilora/<name>.kpack.json. Copy the pack and mods into one folder for sharing.",
+    "inputs": {
+      "mods": {
+        "name": "Mods",
+        "tooltip": "One mod filename or path per line. Accepts solve paths; plain LoRA lines are ignored."
+      },
+      "name": {
+        "name": "Name",
+        "tooltip": "Pack name and filename stem."
+      },
+      "strength": {
+        "name": "Strength",
+        "tooltip": "Strength for every mod entry. Default 0.7."
+      },
+      "depth": {
+        "name": "Depth",
+        "tooltip": "-1 uses the mod settings; zero or greater stores a pack depth."
+      },
+      "copy_mods": {
+        "name": "Copy mods",
+        "tooltip": "Copy the mods and pack into models/kilora/<name>/ for sharing."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Pack path",
+        "tooltip": "Saved .kpack.json file. Load it with KiLoRA Palette."
+      },
+      "1": {
+        "name": "Report",
+        "tooltip": "Each mod ID, version, cue and preview availability."
+      }
+    }
+  },
+  "KiLoRABuildEditorPack": {
+    "display_name": "KiLoRA Live: Build Editor Pack",
+    "description": "Build editor packs for live mode from the connected model and CLIP. The packs go to models/kilora/<name>/. Needs the plugin kilora-editor-chunk.",
+    "inputs": {
+      "model": {
+        "name": "Model",
+        "tooltip": "The base model. With one live mod on it, the packs are for that mod. Without a live mod, they are for the base model."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "The text encoder of the model. It encodes each prompt and the empty caption."
+      },
+      "name": {
+        "name": "Name",
+        "tooltip": "The folder name in models/kilora. A new build with the same name replaces the folder."
+      },
+      "prompts": {
+        "name": "Prompts",
+        "tooltip": "JSON that maps each family name to a list of prompts. A family name that starts with _ adds to the common pack only."
+      },
+      "base_family": {
+        "name": "Base family",
+        "tooltip": "The base model family. auto uses the family of the loaded model."
+      },
+      "draws": {
+        "name": "Noise draws",
+        "tooltip": "Noise draws per prompt and caption. More draws give smoother directions and take longer."
+      },
+      "common": {
+        "name": "Common directions",
+        "tooltip": "The number of directions in the common pack."
+      },
+      "family": {
+        "name": "Family directions",
+        "tooltip": "The number of directions in each family pack."
+      },
+      "loras": {
+        "name": "LoRAs",
+        "tooltip": "LoRA files from models/loras that are applied while the packs are built. One name per line, optionally name:strength."
+      },
+      "orthogonalize": {
+        "name": "Orthogonalize",
+        "tooltip": "Remove the common directions and the earlier family packs from each family pack."
+      },
+      "size": {
+        "name": "Size",
+        "tooltip": "Image size in pixels. 0 uses the default of the base family."
+      },
+      "steps": {
+        "name": "Steps",
+        "tooltip": "Sampler steps per image. 0 uses the default of the base family."
+      },
+      "seed": {
+        "name": "Seed",
+        "tooltip": "The first seed of the images and noise draws."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Pack folder",
+        "tooltip": "The folder with the packs and the editor file. KiLoRA Live Packs finds the packs there."
+      },
+      "1": {
+        "name": "Report",
+        "tooltip": "Packs, directions per pack, events, seconds and the memory estimate."
+      }
+    }
+  }
+}

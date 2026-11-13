@@ -1,0 +1,48 @@
+{
+  "name": "iterate.path_add",
+  "part": "iterate",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "base": {
+      "axes": [
+        "batch",
+        "tokens",
+        "out"
+      ],
+      "dtype": "float32"
+    },
+    "delta": {
+      "axes": [
+        "batch",
+        "tokens",
+        "out"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "output": {
+      "axes": [
+        "batch",
+        "tokens",
+        "out"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "add",
+      "args": [
+        "base",
+        "delta"
+      ],
+      "result": "output",
+      "attributes": {}
+    }
+  ],
+  "identity": "26dbd1814bb869059c9f264d6c6a92d24e77ecbc60a4a108672df02e392014bb"
+}

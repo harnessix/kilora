@@ -1,0 +1,387 @@
+{
+  "name": "select.tensor.sparsemax",
+  "part": "select",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "logits": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "noise": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "region": {
+      "axes": [
+        "batch",
+        "tokens"
+      ],
+      "dtype": "float32"
+    },
+    "has_region": {
+      "axes": [],
+      "dtype": "bool"
+    }
+  },
+  "outputs": {
+    "weights": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {
+    "one": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1.0
+    },
+    "one_int": {
+      "kind": "embedded",
+      "dtype": "int64",
+      "shape": [],
+      "axes": [],
+      "value": 1
+    },
+    "tiny": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1.1754943508222875e-38
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "mean",
+      "args": [
+        "logits"
+      ],
+      "result": "mean",
+      "attributes": {
+        "axis": "tokens",
+        "keep": true
+      }
+    },
+    {
+      "id": 1,
+      "op": "mul",
+      "args": [
+        "logits",
+        "region"
+      ],
+      "result": "weighted",
+      "attributes": {}
+    },
+    {
+      "id": 2,
+      "op": "sum",
+      "args": [
+        "weighted"
+      ],
+      "result": "weighted_sum",
+      "attributes": {
+        "axis": "tokens",
+        "keep": true
+      }
+    },
+    {
+      "id": 3,
+      "op": "sum",
+      "args": [
+        "region"
+      ],
+      "result": "region_sum",
+      "attributes": {
+        "axis": "tokens",
+        "keep": true
+      }
+    },
+    {
+      "id": 4,
+      "op": "clamp",
+      "args": [
+        "region_sum"
+      ],
+      "result": "denominator",
+      "attributes": {
+        "low": 1.1754943508222875e-38,
+        "high": 3.4028234663852886e+38
+      }
+    },
+    {
+      "id": 5,
+      "op": "div",
+      "args": [
+        "weighted_sum",
+        "denominator"
+      ],
+      "result": "region_mean",
+      "attributes": {}
+    },
+    {
+      "id": 6,
+      "op": "where",
+      "args": [
+        "has_region",
+        "region_mean",
+        "mean"
+      ],
+      "result": "mean_selected",
+      "attributes": {}
+    },
+    {
+      "id": 7,
+      "op": "add",
+      "args": [
+        "mean_selected",
+        "noise"
+      ],
+      "result": "noisy",
+      "attributes": {}
+    },
+    {
+      "id": 8,
+      "op": "sort",
+      "args": [
+        "noisy"
+      ],
+      "result": "sorted",
+      "attributes": {
+        "axis": "experts",
+        "descending": true
+      }
+    },
+    {
+      "id": 9,
+      "op": "scale",
+      "args": [
+        "sorted"
+      ],
+      "result": "zeros",
+      "attributes": {
+        "value": 0.0,
+        "by_strength": false
+      }
+    },
+    {
+      "id": 10,
+      "op": "add",
+      "args": [
+        "zeros",
+        "one"
+      ],
+      "result": "ones",
+      "attributes": {}
+    },
+    {
+      "id": 11,
+      "op": "cumsum",
+      "args": [
+        "ones"
+      ],
+      "result": "ranks",
+      "attributes": {
+        "axis": "experts"
+      }
+    },
+    {
+      "id": 12,
+      "op": "cumsum",
+      "args": [
+        "sorted"
+      ],
+      "result": "cumulative",
+      "attributes": {
+        "axis": "experts"
+      }
+    },
+    {
+      "id": 13,
+      "op": "mul",
+      "args": [
+        "ranks",
+        "sorted"
+      ],
+      "result": "ranked",
+      "attributes": {}
+    },
+    {
+      "id": 14,
+      "op": "add",
+      "args": [
+        "one",
+        "ranked"
+      ],
+      "result": "bound",
+      "attributes": {}
+    },
+    {
+      "id": 15,
+      "op": "gt",
+      "args": [
+        "bound",
+        "cumulative"
+      ],
+      "result": "support",
+      "attributes": {}
+    },
+    {
+      "id": 16,
+      "op": "cast",
+      "args": [
+        "support"
+      ],
+      "result": "support_int",
+      "attributes": {
+        "dtype": "int64"
+      }
+    },
+    {
+      "id": 17,
+      "op": "sum",
+      "args": [
+        "support_int"
+      ],
+      "result": "count",
+      "attributes": {
+        "axis": "experts",
+        "keep": true
+      }
+    },
+    {
+      "id": 18,
+      "op": "ge",
+      "args": [
+        "count",
+        "one_int"
+      ],
+      "result": "positive_count",
+      "attributes": {}
+    },
+    {
+      "id": 19,
+      "op": "where",
+      "args": [
+        "positive_count",
+        "count",
+        "one_int"
+      ],
+      "result": "k",
+      "attributes": {}
+    },
+    {
+      "id": 20,
+      "op": "sub",
+      "args": [
+        "k",
+        "one_int"
+      ],
+      "result": "index",
+      "attributes": {}
+    },
+    {
+      "id": 21,
+      "op": "gather",
+      "args": [
+        "cumulative",
+        "index"
+      ],
+      "result": "selected",
+      "attributes": {
+        "axis": "experts"
+      }
+    },
+    {
+      "id": 22,
+      "op": "sub",
+      "args": [
+        "selected",
+        "one"
+      ],
+      "result": "numerator",
+      "attributes": {}
+    },
+    {
+      "id": 23,
+      "op": "cast",
+      "args": [
+        "k"
+      ],
+      "result": "k_float",
+      "attributes": {
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": 24,
+      "op": "div",
+      "args": [
+        "numerator",
+        "k_float"
+      ],
+      "result": "tau",
+      "attributes": {}
+    },
+    {
+      "id": 25,
+      "op": "sub",
+      "args": [
+        "noisy",
+        "tau"
+      ],
+      "result": "unclamped",
+      "attributes": {}
+    },
+    {
+      "id": 26,
+      "op": "clamp",
+      "args": [
+        "unclamped"
+      ],
+      "result": "selected_weights",
+      "attributes": {
+        "low": 0.0,
+        "high": 3.4028234663852886e+38
+      }
+    },
+    {
+      "id": 27,
+      "op": "scale",
+      "args": [
+        "logits"
+      ],
+      "result": "broadcast_zero",
+      "attributes": {
+        "value": 0.0,
+        "by_strength": false
+      }
+    },
+    {
+      "id": 28,
+      "op": "add",
+      "args": [
+        "broadcast_zero",
+        "selected_weights"
+      ],
+      "result": "weights",
+      "attributes": {}
+    }
+  ],
+  "identity": "60546cd3a27e04be9eae10303fd2220b315439a8846b4c150ad27d5fa087d13c"
+}

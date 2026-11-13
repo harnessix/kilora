@@ -1,0 +1,207 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kilora"
+version = "0.0.9"
+description = "Keyed, iterative and composable low-rank adapters for diffusion models"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "harnessix" }]
+keywords = ["lora", "diffusion", "comfyui", "adapter", "z-image"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Environment :: GPU :: NVIDIA CUDA",
+    "Environment :: GPU",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.2",
+    "safetensors>=0.4",
+    "numpy>=1.24",
+]
+
+[project.urls]
+Repository = "https://github.com/harnessix/kilora"
+Homepage = "https://harnessix.github.io/kilora-site/"
+Documentation = "https://github.com/harnessix/kilora/tree/main/docs"
+"Bug Tracker" = "https://github.com/harnessix/kilora/issues"
+
+[project.optional-dependencies]
+diffusers = ["diffusers>=0.36"]
+dev = ["pytest>=8", "ruff>=0.6", "peft>=0.17", "pillow>=9"]
+
+[project.scripts]
+kilora = "kilora.cli:main"
+kilora-train = "kilora.train:main"
+kilora-train-editor = "kilora.trainers:editor_main"
+
+[tool.comfy]
+PublisherId = "harnessix"
+DisplayName = "KiLoRA"
+Icon = "https://harnessix.github.io/kilora-site/assets/icon.svg"
+Banner = "https://harnessix.github.io/kilora-site/assets/banner.png"
+requires-comfyui = ">=0.44.1"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kilora"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src/kilora", "/tests", "/LICENSE", "/NOTICE", "/README.md", "/pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "compat-corpus"]
+pythonpath = ["examples/editor-delta/src", "plugins/kilora-editor-chunk/src"]
+markers = [
+    "gpu: needs a GPU (CUDA or ROCm)",
+    "lora_parity: plain LoRA import parity against Diffusers",
+    "old_mod_corpus: files from earlier releases still load and match",
+    "async_live: runs live writes in the background queue",
+    "perf: timing checks, run only with KILORA_PERF=1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.isort]
+known-third-party = ["kilora_editor_delta"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402", "F401"]
+"examples/editor-delta/src/kilora_editor_delta/__init__.py" = ["F401"]
+"plugins/kilora-editor-chunk/tests/data/make_t607d_reference.py" = ["E402"]
+"plugins/kilora-editor-chunk/tests/test_chunk_plugin.py" = ["E731"]
+"plugins/kilora-editor-chunk/tests/test_cross_layer_editor.py" = ["F401", "F811"]
+"plugins/kilora-editor-chunk/tests/test_explore_draw.py" = ["F401", "F811"]
+"plugins/kilora-editor-chunk/tests/test_merge_pairs.py" = ["F401", "F811"]
+"plugins/kilora-editor-chunk/tests/test_path_merge_cost.py" = ["F401", "F811"]
+"plugins/kilora-editor-chunk/tests/test_t608b.py" = ["F401", "F811"]
+"src/kilora/__init__.py" = ["E402", "F401"]
+"src/kilora/adapter.py" = ["BLE001"]
+"src/kilora/card.py" = ["SIM118"]
+"src/kilora/check.py" = ["BLE001", "SIM118"]
+"src/kilora/comfyui/__init__.py" = ["BLE001"]
+"src/kilora/comfyui/bypass.py" = ["BLE001"]
+"src/kilora/comfyui/cuda_graphs.py" = ["BLE001"]
+"src/kilora/comfyui/live_write.py" = ["BLE001"]
+"src/kilora/comfyui/nodes.py" = ["BLE001"]
+"src/kilora/comfyui/patching.py" = ["BLE001", "F401"]
+"src/kilora/comfyui/prepare_node.py" = ["BLE001"]
+"src/kilora/comfyui/startup_prepare.py" = ["BLE001", "E731"]
+"src/kilora/compute.py" = ["BLE001"]
+"src/kilora/editor_packs.py" = ["SIM118"]
+"src/kilora/families.py" = ["SIM118"]
+"src/kilora/family_spec.py" = ["RUF012"]
+"src/kilora/fused.py" = ["SIM108"]
+"src/kilora/key_cache.py" = ["E731", "SIM118"]
+"src/kilora/live.py" = ["SIM118"]
+"src/kilora/live_queue.py" = ["BLE001", "F841", "N818"]
+"src/kilora/lora_import.py" = ["SIM118"]
+"src/kilora/modfile.py" = ["E402", "F401", "SIM118"]
+"src/kilora/multi_import.py" = ["BLE001"]
+"src/kilora/packs.py" = ["BLE001"]
+"src/kilora/prepare.py" = ["BLE001"]
+"src/kilora/program.py" = ["E402"]
+"src/kilora/quant.py" = ["SIM118"]
+"src/kilora/roles.py" = ["BLE001"]
+"src/kilora/train.py" = ["BLE001", "SIM118"]
+"tests/test_adaptive_gate.py" = ["F401", "F811"]
+"tests/test_anima.py" = ["E402"]
+"tests/test_anima_never_target.py" = ["E402"]
+"tests/test_apply_derived_cache.py" = ["F401", "F811"]
+"tests/test_attention_maps.py" = ["F401", "F811"]
+"tests/test_auto_keys.py" = ["F401", "F811"]
+"tests/test_axes.py" = ["F401", "F811"]
+"tests/test_axes_sampler.py" = ["F401", "F811"]
+"tests/test_axis_suggestion.py" = ["F401", "F811"]
+"tests/test_batch_policy.py" = ["F401", "F811"]
+"tests/test_build_pack_node.py" = ["F401", "F811"]
+"tests/test_call_context.py" = ["BLE001"]
+"tests/test_call_values.py" = ["F401", "F811"]
+"tests/test_candidate_invariance.py" = ["F401", "F811"]
+"tests/test_check.py" = ["F401", "F811", "SIM118"]
+"tests/test_chunk_regions.py" = ["F401", "F811"]
+"tests/test_comfyui_compat.py" = ["F401", "F811"]
+"tests/test_comfyui_depth.py" = ["F401", "F811"]
+"tests/test_comfyui_dropin.py" = ["E501", "F401", "F811"]
+"tests/test_comfyui_live.py" = ["F401", "F811"]
+"tests/test_comfyui_progress.py" = ["F401", "F811"]
+"tests/test_comfyui_stack.py" = ["F401", "F811"]
+"tests/test_comfyui_state_keys.py" = ["E501", "F401", "F811"]
+"tests/test_comfyui_ux.py" = ["F401", "F811"]
+"tests/test_cross_layer.py" = ["E731"]
+"tests/test_data_check.py" = ["E402"]
+"tests/test_depth_map.py" = ["F401", "F811"]
+"tests/test_diffusers.py" = ["E402"]
+"tests/test_ecosystem_files.py" = ["SIM118"]
+"tests/test_editor_independence.py" = ["F401", "F811"]
+"tests/test_editor_options.py" = ["F401", "F811"]
+"tests/test_editor_pack_nodes.py" = ["F401", "F811"]
+"tests/test_entry_window.py" = ["F401", "F811"]
+"tests/test_families.py" = ["N801"]
+"tests/test_fused.py" = ["E402"]
+"tests/test_fused_derived_state.py" = ["E402"]
+"tests/test_fused_input.py" = ["E402"]
+"tests/test_fused_token_depth.py" = ["E402"]
+"tests/test_fused_wide.py" = ["E402"]
+"tests/test_i18n.py" = ["F401", "F811"]
+"tests/test_image_parity.py" = ["E402"]
+"tests/test_image_solve_nodes.py" = ["F401", "F811"]
+"tests/test_import_defaults.py" = ["F401", "F811"]
+"tests/test_import_edit_dimensions.py" = ["E402"]
+"tests/test_input_depth.py" = ["E501"]
+"tests/test_int8_storage.py" = ["SIM118"]
+"tests/test_ir_acceptance.py" = ["F401", "F811"]
+"tests/test_ir_mods.py" = ["E731"]
+"tests/test_key_graph.py" = ["E402", "F401", "F811"]
+"tests/test_layer_batch.py" = ["E402", "F401", "F811"]
+"tests/test_layer_filter.py" = ["E731"]
+"tests/test_learned_with.py" = ["F401", "F811", "SIM118"]
+"tests/test_library_content.py" = ["F401"]
+"tests/test_library_node.py" = ["F401", "F811"]
+"tests/test_live_imports.py" = ["E402", "E731"]
+"tests/test_live_packs_e2e.py" = ["F401", "F811"]
+"tests/test_mention_prompt.py" = ["F401", "F811"]
+"tests/test_modfile.py" = ["SIM118"]
+"tests/test_node_errors.py" = ["F401", "F811"]
+"tests/test_output_chains.py" = ["E402"]
+"tests/test_pack_nodes.py" = ["F401", "F811"]
+"tests/test_package_integration.py" = ["E402", "F401", "F811"]
+"tests/test_palette.py" = ["E501", "F401", "F811"]
+"tests/test_path_width.py" = ["F401", "F811"]
+"tests/test_path_write.py" = ["F401", "F811"]
+"tests/test_prediction_cross_step.py" = ["E731"]
+"tests/test_prediction_write.py" = ["F401", "F811"]
+"tests/test_prepare_lokr.py" = ["F401", "F811"]
+"tests/test_previous_generation.py" = ["F401", "F811"]
+"tests/test_program_roundtrip.py" = ["F401", "F811"]
+"tests/test_recipe_security.py" = ["F401", "F811"]
+"tests/test_recipes.py" = ["F401", "F811"]
+"tests/test_recorder_context.py" = ["BLE001"]
+"tests/test_region_attention.py" = ["E731"]
+"tests/test_regions.py" = ["E731"]
+"tests/test_release_package.py" = ["E402", "F401", "F811"]
+"tests/test_render_showcase.py" = ["E402"]
+"tests/test_route_map.py" = ["F401", "F811"]
+"tests/test_segments.py" = ["F401", "F811"]
+"tests/test_speculate.py" = ["E731"]
+"tests/test_suggestions.py" = ["F401", "F811"]
+"tests/test_suggestions_embedding.py" = ["F401", "F811"]
+"tests/test_token_depth.py" = ["F401"]
+"tests/test_train.py" = ["E402"]
+"tests/test_train_batch.py" = ["E402"]
+"tests/test_train_presets.py" = ["E402", "F401", "F811"]
+"tests/test_undo_log.py" = ["F401", "F811"]
+"tests/test_unet_families.py" = ["E402"]
+"tests/test_usage_history.py" = ["F401", "F811"]

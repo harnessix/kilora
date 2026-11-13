@@ -1,0 +1,88 @@
+{
+  "name": "gate.mask_sample",
+  "part": "gate",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "probability": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "uniforms": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "mask": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "lt",
+      "args": [
+        "uniforms",
+        "probability"
+      ],
+      "result": "choice",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "cast",
+      "args": [
+        "choice"
+      ],
+      "result": "hard_value",
+      "attributes": {
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": 2,
+      "op": "detach",
+      "args": [
+        "probability"
+      ],
+      "result": "fixed_probability",
+      "attributes": {}
+    },
+    {
+      "id": 3,
+      "op": "sub",
+      "args": [
+        "probability",
+        "fixed_probability"
+      ],
+      "result": "surrogate",
+      "attributes": {}
+    },
+    {
+      "id": 4,
+      "op": "add",
+      "args": [
+        "hard_value",
+        "surrogate"
+      ],
+      "result": "mask",
+      "attributes": {}
+    }
+  ],
+  "identity": "5928db10bbfa96c8bdf2ef2bb015fc5e56ee0a9a6624829875313dc74a4b94b4"
+}

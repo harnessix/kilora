@@ -1,0 +1,132 @@
+{
+  "name": "iterate.gated_read",
+  "part": "iterate",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "token": {
+      "axes": [
+        "batch",
+        "tokens",
+        "r1"
+      ],
+      "dtype": "float32"
+    },
+    "change": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "up": {
+      "axes": [
+        "batch",
+        "cols",
+        "out"
+      ],
+      "dtype": "float32"
+    },
+    "channel": {
+      "axes": [
+        "batch",
+        "out"
+      ],
+      "dtype": "float32"
+    },
+    "target": {
+      "axes": [
+        "out",
+        "key"
+      ],
+      "dtype": "float32"
+    },
+    "base": {
+      "axes": [
+        "batch",
+        "tokens",
+        "key"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "result": {
+      "axes": [
+        "batch",
+        "tokens",
+        "key"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "rename_axis",
+      "args": [
+        "token"
+      ],
+      "result": "token_cols",
+      "attributes": {
+        "axis": "r1",
+        "new_axis": "cols"
+      }
+    },
+    {
+      "id": 1,
+      "op": "mul",
+      "args": [
+        "token_cols",
+        "change"
+      ],
+      "result": "masked",
+      "attributes": {}
+    },
+    {
+      "id": 2,
+      "op": "mul",
+      "args": [
+        "up",
+        "channel"
+      ],
+      "result": "up_scaled",
+      "attributes": {}
+    },
+    {
+      "id": 3,
+      "op": "matmul",
+      "args": [
+        "up_scaled",
+        "target"
+      ],
+      "result": "projection",
+      "attributes": {
+        "transpose_b": false
+      }
+    },
+    {
+      "id": 4,
+      "op": "batch_matmul",
+      "args": [
+        "masked",
+        "projection"
+      ],
+      "result": "read",
+      "attributes": {}
+    },
+    {
+      "id": 5,
+      "op": "add",
+      "args": [
+        "base",
+        "read"
+      ],
+      "result": "result",
+      "attributes": {}
+    }
+  ],
+  "identity": "62acd70ca758f7266aa91a3843893ccd9f0c38e8e6b214543c195b3979d1db2a"
+}

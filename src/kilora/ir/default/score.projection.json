@@ -1,0 +1,48 @@
+{
+  "name": "score.projection",
+  "part": "score",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "query": {
+      "axes": [
+        "batch",
+        "tokens",
+        "key"
+      ],
+      "dtype": "float32"
+    },
+    "keys": {
+      "axes": [
+        "batch",
+        "key",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "projection": {
+      "axes": [
+        "batch",
+        "tokens",
+        "cols"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "batch_matmul",
+      "args": [
+        "query",
+        "keys"
+      ],
+      "result": "projection",
+      "attributes": {}
+    }
+  ],
+  "identity": "0187ee929db6474edcc12dff672754f66036f84d798d61026d63b1c2efb2705a"
+}

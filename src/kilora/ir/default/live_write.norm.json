@@ -1,0 +1,71 @@
+{
+  "name": "live_write.norm",
+  "part": "live_write",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "raw": {
+      "axes": [
+        "cols"
+      ],
+      "dtype": "float32"
+    },
+    "total": {
+      "axes": [],
+      "dtype": "float64"
+    }
+  },
+  "outputs": {
+    "next_total": {
+      "axes": [],
+      "dtype": "float64"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "mul",
+      "args": [
+        "raw",
+        "raw"
+      ],
+      "result": "squares",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "sum",
+      "args": [
+        "squares"
+      ],
+      "result": "chunk_sum",
+      "attributes": {
+        "axis": "cols",
+        "keep": false
+      }
+    },
+    {
+      "id": 2,
+      "op": "cast",
+      "args": [
+        "chunk_sum"
+      ],
+      "result": "chunk_sum64",
+      "attributes": {
+        "dtype": "float64"
+      }
+    },
+    {
+      "id": 3,
+      "op": "add",
+      "args": [
+        "total",
+        "chunk_sum64"
+      ],
+      "result": "next_total",
+      "attributes": {}
+    }
+  ],
+  "identity": "b4b1ca24c22c480f674e794be2af2b228a418125975af5f84009c40bd8e2ea7d"
+}

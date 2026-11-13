@@ -1,0 +1,229 @@
+{
+  "name": "guard.default",
+  "part": "guard",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "gap_before": {
+      "axes": [],
+      "dtype": "float64"
+    },
+    "gap_after": {
+      "axes": [],
+      "dtype": "float64"
+    },
+    "spread_before": {
+      "axes": [],
+      "dtype": "float64"
+    },
+    "spread_after": {
+      "axes": [],
+      "dtype": "float64"
+    },
+    "noise": {
+      "axes": [],
+      "dtype": "float64"
+    },
+    "gap_drop": {
+      "axes": [],
+      "dtype": "float64"
+    },
+    "gap_noise_k": {
+      "axes": [],
+      "dtype": "float64"
+    },
+    "spread_low": {
+      "axes": [],
+      "dtype": "float64"
+    },
+    "spread_high": {
+      "axes": [],
+      "dtype": "float64"
+    }
+  },
+  "outputs": {
+    "refused": {
+      "axes": [],
+      "dtype": "bool"
+    }
+  },
+  "bindings": {
+    "zero": {
+      "kind": "embedded",
+      "dtype": "float64",
+      "shape": [],
+      "axes": [],
+      "value": 0.0
+    },
+    "one": {
+      "kind": "embedded",
+      "dtype": "float64",
+      "shape": [],
+      "axes": [],
+      "value": 1.0
+    },
+    "false": {
+      "kind": "embedded",
+      "dtype": "bool",
+      "shape": [],
+      "axes": [],
+      "value": false
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "abs",
+      "args": [
+        "gap_before"
+      ],
+      "result": "gap_abs",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "mul",
+      "args": [
+        "gap_abs",
+        "gap_drop"
+      ],
+      "result": "relative_drop",
+      "attributes": {}
+    },
+    {
+      "id": 2,
+      "op": "mul",
+      "args": [
+        "noise",
+        "gap_noise_k"
+      ],
+      "result": "noise_drop",
+      "attributes": {}
+    },
+    {
+      "id": 3,
+      "op": "gt",
+      "args": [
+        "noise_drop",
+        "relative_drop"
+      ],
+      "result": "noise_greater",
+      "attributes": {}
+    },
+    {
+      "id": 4,
+      "op": "where",
+      "args": [
+        "noise_greater",
+        "noise_drop",
+        "relative_drop"
+      ],
+      "result": "allowed_drop",
+      "attributes": {}
+    },
+    {
+      "id": 5,
+      "op": "sub",
+      "args": [
+        "gap_before",
+        "allowed_drop"
+      ],
+      "result": "gap_limit",
+      "attributes": {}
+    },
+    {
+      "id": 6,
+      "op": "ge",
+      "args": [
+        "gap_after",
+        "gap_limit"
+      ],
+      "result": "gap_ok",
+      "attributes": {}
+    },
+    {
+      "id": 7,
+      "op": "gt",
+      "args": [
+        "spread_before",
+        "zero"
+      ],
+      "result": "positive_spread",
+      "attributes": {}
+    },
+    {
+      "id": 8,
+      "op": "div",
+      "args": [
+        "spread_after",
+        "spread_before"
+      ],
+      "result": "ratio_raw",
+      "attributes": {}
+    },
+    {
+      "id": 9,
+      "op": "where",
+      "args": [
+        "positive_spread",
+        "ratio_raw",
+        "one"
+      ],
+      "result": "ratio",
+      "attributes": {}
+    },
+    {
+      "id": 10,
+      "op": "le",
+      "args": [
+        "spread_low",
+        "ratio"
+      ],
+      "result": "above_low",
+      "attributes": {}
+    },
+    {
+      "id": 11,
+      "op": "le",
+      "args": [
+        "ratio",
+        "spread_high"
+      ],
+      "result": "below_high",
+      "attributes": {}
+    },
+    {
+      "id": 12,
+      "op": "where",
+      "args": [
+        "above_low",
+        "below_high",
+        "false"
+      ],
+      "result": "spread_ok",
+      "attributes": {}
+    },
+    {
+      "id": 13,
+      "op": "where",
+      "args": [
+        "gap_ok",
+        "spread_ok",
+        "false"
+      ],
+      "result": "passed",
+      "attributes": {}
+    },
+    {
+      "id": 14,
+      "op": "eq",
+      "args": [
+        "passed",
+        "false"
+      ],
+      "result": "refused",
+      "attributes": {}
+    }
+  ],
+  "identity": "6a61048b6d23cfd5d4e58f9a181cbfbee529c3577d3e83fc38d9a8d98a20f341"
+}

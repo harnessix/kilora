@@ -1,0 +1,11 @@
+{
+    "author": "harnessix",
+    "title": "KiLoRA",
+    "id": "kilora",
+    "reference": "https://github.com/harnessix/kilora",
+    "files": [
+        "https://github.com/harnessix/kilora"
+    ],
+    "install_type": "git-clone",
+    "description": "Load and combine KiLoRA mods with signed strengths, and import plain LoRA files."
+}

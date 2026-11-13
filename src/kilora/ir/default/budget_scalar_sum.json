@@ -1,0 +1,36 @@
+{
+  "name": "budget_scalar_sum",
+  "part": "budget",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "previous": {
+      "axes": [],
+      "dtype": "float64"
+    },
+    "alpha": {
+      "axes": [],
+      "dtype": "float64"
+    }
+  },
+  "outputs": {
+    "total": {
+      "axes": [],
+      "dtype": "float64"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "add",
+      "args": [
+        "previous",
+        "alpha"
+      ],
+      "result": "total",
+      "attributes": {}
+    }
+  ],
+  "identity": "63c826351f33007bfca7015a881ad40a275d7ec625b8f8798996055507474546"
+}

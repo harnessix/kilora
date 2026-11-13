@@ -1,0 +1,291 @@
+{
+  "name": "select.tensor.top1",
+  "part": "select",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "logits": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "noise": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "region": {
+      "axes": [
+        "batch",
+        "tokens"
+      ],
+      "dtype": "float32"
+    },
+    "has_region": {
+      "axes": [],
+      "dtype": "bool"
+    }
+  },
+  "outputs": {
+    "weights": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {
+    "one": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1.0
+    },
+    "one_int": {
+      "kind": "embedded",
+      "dtype": "int64",
+      "shape": [],
+      "axes": [],
+      "value": 1
+    },
+    "tiny": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1.1754943508222875e-38
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "mean",
+      "args": [
+        "logits"
+      ],
+      "result": "mean",
+      "attributes": {
+        "axis": "tokens",
+        "keep": true
+      }
+    },
+    {
+      "id": 1,
+      "op": "mul",
+      "args": [
+        "logits",
+        "region"
+      ],
+      "result": "weighted",
+      "attributes": {}
+    },
+    {
+      "id": 2,
+      "op": "sum",
+      "args": [
+        "weighted"
+      ],
+      "result": "weighted_sum",
+      "attributes": {
+        "axis": "tokens",
+        "keep": true
+      }
+    },
+    {
+      "id": 3,
+      "op": "sum",
+      "args": [
+        "region"
+      ],
+      "result": "region_sum",
+      "attributes": {
+        "axis": "tokens",
+        "keep": true
+      }
+    },
+    {
+      "id": 4,
+      "op": "clamp",
+      "args": [
+        "region_sum"
+      ],
+      "result": "denominator",
+      "attributes": {
+        "low": 1.1754943508222875e-38,
+        "high": 3.4028234663852886e+38
+      }
+    },
+    {
+      "id": 5,
+      "op": "div",
+      "args": [
+        "weighted_sum",
+        "denominator"
+      ],
+      "result": "region_mean",
+      "attributes": {}
+    },
+    {
+      "id": 6,
+      "op": "where",
+      "args": [
+        "has_region",
+        "region_mean",
+        "mean"
+      ],
+      "result": "mean_selected",
+      "attributes": {}
+    },
+    {
+      "id": 7,
+      "op": "add",
+      "args": [
+        "mean_selected",
+        "noise"
+      ],
+      "result": "noisy",
+      "attributes": {}
+    },
+    {
+      "id": 8,
+      "op": "softmax",
+      "args": [
+        "noisy"
+      ],
+      "result": "probs",
+      "attributes": {
+        "axis": "experts"
+      }
+    },
+    {
+      "id": 9,
+      "op": "argmax",
+      "args": [
+        "noisy"
+      ],
+      "result": "choice",
+      "attributes": {
+        "axis": "experts"
+      }
+    },
+    {
+      "id": 10,
+      "op": "one_hot",
+      "args": [
+        "choice"
+      ],
+      "result": "hot_int",
+      "attributes": {
+        "axis": "experts",
+        "size_of": "logits"
+      }
+    },
+    {
+      "id": 11,
+      "op": "cast",
+      "args": [
+        "hot_int"
+      ],
+      "result": "hot",
+      "attributes": {
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": 12,
+      "op": "unsqueeze",
+      "args": [
+        "choice"
+      ],
+      "result": "choice_index",
+      "attributes": {
+        "axis": "experts",
+        "before": "tokens",
+        "after": true
+      }
+    },
+    {
+      "id": 13,
+      "op": "gather",
+      "args": [
+        "probs",
+        "choice_index"
+      ],
+      "result": "picked",
+      "attributes": {
+        "axis": "experts"
+      }
+    },
+    {
+      "id": 14,
+      "op": "add",
+      "args": [
+        "one",
+        "picked"
+      ],
+      "result": "picked_plus_one",
+      "attributes": {}
+    },
+    {
+      "id": 15,
+      "op": "detach",
+      "args": [
+        "picked"
+      ],
+      "result": "picked_detached",
+      "attributes": {}
+    },
+    {
+      "id": 16,
+      "op": "sub",
+      "args": [
+        "picked_plus_one",
+        "picked_detached"
+      ],
+      "result": "picked_weight",
+      "attributes": {}
+    },
+    {
+      "id": 17,
+      "op": "mul",
+      "args": [
+        "hot",
+        "picked_weight"
+      ],
+      "result": "selected_weights",
+      "attributes": {}
+    },
+    {
+      "id": 18,
+      "op": "scale",
+      "args": [
+        "logits"
+      ],
+      "result": "broadcast_zero",
+      "attributes": {
+        "value": 0.0,
+        "by_strength": false
+      }
+    },
+    {
+      "id": 19,
+      "op": "add",
+      "args": [
+        "broadcast_zero",
+        "selected_weights"
+      ],
+      "result": "weights",
+      "attributes": {}
+    }
+  ],
+  "identity": "f22ab559f45b18db3d64c5ed1c3321f34daf53ff05217b8ec30987422d1886f1"
+}

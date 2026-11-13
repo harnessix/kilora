@@ -1,0 +1,38 @@
+{
+  "name": "budget_scalar",
+  "part": "budget",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "alpha": {
+      "axes": [],
+      "dtype": "float64"
+    },
+    "total": {
+      "axes": [],
+      "dtype": "float64"
+    }
+  },
+  "outputs": {
+    "scale": {
+      "axes": [],
+      "dtype": "float64"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "scale",
+      "args": [
+        "alpha"
+      ],
+      "result": "scale",
+      "attributes": {
+        "value": 1.0,
+        "by_strength": false
+      }
+    }
+  ],
+  "identity": "1252b0164631ba0aff321140cc9d2cb8dbc433e8e507fdb0953c0a0cc8f8bca1"
+}

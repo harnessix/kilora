@@ -1,0 +1,42 @@
+{
+  "name": "budget",
+  "part": "budget",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "weights": {
+      "axes": [
+        "batch",
+        "tokens",
+        "axes"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "scales": {
+      "axes": [
+        "batch",
+        "tokens",
+        "axes"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "scale",
+      "args": [
+        "weights"
+      ],
+      "result": "scales",
+      "attributes": {
+        "value": 1.0,
+        "by_strength": false
+      }
+    }
+  ],
+  "identity": "1fc3a2b92cbb97d2c6242ffc5c9b9c2c5c1b8f91a021aa99852b4ef61c7a2ea3"
+}

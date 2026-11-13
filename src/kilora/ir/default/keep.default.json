@@ -1,0 +1,90 @@
+{
+  "name": "keep.default",
+  "part": "keep",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "carried": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "per"
+      ],
+      "dtype": "float32"
+    },
+    "base_scale": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "r1"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "probability": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "per"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {
+    "decay_base": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 0.5
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "abs",
+      "args": [
+        "carried"
+      ],
+      "result": "magnitude",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "rename_axis",
+      "args": [
+        "base_scale"
+      ],
+      "result": "scale_by_column",
+      "attributes": {
+        "axis": "r1",
+        "new_axis": "per"
+      }
+    },
+    {
+      "id": 2,
+      "op": "div",
+      "args": [
+        "magnitude",
+        "scale_by_column"
+      ],
+      "result": "exponent",
+      "attributes": {}
+    },
+    {
+      "id": 3,
+      "op": "pow",
+      "args": [
+        "decay_base",
+        "exponent"
+      ],
+      "result": "probability",
+      "attributes": {}
+    }
+  ],
+  "identity": "1baa991014efc546d45c3b6e2ceca983c87b8d33ae31c72cfcd77d55030378ed"
+}

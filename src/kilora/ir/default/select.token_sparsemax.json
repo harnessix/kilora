@@ -1,0 +1,268 @@
+{
+  "name": "select.token.sparsemax",
+  "part": "select",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "logits": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "noise": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "weights": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {
+    "one": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1.0
+    },
+    "one_int": {
+      "kind": "embedded",
+      "dtype": "int64",
+      "shape": [],
+      "axes": [],
+      "value": 1
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "add",
+      "args": [
+        "logits",
+        "noise"
+      ],
+      "result": "noisy",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "sort",
+      "args": [
+        "noisy"
+      ],
+      "result": "sorted",
+      "attributes": {
+        "axis": "experts",
+        "descending": true
+      }
+    },
+    {
+      "id": 2,
+      "op": "scale",
+      "args": [
+        "sorted"
+      ],
+      "result": "zeros",
+      "attributes": {
+        "value": 0.0,
+        "by_strength": false
+      }
+    },
+    {
+      "id": 3,
+      "op": "add",
+      "args": [
+        "zeros",
+        "one"
+      ],
+      "result": "ones",
+      "attributes": {}
+    },
+    {
+      "id": 4,
+      "op": "cumsum",
+      "args": [
+        "ones"
+      ],
+      "result": "ranks",
+      "attributes": {
+        "axis": "experts"
+      }
+    },
+    {
+      "id": 5,
+      "op": "cumsum",
+      "args": [
+        "sorted"
+      ],
+      "result": "cumulative",
+      "attributes": {
+        "axis": "experts"
+      }
+    },
+    {
+      "id": 6,
+      "op": "mul",
+      "args": [
+        "ranks",
+        "sorted"
+      ],
+      "result": "ranked",
+      "attributes": {}
+    },
+    {
+      "id": 7,
+      "op": "add",
+      "args": [
+        "one",
+        "ranked"
+      ],
+      "result": "bound",
+      "attributes": {}
+    },
+    {
+      "id": 8,
+      "op": "gt",
+      "args": [
+        "bound",
+        "cumulative"
+      ],
+      "result": "support",
+      "attributes": {}
+    },
+    {
+      "id": 9,
+      "op": "cast",
+      "args": [
+        "support"
+      ],
+      "result": "support_int",
+      "attributes": {
+        "dtype": "int64"
+      }
+    },
+    {
+      "id": 10,
+      "op": "sum",
+      "args": [
+        "support_int"
+      ],
+      "result": "count",
+      "attributes": {
+        "axis": "experts",
+        "keep": true
+      }
+    },
+    {
+      "id": 11,
+      "op": "ge",
+      "args": [
+        "count",
+        "one_int"
+      ],
+      "result": "positive_count",
+      "attributes": {}
+    },
+    {
+      "id": 12,
+      "op": "where",
+      "args": [
+        "positive_count",
+        "count",
+        "one_int"
+      ],
+      "result": "k",
+      "attributes": {}
+    },
+    {
+      "id": 13,
+      "op": "sub",
+      "args": [
+        "k",
+        "one_int"
+      ],
+      "result": "index",
+      "attributes": {}
+    },
+    {
+      "id": 14,
+      "op": "gather",
+      "args": [
+        "cumulative",
+        "index"
+      ],
+      "result": "selected",
+      "attributes": {
+        "axis": "experts"
+      }
+    },
+    {
+      "id": 15,
+      "op": "sub",
+      "args": [
+        "selected",
+        "one"
+      ],
+      "result": "numerator",
+      "attributes": {}
+    },
+    {
+      "id": 16,
+      "op": "cast",
+      "args": [
+        "k"
+      ],
+      "result": "k_float",
+      "attributes": {
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": 17,
+      "op": "div",
+      "args": [
+        "numerator",
+        "k_float"
+      ],
+      "result": "tau",
+      "attributes": {}
+    },
+    {
+      "id": 18,
+      "op": "sub",
+      "args": [
+        "noisy",
+        "tau"
+      ],
+      "result": "unclamped",
+      "attributes": {}
+    },
+    {
+      "id": 19,
+      "op": "clamp",
+      "args": [
+        "unclamped"
+      ],
+      "result": "weights",
+      "attributes": {
+        "low": 0.0,
+        "high": 3.4028234663852886e+38
+      }
+    }
+  ],
+  "identity": "2048acbe84e1440923af2ef132b522a37d251d1cd3f49326326ab287cfaf6bd7"
+}

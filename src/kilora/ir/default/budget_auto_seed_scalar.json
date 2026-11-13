@@ -1,0 +1,53 @@
+{
+  "name": "budget_auto_seed_scalar",
+  "part": "budget",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "previous": {
+      "axes": [],
+      "dtype": "float64"
+    },
+    "alpha": {
+      "axes": [
+        "batch",
+        "tokens"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "total": {
+      "axes": [
+        "batch",
+        "tokens"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "cast",
+      "args": [
+        "previous"
+      ],
+      "result": "converted",
+      "attributes": {
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": 1,
+      "op": "add",
+      "args": [
+        "alpha",
+        "converted"
+      ],
+      "result": "total",
+      "attributes": {}
+    }
+  ],
+  "identity": "6a4ba72b2ec2eb193742df47b2488015b057741d975a8d7811a30db6104a893f"
+}

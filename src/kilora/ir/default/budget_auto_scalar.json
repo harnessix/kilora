@@ -1,0 +1,65 @@
+{
+  "name": "budget_auto_scalar",
+  "part": "budget",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "alpha": {
+      "axes": [],
+      "dtype": "float64"
+    },
+    "total": {
+      "axes": [
+        "batch",
+        "tokens"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "scale": {
+      "axes": [
+        "batch",
+        "tokens"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "cast",
+      "args": [
+        "alpha"
+      ],
+      "result": "converted",
+      "attributes": {
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": 1,
+      "op": "scale",
+      "args": [
+        "total"
+      ],
+      "result": "zero",
+      "attributes": {
+        "value": 0.0,
+        "by_strength": false
+      }
+    },
+    {
+      "id": 2,
+      "op": "add",
+      "args": [
+        "zero",
+        "converted"
+      ],
+      "result": "scale",
+      "attributes": {}
+    }
+  ],
+  "identity": "0d21c9a70381036e7e59449f9dbf0cae5f4cffbc14f78a49f60d7505aef0549e"
+}

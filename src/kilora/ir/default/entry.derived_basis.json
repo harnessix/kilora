@@ -1,0 +1,202 @@
+{
+  "name": "entry.derived_basis",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "hooks": [],
+  "inputs": {
+    "block": {
+      "axes": [
+        "per",
+        "key"
+      ],
+      "dtype": "float32"
+    },
+    "indices": {
+      "axes": [
+        "r1"
+      ],
+      "dtype": "int64"
+    },
+    "width_indices": {
+      "axes": [
+        "r2"
+      ],
+      "dtype": "int64"
+    },
+    "max_dim": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "eps": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "limit": {
+      "axes": [],
+      "dtype": "int64"
+    },
+    "zero": {
+      "axes": [],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "basis": {
+      "axes": [
+        "r2",
+        "key"
+      ],
+      "dtype": "float32"
+    },
+    "count": {
+      "axes": [],
+      "dtype": "int64"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "svd_values",
+      "args": [
+        "block"
+      ],
+      "result": "values",
+      "attributes": {
+        "axis": "r1"
+      }
+    },
+    {
+      "id": 1,
+      "op": "svd_vh",
+      "args": [
+        "block"
+      ],
+      "result": "vh",
+      "attributes": {
+        "axis": "r1"
+      }
+    },
+    {
+      "id": 2,
+      "op": "max",
+      "args": [
+        "values"
+      ],
+      "result": "maximum",
+      "attributes": {
+        "axis": "r1",
+        "keep": false
+      }
+    },
+    {
+      "id": 3,
+      "op": "mul",
+      "args": [
+        "maximum",
+        "max_dim"
+      ],
+      "result": "scaled_max",
+      "attributes": {}
+    },
+    {
+      "id": 4,
+      "op": "mul",
+      "args": [
+        "scaled_max",
+        "eps"
+      ],
+      "result": "tol",
+      "attributes": {}
+    },
+    {
+      "id": 5,
+      "op": "gt",
+      "args": [
+        "values",
+        "tol"
+      ],
+      "result": "valid",
+      "attributes": {}
+    },
+    {
+      "id": 6,
+      "op": "cast",
+      "args": [
+        "valid"
+      ],
+      "result": "valid_int",
+      "attributes": {
+        "dtype": "int64"
+      }
+    },
+    {
+      "id": 7,
+      "op": "sum",
+      "args": [
+        "valid_int"
+      ],
+      "result": "rank",
+      "attributes": {
+        "axis": "r1",
+        "keep": false
+      }
+    },
+    {
+      "id": 8,
+      "op": "lt",
+      "args": [
+        "rank",
+        "limit"
+      ],
+      "result": "below",
+      "attributes": {}
+    },
+    {
+      "id": 9,
+      "op": "where",
+      "args": [
+        "below",
+        "rank",
+        "limit"
+      ],
+      "result": "count",
+      "attributes": {}
+    },
+    {
+      "id": 10,
+      "op": "lt",
+      "args": [
+        "indices",
+        "count"
+      ],
+      "result": "keep",
+      "attributes": {}
+    },
+    {
+      "id": 11,
+      "op": "where",
+      "args": [
+        "keep",
+        "vh",
+        "zero"
+      ],
+      "result": "masked",
+      "attributes": {}
+    },
+    {
+      "id": 12,
+      "op": "narrow",
+      "args": [
+        "masked"
+      ],
+      "result": "basis",
+      "attributes": {
+        "axis": "r1",
+        "new_axis": "r2",
+        "size_of": "width_indices"
+      }
+    }
+  ],
+  "identity": "2046c56aec1f27da8d34d33fd0167c11387bb6c1d1b10f3d5be061b8697d85df"
+}

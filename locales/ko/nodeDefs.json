@@ -1,0 +1,1951 @@
+{
+  "KiLoRASelect": {
+    "display_name": "KiLoRA 모드 목록: 모드 추가",
+    "description": "모드 목록에 모드 하나를 추가합니다. 여러 개를 연결한 뒤 목록을 KiLoRA 모드 목록 적용에 연결합니다.",
+    "inputs": {
+      "file": {
+        "name": "파일",
+        "tooltip": "models/kilora 에 있는 KiLoRA 모드 파일."
+      },
+      "strength": {
+        "name": "강도",
+        "tooltip": "1은 학습할 때의 강도입니다. 0이면 모드가 꺼집니다. 음수는 모드에서 멀어집니다."
+      },
+      "prior": {
+        "name": "라우터 선호도",
+        "tooltip": "여러 모드가 같은 층을 쓸 때 라우터가 이 모드를 고르는 정도. 1이 중립입니다."
+      },
+      "sets": {
+        "name": "모드 목록",
+        "tooltip": "다른 모드 목록 노드의 목록. 비우면 새 목록을 시작합니다."
+      },
+      "enabled": {
+        "name": "사용",
+        "tooltip": "끄면 목록에는 남지만 불러오지 않습니다."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모드 목록",
+        "tooltip": "다음 모드 목록 노드나 KiLoRA 모드 목록 적용에 연결합니다."
+      }
+    }
+  },
+  "KiLoRAImportLoRA": {
+    "display_name": "KiLoRA 모드 목록: LoRA 추가",
+    "description": "일반 LoRA 파일을 모드 목록에 추가합니다.",
+    "inputs": {
+      "lora_name": {
+        "name": "LoRA 파일",
+        "tooltip": "models/loras 에 있는 LoRA 파일."
+      },
+      "strength": {
+        "name": "강도",
+        "tooltip": "LoRA 가중치. LoRA 로더와 같습니다. KiLoRA 믹스의 권장 강도는 0.7입니다."
+      },
+      "sets": {
+        "name": "모드 목록",
+        "tooltip": "다른 모드 목록 노드의 목록. 비우면 새 목록을 시작합니다."
+      },
+      "enabled": {
+        "name": "사용",
+        "tooltip": "끄면 목록에는 남지만 불러오지 않습니다."
+      },
+      "lora_stack": {
+        "name": "LoRA stack",
+        "tooltip": "Optional. A LoRA stack: file, model strength, clip strength. Each entry is added with the model strength. When this is connected, it is used instead of the LoRA file above."
+      },
+      "axis": {
+        "name": "축",
+        "tooltip": "auto: choose the axis from LoRA metadata, trigger words, tags or file name. creative: route with creative LoRAs. functional: a plain LoRA on its own axis. ip: the character or prop axis: a plain LoRA on its own axis, and several IP LoRAs route together. shared: route with each active axis."
+      },
+      "size_norm": {
+        "name": "size norm",
+        "tooltip": "off: 주어진 강도 그대로. weight: 강도에 파일 전체에 대한 하나의 수를 곱합니다. 이 수는 줄이기만 합니다. 일반적인 라이브러리 LoRA보다 큰 파일은 그 크기로 낮춥니다. 더 약한 파일은 radial budget이 켜져 있어도 항상 자신의 크기를 유지합니다. 파일 안의 비율은 바뀌지 않습니다."
+      },
+      "start": {
+        "name": "시작",
+        "tooltip": "이 LoRA가 작동하기 시작하는 샘플링 진행도입니다(0~1, 경계 포함)."
+      },
+      "end": {
+        "name": "종료",
+        "tooltip": "이 LoRA가 작동을 멈추는 샘플링 진행도입니다(0~1, 경계 포함)."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모드 목록",
+        "tooltip": "다음 모드 목록 노드나 KiLoRA 모드 목록 적용에 연결합니다."
+      }
+    }
+  },
+  "KiLoRATriggerWords": {
+    "display_name": "KiLoRA Trigger Words",
+    "description": "Shows the trigger words of a LoRA file, from its metadata, its training tags and a Civitai sidecar.",
+    "inputs": {
+      "lora_name": {
+        "name": "LoRA 파일",
+        "tooltip": "models/loras 에 있는 LoRA 파일."
+      },
+      "lora_stack": {
+        "name": "LoRA stack",
+        "tooltip": "Optional. A LoRA stack. Trigger words of those files are added after the LoRA file above."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "트리거 단어",
+        "tooltip": "트리거 단어. 프롬프트에 추가합니다."
+      }
+    }
+  },
+  "KiLoRAPalette": {
+    "display_name": "KiLoRA 팔레트",
+    "description": "저장된 팔레트(강도, 역할, 트리거 단어가 있는 LoRA와 mod 파일)를 mod 목록으로 불러옵니다. Shuffle은 seed마다 다른 조합을 고릅니다.",
+    "inputs": {
+      "palette": {
+        "name": "팔레트",
+        "tooltip": "kilora_palettes 폴더의 팔레트 또는 models/kilora의 mod 팩."
+      },
+      "shuffle": {
+        "name": "섞기",
+        "tooltip": "켜기: seed로 팔레트 일부를 고르고 범위 안의 무작위 강도를 줍니다."
+      },
+      "pick_min": {
+        "name": "선택 최소",
+        "tooltip": "Shuffle: 고를 항목 수의 최소."
+      },
+      "pick_max": {
+        "name": "선택 최대",
+        "tooltip": "Shuffle: 고를 항목 수의 최대."
+      },
+      "strength_min": {
+        "name": "강도 최소",
+        "tooltip": "Shuffle: 고른 항목 강도의 최소."
+      },
+      "strength_max": {
+        "name": "강도 최대",
+        "tooltip": "Shuffle: 고른 항목 강도의 최대."
+      },
+      "seed": {
+        "name": "seed",
+        "tooltip": "Shuffle: 같은 seed는 같은 선택을 줍니다."
+      },
+      "sets": {
+        "name": "모드 목록",
+        "tooltip": "선택. 팔레트 항목을 이 mod 목록에 추가합니다."
+      },
+      "mask_a": {
+        "name": "마스크 a",
+        "tooltip": "선택. 영역 a 항목의 영역."
+      },
+      "mask_b": {
+        "name": "마스크 b",
+        "tooltip": "선택. 영역 b 항목의 영역."
+      },
+      "mode": {
+        "name": "mode",
+        "tooltip": "Shuffle: random picks or picks based on local counts."
+      },
+      "reset_state": {
+        "name": "reset state",
+        "tooltip": "Clear the local Shuffle counts for this palette."
+      },
+      "reward": {
+        "name": "reward",
+        "tooltip": "Learn mode: rate the seeded pick. Restore the image seed and settings, with no intervening state changes; use fixed seed, then set reward back to none."
+      },
+      "embedding_model_path": {
+        "name": "embedding model path",
+        "tooltip": "Path to the local embedding model used by Shuffle in embedding mode."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모드 목록",
+        "tooltip": "다음 모드 목록 노드나 KiLoRA 모드 목록 적용에 연결합니다."
+      },
+      "1": {
+        "name": "트리거 단어",
+        "tooltip": "불러온 항목의 트리거 단어(프롬프트용)."
+      },
+      "2": {
+        "name": "settings",
+        "tooltip": "팔레트 설정. KiLoRA Apply Mod List에 연결합니다."
+      },
+      "3": {
+        "name": "보고",
+        "tooltip": "일어난 일과 참고 사항."
+      }
+    }
+  },
+  "KiLoRASavePalette": {
+    "display_name": "KiLoRA 팔레트 저장",
+    "description": "mod 목록을 가중치 없는 팔레트 파일로 저장합니다. 예: Shuffle 선택.",
+    "inputs": {
+      "sets": {
+        "name": "모드 목록",
+        "tooltip": "저장할 mod 목록. 예: KiLoRA 팔레트의 sets 출력."
+      },
+      "name": {
+        "name": "이름",
+        "tooltip": "팔레트의 표시 이름."
+      },
+      "filename": {
+        "name": "파일 이름",
+        "tooltip": "확장자 없는 파일 이름."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "선택. 팔레트와 함께 저장할 KiLoRA Apply 설정."
+      }
+    }
+  },
+  "KiLoRASuggestions": {
+    "display_name": "KiLoRA Mod List: Suggest LoRAs",
+    "description": "Lists installed LoRAs by co-usage or embedding similarity.",
+    "inputs": {
+      "sets": {
+        "name": "모드 목록",
+        "tooltip": "The current mod list used to find related LoRAs."
+      },
+      "model_path": {
+        "name": "embedding model path",
+        "tooltip": "Path to a saved LayerChain model directory. The library basis must match the basis used to train it."
+      },
+      "suggest_by": {
+        "name": "suggest by",
+        "tooltip": "Choose co-usage, similarity, a missing direction, or similarity to kept entries. Complementary scores the uncovered embedding norm times cosine with the current mean."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "suggestions",
+        "tooltip": "Up to five installed LoRA files and their scores."
+      }
+    }
+  },
+  "KiLoRALoadOrder": {
+    "display_name": "KiLoRA 모드 목록: 확인",
+    "description": "불러오는 순서와 문제를 보여 줍니다. 모델은 바뀌지 않습니다.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "목록을 불러올 모델. 바뀌지 않습니다."
+      },
+      "sets": {
+        "name": "모드 목록",
+        "tooltip": "확인할 모드 목록."
+      },
+      "depth": {
+        "name": "깊이",
+        "tooltip": "반복 횟수. -1은 모드가 권장하는 깊이를 씁니다."
+      }
+    }
+  },
+  "KiLoRAApply": {
+    "display_name": "KiLoRA 모드 목록 적용",
+    "description": "모드 목록의 모든 모드를 모델 사본에 불러옵니다.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "불러올 모델. 원래 모델은 바뀌지 않습니다."
+      },
+      "sets": {
+        "name": "모드 목록",
+        "tooltip": "마지막 모드 목록 노드의 목록."
+      },
+      "depth": {
+        "name": "깊이",
+        "tooltip": "반복 횟수. -1은 모드가 권장하는 깊이를 씁니다."
+      },
+      "iteration": {
+        "name": "반복 방식",
+        "tooltip": "깊이 패스의 동작 방식. mod: 모드가 선택한 방식. accumulate: 각 패스가 변화를 더합니다. path: 각 패스가 다음 전문가를 고르고, 결과는 그 전문가의 변화입니다."
+      },
+      "depth_schedule": {
+        "name": "깊이 일정",
+        "tooltip": "선택 사항. KiLoRA 깊이 일정. 깊이 입력과 모드의 기본 일정을 대신합니다."
+      },
+      "routing_scope": {
+        "name": "라우팅 범위",
+        "tooltip": "어떤 로짓이 전문가를 고르는지. mod: 각 모드에 저장된 범위. token: 각 토큰이 따로. tensor: 모든 토큰의 평균으로, 텐서 전체에 하나의 선택."
+      },
+      "routing_select": {
+        "name": "라우팅 선택",
+        "tooltip": "로짓이 전문가 가중치가 되는 방식. mod: 각 모드에 저장된 선택. sparsemax: 합이 1인 가중치, 약한 전문가는 0. top1: 가장 좋은 전문가만."
+      },
+      "output_gate": {
+        "name": "출력 게이트",
+        "tooltip": "각 모드의 변화를 제한하는 방식. mod: 모드가 선택한 방식. auto: adaptive, 모드에 학습된 게이트가 있으면 both. adaptive: 각 출력 채널과 토큰은 자신의 기준 크기에 비해 크거나 방향이 바뀌는 변화를 덜 남깁니다. learned: 모드의 학습된 게이트만. both: 두 게이트의 곱. none: 게이트 없음."
+      },
+      "gate_kappa": {
+        "name": "게이트 카파",
+        "tooltip": "적응형 게이트의 스케일. 기준 크기의 카파 배인 변화는 확률 0.5로 남습니다. 값이 작을수록 더 많이 제한합니다. 0은 모드의 값을 사용합니다."
+      },
+      "path_width": {
+        "name": "경로 폭",
+        "tooltip": "경로 반복 전용. 걸음의 수: 첫 단계의 상위 전문가에서 시작하고, 각 걸음은 자신의 쿼리에서 이어집니다. 폭이 크면 첫 단계가 틀려도 올바른 전문가를 찾습니다. 0은 모드의 값을 사용합니다(기본 1: 걸음 하나)."
+      },
+      "path_select": {
+        "name": "경로 선택",
+        "tooltip": "경로 반복 전용. 각 토큰이 어떤 걸음의 결과를 고르는지. mod: 모드의 선택. converged: 고정점에 도달한 걸음이 이기고, 다음은 더 높은 경로 점수. score: 경로 점수만. mix: 경로 점수로 가중한 걸음들의 혼합."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "Optional. The text encoder layers of the mods and LoRA files apply to this CLIP, as ComfyUI's LoRA loader does. Use the clip output for the prompt."
+      },
+      "route_freeze": {
+        "name": "라우팅 고정",
+        "tooltip": "속도. 이 샘플링 진행도(0.4: 단계의 40% 이후)부터 각 층은 라우팅을 멈춥니다. 그 단계의 전문가 가중치와 게이트를 고정 스케일로 두고 저랭크 곱을 한 번만 계산하므로 일반 LoRA와 거의 같은 속도입니다. 0은 모드의 값을 사용합니다(기본은 꺼짐)."
+      },
+      "timeline": {
+        "name": "timeline",
+        "tooltip": "Optional. Time-dependent values from KiLoRA Timeline. Without it nothing changes."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional. KiLoRA settings. An input of this node that is not at its default replaces the value of the settings."
+      },
+      "depth_map": {
+        "name": "depth_map",
+        "tooltip": "선택. KiLoRA 깊이 맵에서 온 이미지 영역별 깊이. 시작 진행도부터 이미지 토큰의 깊이를 대신합니다."
+      },
+      "linear_jump": {
+        "name": "linear jump",
+        "tooltip": "Approximate later depth passes with a fitted map. Off by default; image quality can change."
+      },
+      "jump_threshold": {
+        "name": "jump residual limit",
+        "tooltip": "Maximum relative fitting error for using the approximation at a layer. Higher errors keep the full loop."
+      },
+      "axis_alpha": {
+        "name": "axis_alpha",
+        "tooltip": "Off is the default. Creative and IP share one budget per token. Auto blends them using previous-step trigger attention, or alpha_mask when connected."
+      },
+      "alpha_mask": {
+        "name": "alpha mask",
+        "tooltip": "Optional IP alpha mask when axis_alpha is auto. It replaces trigger maps and its edge is feathered over 16 pixels. With axis_alpha off it has no effect."
+      },
+      "gate_history": {
+        "name": "gate history",
+        "tooltip": "full updates the adaptive gate at every depth step. head:k fixes its keep rates after the first k steps (k must be at least 1)."
+      },
+      "expert_text": {
+        "name": "expert_text",
+        "tooltip": "Auto prepares separate text conditioning for experts in layered mode. Off keeps the shared text path."
+      },
+      "variation": {
+        "name": "variation",
+        "tooltip": "Entry sampling temperature for derived routing. Zero selects deterministically."
+      },
+      "record_history": {
+        "name": "record history",
+        "tooltip": "Record file hashes and date locally. Turn off to stop recording."
+      },
+      "candidates": {
+        "name": "Candidates",
+        "tooltip": "Choose this many experts before routing. 0 or at least the expert count uses every expert."
+      },
+      "attention_route": {
+        "name": "attention route (deprecated)",
+        "tooltip": "Deprecated and ignored. Attention projections use the same routing and depth as other mounts."
+      },
+      "attention_route_cap": {
+        "name": "attention route cap (deprecated)",
+        "tooltip": "Deprecated and ignored. Kept to preserve saved workflow widget positions."
+      },
+      "size_norm": {
+        "name": "size norm",
+        "tooltip": "off: 각 LoRA 항목은 자신의 size norm 설정을 사용합니다. weight: 체인의 모든 LoRA 항목이 파일마다 하나의 크기 수를 받습니다. 이 수는 줄이기만 합니다. 일반적인 라이브러리 LoRA보다 큰 파일은 그 크기로 낮춥니다. 더 약한 파일은 radial budget이 켜져 있어도 항상 자신의 크기를 유지합니다. 보고서는 파일마다 규칙을 표시합니다. Mod와 팩은 저장된 강도를 유지합니다."
+      },
+      "radial_step": {
+        "name": "방사 스텝",
+        "tooltip": "누적 깊이 루프. 이후 각 깊이 스텝 중 변화의 크기를 현재 방향을 따라 바꾸는 부분의 스텝 크기. 1은 그대로 더합니다. 0은 크기를 유지하고 방향만 바뀝니다. 1, 1, 예산 0이면 깊이 스텝이 이전과 같이 더해집니다. 기본값은 0.5입니다."
+      },
+      "orthogonal_step": {
+        "name": "직교 스텝",
+        "tooltip": "누적 깊이 루프. 이후 각 깊이 스텝 중 변화의 방향을 바꾸는 부분의 스텝 크기. 1은 그대로 더합니다. 0은 방향을 유지하고 크기만 바뀝니다."
+      },
+      "radial_budget": {
+        "name": "방사 예산",
+        "tooltip": "누적 깊이 루프. 방사 스텝의 크기 한도(토큰별): 첫 깊이 스텝 후 변화 크기의 이 배수. 직교 부분은 자르지 않습니다. 0은 끔."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모델",
+        "tooltip": "모드를 불러온 모델."
+      },
+      "1": {
+        "name": "보고",
+        "tooltip": "일어난 일과 참고 사항."
+      },
+      "2": {
+        "name": "clip",
+        "tooltip": "The CLIP with the text encoder layers of the mods. Without text encoder layers it is the CLIP you connected."
+      }
+    }
+  },
+  "KiLoRAClearHistory": {
+    "display_name": "KiLoRA Clear Local History",
+    "description": "Remove the local history of applied chains.",
+    "inputs": {},
+    "outputs": {
+      "0": {
+        "name": "보고",
+        "tooltip": "일어난 일과 참고 사항."
+      }
+    }
+  },
+  "KiLoRAClear": {
+    "display_name": "KiLoRA 모드 제거",
+    "description": "모델에서 모든 KiLoRA 모드를 제거합니다.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "KiLoRA 모드를 제거할 모델."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모델",
+        "tooltip": "KiLoRA 모드를 제거한 모델."
+      }
+    }
+  },
+  "KiLoRALiveSave": {
+    "display_name": "KiLoRA 라이브: 되돌리기, 초기화, 저장",
+    "description": "라이브 모드의 되돌리기, 초기화, 저장 지점, 불러오기.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "KiLoRA 모드 불러오기 또는 KiLoRA 모드 목록 적용의 모델. 라이브 모드가 들어 있어야 합니다."
+      },
+      "action": {
+        "name": "작업",
+        "tooltip": "undo: 한 단계 뒤로. reset: 처음으로 (undo로 복원). save point, load: 이름 있는 저장."
+      },
+      "name": {
+        "name": "이름",
+        "tooltip": "저장 지점의 이름."
+      },
+      "mod": {
+        "name": "모드",
+        "tooltip": "라이브 모드의 ID, 또는 all."
+      }
+    }
+  },
+  "KiLoRALiveOptions": {
+    "display_name": "KiLoRA 라이브: 설정",
+    "description": "학습을 켜거나 끄고, 학습 속도를 정합니다.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "샘플러 앞에 놓아 라이브 모드 또는 가져온 LoRA를 기록합니다. 라이브 모드가 없어도 됩니다."
+      },
+      "mod": {
+        "name": "모드",
+        "tooltip": "라이브 모드의 ID. 하나만 불러왔다면 비워 둡니다."
+      },
+      "learning": {
+        "name": "학습",
+        "tooltip": "켜기: 이미지에서 배웁니다. 끄기: 상태를 유지합니다."
+      },
+      "speed": {
+        "name": "속도",
+        "tooltip": "학습 속도. -1은 모드의 기본값을 씁니다. 값이 클수록 빨리 바뀝니다."
+      },
+      "keep_previous": {
+        "name": "이전 이미지 유지",
+        "tooltip": "on: 라이브 상태가 이전 이미지와 그 프롬프트도 유지합니다. 두 이미지를 비교하는 에디터용입니다. unchanged: 현재 설정을 유지합니다."
+      },
+      "measure_size": {
+        "name": "학습 크기(전문가)",
+        "tooltip": "전문가용. 학습이 측정하는 사본의 긴 변(픽셀): 256~4096, 16 단위로 반올림. 이미지 크기를 입력하면 원래 크기로 측정합니다(느림). 0: 변경 없음. 기본값 512."
+      },
+      "reduce_with": {
+        "name": "축소 방식",
+        "tooltip": "축소 사본을 만드는 방식. latent: 빠르고 VAE가 필요 없습니다. decode-resize-encode: 쓰기 노드의 VAE 입력이 필요합니다. unchanged: 현재 설정을 유지합니다."
+      },
+      "pin": {
+        "name": "pin",
+        "tooltip": "Keep rendering the current state while learning continues. Off follows the latest write; unchanged keeps the current setting."
+      },
+      "controller": {
+        "name": "컨트롤러",
+        "tooltip": "r1: 기본 쓰기 규칙(기본값). rprop: 부호 컨트롤러. unchanged는 현재 선택을 유지합니다."
+      },
+      "measure": {
+        "name": "measurement budget",
+        "tooltip": "How the imported editor measures its moves. compressed: a fixed number of random combinations of all moves per write, two passes each, then an estimate of every slope. full: two passes per move, slower. unchanged: keep the current choice. The default is compressed."
+      },
+      "measure_combos": {
+        "name": "combinations per write",
+        "tooltip": "The number of random combinations that the compressed measurement uses per write. A write costs two passes per combination. 0: unchanged. The default is 8."
+      },
+      "edits": {
+        "name": "편집",
+        "tooltip": "편집은 각 LoRA의 계층별 코어 행렬과 강도, 팩 항을 변경합니다. 원본 파일에는 쓰지 않습니다. off는 가져온 LoRA를 정확히 복원합니다. unchanged는 현재 선택을 유지합니다."
+      },
+      "measure_samples": {
+        "name": "samples per write measurement",
+        "tooltip": "Samples per write measurement: the same noise and timesteps for every trial. More samples measure more steadily and cost more time. 1 = one sample at the middle timestep."
+      },
+      "learn": {
+        "name": "학습 신호",
+        "tooltip": "쓰기가 학습하는 방식. measure: 추가 순전파로 기울기를 측정합니다(기본값). prediction: 생성 중 기록된 예측 오차로 측정 패스 없이 닫힌 형식으로 변경을 풉니다. 가드는 다음 생성에서 실행됩니다. unchanged는 현재 선택을 유지합니다."
+      }
+    }
+  },
+  "KiLoRALivePacks": {
+    "display_name": "KiLoRA Live: 에디터 팩",
+    "description": "설치된 에디터 팩을 보여 주고, 팩을 켜거나 끄며, 불러온 저장 파일이 사용한 팩을 보여 줍니다.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "KiLoRA 모드 불러오기 또는 KiLoRA 모드 목록 적용의 모델. 라이브 모드가 들어 있어야 합니다."
+      },
+      "mod": {
+        "name": "모드",
+        "tooltip": "라이브 모드의 ID. 하나만 불러왔다면 비워 둡니다."
+      },
+      "packs": {
+        "name": "팩",
+        "tooltip": "auto: 공통 팩과 모드 계열의 팩. common only: 공통 팩만. pinned: 불러온 저장 파일의 팩 버전."
+      },
+      "turned_off": {
+        "name": "꺼짐",
+        "tooltip": "끌 팩의 ID, 쉼표로 구분."
+      },
+      "editor_kind": {
+        "name": "에디터",
+        "tooltip": "팩의 에디터. 에디터 하나의 팩만 설치되어 있으면 비워 두세요."
+      },
+      "measurement": {
+        "name": "측정 방식",
+        "tooltip": "에디터가 각 방향을 측정하는 방식. central: 두 번의 전방 계산, 더 정확. one-sided: 한 번과 공유 기준 한 번, 더 빠름. unchanged: 현재 설정 유지."
+      },
+      "time_bins": {
+        "name": "시간 구간",
+        "tooltip": "에디터가 측정하는 노이즈 단계 수: 1 또는 2. unchanged: 현재 설정 유지."
+      },
+      "families": {
+        "name": "families",
+        "tooltip": "Optional. Family packs to use next to the common pack, as a comma list of family names (for example ink_line). Empty: auto takes the mod's family pack, or all installed family packs."
+      },
+      "path_merge": {
+        "name": "경로 병합",
+        "tooltip": "관찰된 전문가 경로를 에디터 상태에 병합합니다. 기본값은 켜짐입니다. unchanged는 현재 선택을 유지합니다."
+      },
+      "path_angle": {
+        "name": "path rotation angle",
+        "tooltip": "Rotation angle in radians for editor path merging. Default: 0.05."
+      },
+      "cross_layer": {
+        "name": "cross-layer links",
+        "tooltip": "Use recorded links in the path merge. Off by default. unchanged keeps the current choice."
+      },
+      "keep_merge_pairs": {
+        "name": "keep merge pairs",
+        "tooltip": "Keep before and after coefficients for up to 32 merges per branch. Off by default."
+      },
+      "merge_residual": {
+        "name": "merge residual",
+        "tooltip": "Keep the part outside the direction set, or drop it. Default: keep."
+      },
+      "term_budget": {
+        "name": "term budget",
+        "tooltip": "Compact a node after its term count exceeds this number. Default: 64."
+      },
+      "explore": {
+        "name": "explore",
+        "tooltip": "Favor less-used directions in inspiration draws. Zero turns this off. Explore draws keep no path-merge residuals, even with merge residual set to keep."
+      }
+    }
+  },
+  "KiLoRAFreeze": {
+    "display_name": "KiLoRA 라이브: 고정 모드로 저장",
+    "description": "라이브 모드의 현재 상태를 새 고정 모드로 저장합니다.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "KiLoRA 모드 불러오기 또는 KiLoRA 모드 목록 적용의 모델. 라이브 모드가 들어 있어야 합니다."
+      },
+      "mod": {
+        "name": "모드",
+        "tooltip": "라이브 모드의 ID. 하나만 불러왔다면 비워 둡니다."
+      },
+      "new_id": {
+        "name": "새 ID",
+        "tooltip": "새 모드의 ID. 소문자, 숫자, 점, 밑줄, 하이픈을 씁니다."
+      }
+    }
+  },
+  "KiLoRAModInfo": {
+    "display_name": "KiLoRA 모드 정보",
+    "description": "제작자의 안내를 보여 줍니다: 강도, 트리거 단어, 예시 프롬프트, 깊이.",
+    "inputs": {
+      "file": {
+        "name": "파일",
+        "tooltip": "models/kilora 에 있는 KiLoRA 모드 파일."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "강도",
+        "tooltip": "권장 강도. 강도 입력에 연결합니다."
+      },
+      "1": {
+        "name": "트리거 단어",
+        "tooltip": "트리거 단어. 프롬프트에 추가합니다."
+      },
+      "2": {
+        "name": "예시 프롬프트",
+        "tooltip": "작성자의 예시 프롬프트."
+      },
+      "3": {
+        "name": "깊이",
+        "tooltip": "권장 깊이."
+      },
+      "4": {
+        "name": "정보",
+        "tooltip": "텍스트로 된 모드 카드."
+      }
+    }
+  },
+  "KiLoRALiveExport": {
+    "display_name": "KiLoRA 라이브: 공유용 내보내기",
+    "description": "라이브 모드를 공유용으로 저장합니다. 기본값은 당신에게서 배운 내용을 빼고 저장합니다.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "KiLoRA 모드 불러오기 또는 KiLoRA 모드 목록 적용의 모델. 라이브 모드가 들어 있어야 합니다."
+      },
+      "mod": {
+        "name": "모드",
+        "tooltip": "라이브 모드의 ID. 하나만 불러왔다면 비워 둡니다."
+      },
+      "include_learned_state": {
+        "name": "학습한 상태 포함",
+        "tooltip": "끄기: 당신에게서 배운 내용 없이 공유합니다."
+      },
+      "new_id": {
+        "name": "새 ID",
+        "tooltip": "공유할 모드의 ID. 비우면 원래 ID를 유지합니다."
+      },
+      "format": {
+        "name": "format",
+        "tooltip": "Choose a KiLoRA mod or a plain LoRA export."
+      }
+    }
+  },
+  "KiLoRALoadMod": {
+    "display_name": "KiLoRA 모드 불러오기",
+    "description": "KiLoRA 모드 하나를 모델 사본에 불러옵니다. LoRA 로더처럼 사용합니다.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "불러올 모델. 원래 모델은 바뀌지 않습니다."
+      },
+      "file": {
+        "name": "파일",
+        "tooltip": "models/kilora 에 있는 KiLoRA 모드 파일."
+      },
+      "strength": {
+        "name": "강도",
+        "tooltip": "1은 학습할 때의 강도입니다. 0이면 모드가 꺼집니다. 음수는 모드에서 멀어집니다."
+      },
+      "depth": {
+        "name": "깊이",
+        "tooltip": "반복 횟수. -1은 모드가 권장하는 깊이를 씁니다."
+      },
+      "iteration": {
+        "name": "반복 방식",
+        "tooltip": "깊이 패스의 동작 방식. mod: 모드가 선택한 방식. accumulate: 각 패스가 변화를 더합니다. path: 각 패스가 다음 전문가를 고르고, 결과는 그 전문가의 변화입니다."
+      },
+      "routing_scope": {
+        "name": "라우팅 범위",
+        "tooltip": "어떤 로짓이 전문가를 고르는지. mod: 각 모드에 저장된 범위. token: 각 토큰이 따로. tensor: 모든 토큰의 평균으로, 텐서 전체에 하나의 선택."
+      },
+      "routing_select": {
+        "name": "라우팅 선택",
+        "tooltip": "로짓이 전문가 가중치가 되는 방식. mod: 각 모드에 저장된 선택. sparsemax: 합이 1인 가중치, 약한 전문가는 0. top1: 가장 좋은 전문가만."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모델",
+        "tooltip": "모드를 불러온 모델."
+      },
+      "1": {
+        "name": "보고",
+        "tooltip": "일어난 일과 참고 사항."
+      }
+    }
+  },
+  "KiLoRALiveRecord": {
+    "display_name": "KiLoRA 라이브: 1. 기록 (샘플러 앞)",
+    "description": "샘플러 앞에 놓아 라이브 모드 또는 가져온 LoRA를 기록합니다. 라이브 모드가 없어도 됩니다.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "샘플러 앞에 놓아 라이브 모드 또는 가져온 LoRA를 기록합니다. 라이브 모드가 없어도 됩니다."
+      },
+      "editor": {
+        "name": "편집기",
+        "tooltip": "models/kilora 에 있는 라이브 모드 편집기 파일(.kedit). 이 베이스 모델용이어야 합니다. 가져온 LoRA에는 Imported LoRAs를 선택하세요. 라이브 모드나 편집기 파일은 필요하지 않습니다."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "텍스트 인코더. 라이브 측정은 프롬프트와 빈 캡션에서의 손실을 평균하며, 빈 캡션을 이것으로 인코딩합니다. 연결하지 않으면 가이던스 샘플러의 네거티브 프롬프트로 대신합니다."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모델",
+        "tooltip": "이 모델을 샘플러에 연결합니다."
+      },
+      "1": {
+        "name": "기록",
+        "tooltip": "KiLoRA 라이브: 2. 쓰기에 연결합니다."
+      }
+    }
+  },
+  "KiLoRALiveWrite": {
+    "display_name": "KiLoRA 라이브: 2. 쓰기 (샘플러 뒤)",
+    "description": "라이브 모드 2단계. 샘플러 뒤에 둡니다. 편집기가 라이브 모드를 업데이트합니다. 되돌릴 수 있습니다. 가드는 프롬프트 충실도를 낮추거나 이미지를 붕괴시키는 쓰기를 거부합니다. Record에 CLIP이 없으면 가드는 꺼집니다.",
+    "inputs": {
+      "path": {
+        "name": "기록",
+        "tooltip": "KiLoRA 라이브: 1. 기록의 기록 출력."
+      },
+      "samples": {
+        "name": "잠재 이미지",
+        "tooltip": "샘플러의 잠재 이미지. 그대로 통과합니다."
+      },
+      "vae": {
+        "name": "VAE",
+        "tooltip": "선택 사항. decode-resize-encode 축소용 VAE."
+      },
+      "mask": {
+        "name": "마스크",
+        "tooltip": "흰 영역은 변경되고 검은 영역은 그대로입니다. 부드러운 경계는 섞입니다."
+      },
+      "region_caption": {
+        "name": "region caption",
+        "tooltip": "Optional. A caption for the marked region. It names the concept, so later generations can find it. It needs the CLIP on Record."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "잠재 이미지",
+        "tooltip": "샘플러의 잠재 이미지, 변경 없음."
+      },
+      "1": {
+        "name": "보고",
+        "tooltip": "일어난 일과 참고 사항."
+      }
+    }
+  },
+  "KiLoRALiveLearnFromImages": {
+    "display_name": "KiLoRA 라이브: 이미지에서 학습",
+    "description": "이미지 세트의 공통점을 라이브 상태에 학습하여 새 브랜치에 커밋 한 번으로 기록합니다. 다섯 장마다 한 장은 변경 확인용으로 따로 둡니다. 사용하는 이미지의 권리는 사용자에게 책임이 있습니다.",
+    "inputs": {
+      "path": {
+        "name": "기록",
+        "tooltip": "KiLoRA 라이브: 1. 기록의 기록 출력."
+      },
+      "vae": {
+        "name": "VAE",
+        "tooltip": "이미지를 연결된 모델의 잠재 형식으로 인코딩하는 VAE입니다."
+      },
+      "cue": {
+        "name": "단서",
+        "tooltip": "각 캡션에 더하는 큐 (예: 스타일 단어)."
+      },
+      "ignore_guard": {
+        "name": "검사 무시",
+        "tooltip": "따로 둔 이미지의 손실이 오르거나 드리프트가 한계를 넘어도 변경을 커밋합니다. 보고서에 경고를 추가합니다."
+      },
+      "images": {
+        "name": "이미지",
+        "tooltip": "IMAGE 배치입니다. 이미지 또는 폴더 중 하나를 사용합니다. 이미지 권리는 사용자 책임입니다."
+      },
+      "captions": {
+        "name": "캡션",
+        "tooltip": "이미지당 한 줄의 캡션입니다. 비워 두면 모든 이미지에 단서만 사용합니다."
+      },
+      "folder": {
+        "name": "폴더",
+        "tooltip": "같은 이름의 선택적 .txt 캡션이 있는 이미지 폴더입니다. 폴더 또는 이미지 중 하나를 사용합니다."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "캡션과 드리프트 확인 프롬프트용 텍스트 인코더. 필수."
+      },
+      "mounts": {
+        "name": "마운트",
+        "tooltip": "선택 사항인 마운트 이름 패턴. 한 줄에 하나 또는 쉼표로 구분(예: transformer_blocks.1*). 일치하는 마운트만 바뀝니다. 비우면 전체."
+      },
+      "t_min": {
+        "name": "t 최소",
+        "tooltip": "샘플의 최저 샘플러 시간. 0(마지막 단계, 노이즈 적음)부터 1(첫 단계, 노이즈 많음)까지. 노이즈가 적은 쪽은 디테일과 질감을 바꿉니다."
+      },
+      "t_max": {
+        "name": "t 최대",
+        "tooltip": "샘플의 최고 샘플러 시간. 0부터 1까지. 노이즈가 많은 쪽은 구도와 전체 스타일을 바꿉니다. 0과 1이면 모든 단계를 씁니다."
+      },
+      "mask": {
+        "name": "마스크",
+        "tooltip": "선택 사항인 영역 마스크. 잠재 토큰 크기로 조정됩니다. 흰 영역만 변경을 주고, 검은 영역의 오차는 0이 됩니다."
+      },
+      "axis": {
+        "name": "축",
+        "tooltip": "선택 사항인 에디터 축. 이 축의 LoRA 프레임만 항을 줍니다. all: 모든 축."
+      },
+      "single_image": {
+        "name": "단일 이미지",
+        "tooltip": "정확히 이미지 한 장에서 학습합니다. 세트 평균도, 보류 이미지 검사도 없습니다. 결과가 이미지 내용을 복사할 수 있다는 경고가 보고서에 나옵니다. 드리프트 검사는 계속 켜져 있습니다."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "기록",
+        "tooltip": "같은 기록, 다음 라이브 노드용."
+      },
+      "1": {
+        "name": "보고",
+        "tooltip": "따로 둔 이미지에서 변경 없이와 변경 후의 손실, 상대 이득, 드리프트, 쓰기 노름, 브랜치, 시간."
+      }
+    }
+  },
+  "KiLoRARegion": {
+    "display_name": "KiLoRA 모드 목록: 영역",
+    "description": "모드 목록의 모드를 이미지의 마스크 영역으로 제한합니다. 각 모드는 그 영역에서 전문가를 고릅니다. 마스크가 다른 목록을 연결해 모드를 서로 다른 영역에 놓을 수 있습니다.",
+    "inputs": {
+      "sets": {
+        "name": "모드 목록",
+        "tooltip": "다른 모드 목록 노드의 목록. 비우면 새 목록을 시작합니다."
+      },
+      "mask": {
+        "name": "마스크",
+        "tooltip": "흰 영역은 변경되고 검은 영역은 그대로입니다. 부드러운 경계는 섞입니다."
+      },
+      "apply_to": {
+        "name": "적용 대상",
+        "tooltip": "전체 목록: 들어온 목록의 모든 모드. 마지막 모드: 마지막에 추가한 모드만."
+      },
+      "caption": {
+        "name": "caption",
+        "tooltip": "Optional. A text encoding for this region (from CLIP Text Encode). With region captions on in KiLoRA Region Attention, the region follows this caption instead of the prompt."
+      },
+      "segs": {
+        "name": "segs",
+        "tooltip": "Optional. Regions from Impact Pack (SEGS). Their masks are joined into one mask and used as the region instead of the mask."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모드 목록",
+        "tooltip": "다음 모드 목록 노드나 KiLoRA 모드 목록 적용에 연결합니다."
+      }
+    }
+  },
+  "KiLoRADepthSchedule": {
+    "display_name": "KiLoRA 깊이 일정",
+    "description": "각 블록의 깊이를 샘플링 진행에 따라서도 목록, 프리셋 또는 수식으로 정합니다. KiLoRA 모드 목록 적용에 연결하세요.",
+    "inputs": {
+      "schedule": {
+        "name": "일정",
+        "tooltip": "목록(블록마다 깊이 하나, 마지막 값이 반복됨), 프리셋 이름 또는 i, n, t, self, cross, mlp를 쓰는 수식. 비어 있으면 프리셋을 씁니다."
+      },
+      "preset": {
+        "name": "프리셋",
+        "tooltip": "일정 텍스트가 비어 있을 때 씁니다. none: 일정 없음, 깊이 입력을 씁니다."
+      },
+      "blocks": {
+        "name": "블록 수",
+        "tooltip": "미리보기의 블록 수."
+      },
+      "preview_kind": {
+        "name": "미리보기 층 종류",
+        "tooltip": "미리보기가 보여 주는 층 종류."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "깊이 일정",
+        "tooltip": "일정. KiLoRA 모드 목록 적용에 연결하세요."
+      },
+      "1": {
+        "name": "미리보기",
+        "tooltip": "히트맵: 가로는 블록, 세로는 샘플링 진행. 검정은 깊이 0, 노랑은 가장 깊은 값."
+      }
+    }
+  },
+  "KiLoRARegionAttention": {
+    "display_name": "KiLoRA Mod List: Region Attention",
+    "description": "Experimental. Keeps the change of each KiLoRA region inside its region. In a window of sampling after the layout forms, the tokens of a region attend less (soft) or not at all (hard) to tokens outside it. Connect it after KiLoRA Apply.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "불러올 모델. 원래 모델은 바뀌지 않습니다."
+      },
+      "mode": {
+        "name": "mode",
+        "tooltip": "off: no change. soft: a region looks less at the rest of the image. hard: a region does not look at the rest of the image."
+      },
+      "strength": {
+        "name": "strength",
+        "tooltip": "How much less a region looks outside itself in soft mode. Start low: high values change the image."
+      },
+      "until": {
+        "name": "until",
+        "tooltip": "Where the window ends, as a part of the sampler steps. 0.6: the limit stops after 60% of the steps."
+      },
+      "outside_region": {
+        "name": "outside region",
+        "tooltip": "On: the area outside every region counts as one more region, so it does not look into the regions. Use it for a single region."
+      },
+      "start": {
+        "name": "start",
+        "tooltip": "Where the window starts, as a part of the sampler steps. Steps before it never change, so the layout forms freely. 0.3: after the first 30% of the steps."
+      },
+      "region_captions": {
+        "name": "region captions",
+        "tooltip": "On: regions with a caption follow their own caption in the same window of steps (regional prompting). The rest of the image follows the prompt."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모델",
+        "tooltip": "모드를 불러온 모델."
+      },
+      "1": {
+        "name": "보고",
+        "tooltip": "일어난 일과 참고 사항."
+      }
+    }
+  },
+  "KiLoRASimple": {
+    "display_name": "KiLoRA Settings (Simple)",
+    "description": "KiLoRA settings with one choice: how the LoRAs mix. Connect it to the settings input of KiLoRA Apply or a KiLoRA LoRA node. The mix values: balanced: the defaults of KiLoRA Apply, with depth and routing from each mod. keep_each_strong: each token takes only its best LoRA, at full strength (routing scope token, routing select top1). subtle: one pass and one smooth blend per layer (depth 1, routing scope tensor, routing select sparsemax). stack: KiLoRA LoRA Loader does not route and gives the same output as Load LoRA. The other nodes use the balanced values for stack.",
+    "inputs": {
+      "mix": {
+        "name": "mix",
+        "tooltip": "How the LoRAs mix. balanced: the defaults of KiLoRA Apply, with depth and routing from each mod. keep_each_strong: each token takes only its best LoRA, at full strength (routing scope token, routing select top1). subtle: one pass and one smooth blend per layer (depth 1, routing scope tensor, routing select sparsemax). stack: KiLoRA LoRA Loader does not route and gives the same output as Load LoRA. The other nodes use the balanced values for stack. balanced에서 LoRA 파일은 깊이 3으로 라우팅하고 단계의 0.4에서 라우팅을 고정합니다. stack은 한 번의 패스입니다."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "settings",
+        "tooltip": "The settings. Connect them to KiLoRA Apply or a KiLoRA LoRA node."
+      }
+    }
+  },
+  "KiLoRASettings": {
+    "display_name": "KiLoRA Settings",
+    "description": "KiLoRA settings: a mix, and single values that replace the values of the mix. Connect it to the settings input of KiLoRA Apply or a KiLoRA LoRA node. Content keys default to per_expert; mix is the compatibility choice. Fused gate statistics are faster; torch reproduces images made before this release.",
+    "inputs": {
+      "mix": {
+        "name": "mix",
+        "tooltip": "How the LoRAs mix. balanced: the defaults of KiLoRA Apply, with depth and routing from each mod. keep_each_strong: each token takes only its best LoRA, at full strength (routing scope token, routing select top1). subtle: one pass and one smooth blend per layer (depth 1, routing scope tensor, routing select sparsemax). stack: KiLoRA LoRA Loader does not route and gives the same output as Load LoRA. The other nodes use the balanced values for stack. balanced에서 LoRA 파일은 깊이 3으로 라우팅하고 단계의 0.4에서 라우팅을 고정합니다. stack은 한 번의 패스입니다."
+      },
+      "depth": {
+        "name": "깊이",
+        "tooltip": "Number of passes. -2 takes the depth of the mix. -1 uses the depth that the mods recommend."
+      },
+      "iteration": {
+        "name": "반복 방식",
+        "tooltip": "How depth passes work. from mix: the value of the mix. mod: the mode the mod chose. accumulate: each pass adds its change. path: each pass picks the next expert, and the result is that expert's change."
+      },
+      "routing_scope": {
+        "name": "라우팅 범위",
+        "tooltip": "Which logits choose the experts. from mix: the value of the mix. mod: the scope stored in each mod. token: each token on its own. tensor: the mean over all tokens, one choice for the whole tensor."
+      },
+      "routing_select": {
+        "name": "라우팅 선택",
+        "tooltip": "How the logits become expert weights. from mix: the value of the mix. mod: the selection stored in each mod. sparsemax: weights that sum to 1, weak experts at 0. top1: only the best expert."
+      },
+      "depth_schedule": {
+        "name": "깊이 일정",
+        "tooltip": "선택 사항. KiLoRA 깊이 일정. 깊이 입력과 모드의 기본 일정을 대신합니다."
+      },
+      "lycoris_apply": {
+        "name": "LyCORIS apply",
+        "tooltip": "For routed LoKr and LoHa files, truncated applies the low-rank change; exact applies the whole change."
+      },
+      "candidates": {
+        "name": "Candidates",
+        "tooltip": "Choose this many experts before routing. 0 or at least the expert count uses every expert."
+      },
+      "candidate_summary": {
+        "name": "candidate summary",
+        "tooltip": "Choose content keys or leading read-map directions to select candidates."
+      },
+      "content_keys": {
+        "name": "content keys",
+        "tooltip": "per_expert (default) caches keys for each LoRA. mix is the compatibility choice. KILORA_CONTENT_KEYS overrides this setting."
+      },
+      "gate_stats": {
+        "name": "gate statistics",
+        "tooltip": "fused (default) is faster. torch reproduces images made before this release. KILORA_GATE_STATS overrides this setting."
+      },
+      "routing_features": {
+        "name": "routing features",
+        "tooltip": "Collect optional inputs for routing scores."
+      },
+      "cross_token_region": {
+        "name": "token region cross",
+        "tooltip": "Weight for the token and region routing score product."
+      },
+      "cross_token_prompt": {
+        "name": "token prompt cross",
+        "tooltip": "Weight for the token and prompt routing score product."
+      },
+      "cross_token_timestep": {
+        "name": "token timestep cross",
+        "tooltip": "Weight for the token and timestep routing score product."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "settings",
+        "tooltip": "The settings. Connect them to KiLoRA Apply or a KiLoRA LoRA node."
+      }
+    }
+  },
+  "KiLoRALoRALoader": {
+    "display_name": "KiLoRA LoRA Loader",
+    "description": "Use it in place of Load LoRA. It patches CLIP like Load LoRA. The model LoRAs of all chained KiLoRA LoRA Loaders are routed together when sampling starts. With mix set to stack, the output is the same as Load LoRA.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "불러올 모델. 원래 모델은 바뀌지 않습니다."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "The text encoder. It gets the LoRA the same way as with Load LoRA."
+      },
+      "lora_name": {
+        "name": "LoRA 파일",
+        "tooltip": "models/loras 에 있는 LoRA 파일."
+      },
+      "strength_model": {
+        "name": "strength model",
+        "tooltip": "The LoRA weight on the model, as in Load LoRA. Routing keeps this strength for each LoRA."
+      },
+      "strength_clip": {
+        "name": "strength clip",
+        "tooltip": "The LoRA weight on the text encoder, as in Load LoRA."
+      },
+      "lora_stack": {
+        "name": "LoRA stack",
+        "tooltip": "Optional. More LoRAs as a list of (LoRA file, strength model, strength clip). They load before the LoRA of this node."
+      },
+      "timeline": {
+        "name": "timeline",
+        "tooltip": "Optional. Time-dependent values from KiLoRA Timeline. Without it nothing changes."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional. KiLoRA settings. Without them, the defaults apply."
+      },
+      "depth_map": {
+        "name": "depth_map",
+        "tooltip": "선택. KiLoRA 깊이 맵에서 온 이미지 영역별 깊이. 시작 진행도부터 이미지 토큰의 깊이를 대신합니다."
+      },
+      "axis_alpha": {
+        "name": "axis_alpha",
+        "tooltip": "Off is the default. Creative and IP share one budget per token. Auto blends them using previous-step trigger attention, or alpha_mask when connected."
+      },
+      "alpha_mask": {
+        "name": "alpha mask",
+        "tooltip": "Optional IP alpha mask when axis_alpha is auto. It replaces trigger maps and its edge is feathered over 16 pixels. With axis_alpha off it has no effect."
+      },
+      "expert_text": {
+        "name": "expert_text",
+        "tooltip": "Auto prepares separate text conditioning for experts in layered mode. Off keeps the shared text path."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모델",
+        "tooltip": "The model. The LoRAs are routed when sampling starts."
+      },
+      "1": {
+        "name": "clip",
+        "tooltip": "The text encoder with the LoRA."
+      }
+    }
+  },
+  "KiLoRARouteLoaded": {
+    "display_name": "KiLoRA Route Loaded LoRAs",
+    "description": "Put it after your LoRA loaders. It takes the LoRAs that the loaders put on the model and routes them with KiLoRA. Each LoRA keeps its model strength. CLIP is not changed. If the LoRAs cannot be told apart, they stay as loaded and the report says so.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "The model after your LoRA loaders. The original model is not changed."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional. KiLoRA settings. Without them, the defaults apply."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모델",
+        "tooltip": "The model with the loaded LoRAs routed."
+      },
+      "1": {
+        "name": "보고",
+        "tooltip": "일어난 일과 참고 사항."
+      }
+    }
+  },
+  "KiLoRARouteRecord": {
+    "display_name": "KiLoRA Route Record",
+    "description": "Records where each LoRA acts while the sampler runs. Connect its model to the sampler and its routes to KiLoRA Route Map.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "The model with KiLoRA routing (after KiLoRA Apply or a KiLoRA loader)."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모델",
+        "tooltip": "The model that records the routing. Connect it to the sampler."
+      },
+      "1": {
+        "name": "routes",
+        "tooltip": "The recorded routing shares. Connect them to KiLoRA Route Map."
+      }
+    }
+  },
+  "KiLoRARouteMap": {
+    "display_name": "KiLoRA Route Map",
+    "description": "Shows where each LoRA acted in the last sampled image: one colored panel per LoRA, with a legend. Connect the routes of KiLoRA Route Record and the decoded image.",
+    "inputs": {
+      "routes": {
+        "name": "routes",
+        "tooltip": "The routes of KiLoRA Route Record."
+      },
+      "image": {
+        "name": "image",
+        "tooltip": "The decoded image of the same sampler run."
+      },
+      "labels": {
+        "name": "labels",
+        "tooltip": "The LoRA names, separated by commas, in load order. Missing names become LoRA 1, LoRA 2, and so on."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "map",
+        "tooltip": "One panel per LoRA: the image, colored where the LoRA acted. A stronger color is a larger share."
+      },
+      "1": {
+        "name": "보고",
+        "tooltip": "일어난 일과 참고 사항."
+      }
+    }
+  },
+  "KiLoRATokenRoles": {
+    "display_name": "KiLoRA Mod List: Token Roles",
+    "description": "Sets which tokens the mods of a mod list change in an editing workflow: the target image, the reference images or the text. Other tokens keep the base weights.",
+    "inputs": {
+      "sets": {
+        "name": "모드 목록",
+        "tooltip": "다른 모드 목록 노드의 목록. 비우면 새 목록을 시작합니다."
+      },
+      "roles": {
+        "name": "roles",
+        "tooltip": "auto: the mod's own policy, else the LoRA file's, else the target tokens when reference images are present. target: the image being made. reference: the reference images. all: every token, as without roles."
+      },
+      "apply_to": {
+        "name": "적용 대상",
+        "tooltip": "전체 목록: 들어온 목록의 모든 모드. 마지막 모드: 마지막에 추가한 모드만."
+      },
+      "custom": {
+        "name": "custom roles",
+        "tooltip": "Optional. A role list that replaces the choice above, for example reference:0+text for the first reference image and the text."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모드 목록",
+        "tooltip": "다음 모드 목록 노드나 KiLoRA 모드 목록 적용에 연결합니다."
+      }
+    }
+  },
+  "KiLoRATwoPanels": {
+    "display_name": "KiLoRA Mod List: Two Panels",
+    "description": "Marks a two-panel canvas. One panel holds the reference picture and the other is the image being made. Mods on auto roles change only the target panel. Applies to every mod of the list.",
+    "inputs": {
+      "sets": {
+        "name": "모드 목록",
+        "tooltip": "다른 모드 목록 노드의 목록. 비우면 새 목록을 시작합니다."
+      },
+      "reference_side": {
+        "name": "reference side",
+        "tooltip": "The side of the canvas that holds the reference picture."
+      },
+      "split": {
+        "name": "split",
+        "tooltip": "The part of the canvas width (left, right) or height (top, bottom) that the reference panel covers."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모드 목록",
+        "tooltip": "다음 모드 목록 노드나 KiLoRA 모드 목록 적용에 연결합니다."
+      }
+    }
+  },
+  "KiLoRARegionIsolation": {
+    "display_name": "KiLoRA Mod List: Region Isolation",
+    "description": "Experimental. Keeps the area outside the KiLoRA regions as the base model makes it. In the first part of sampling, a base-only branch runs next to the sampler, and the outside follows it. Each step in that part costs one extra model call. Connect it after KiLoRA Apply.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "불러올 모델. 원래 모델은 바뀌지 않습니다."
+      },
+      "strength": {
+        "name": "strength",
+        "tooltip": "How far the outside follows the base model. 1: fully, 0: off."
+      },
+      "until": {
+        "name": "until",
+        "tooltip": "The part of the sampler steps that the isolation acts in, from the start. After it, the image settles freely, so the edge can heal."
+      },
+      "feather": {
+        "name": "feather",
+        "tooltip": "The soft edge of the regions, in pixels. Larger values blend the edge over a wider band."
+      },
+      "sets": {
+        "name": "모드 목록",
+        "tooltip": "Optional. The mod list whose regions to isolate (the same list as on KiLoRA Apply). Without it, the regions of the list that KiLoRA Apply loaded."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모델",
+        "tooltip": "모드를 불러온 모델."
+      },
+      "1": {
+        "name": "보고",
+        "tooltip": "일어난 일과 참고 사항."
+      }
+    }
+  },
+  "KiLoRATimeline": {
+    "display_name": "KiLoRA Timeline",
+    "description": "Sets one value over the run: the strength of a mod, or when it is active, for example. Chain Timeline nodes to add rows, and connect the last one to KiLoRA Apply or the LoRA loader. The preview plots every row.",
+    "inputs": {
+      "target": {
+        "name": "target",
+        "tooltip": "all, an axis (creative, functional or ip), or the file name of a mod or LoRA in the mod list, without the extension."
+      },
+      "quantity": {
+        "name": "quantity",
+        "tooltip": "What the row sets. strength multiplies the strength. active turns the mod on (1) or off (0). route_freeze and gate_kappa replace the inputs of KiLoRA Apply. The region quantities set the strength of that effect over time. depth_map and depth_base control the depth map (target all)."
+      },
+      "curve": {
+        "name": "curve",
+        "tooltip": "Keyframes such as 0:1, 0.3:0.6, 1:0.2 (position:value), or an expression with t, step, steps and sigma, for example 1 - t."
+      },
+      "clock": {
+        "name": "clock",
+        "tooltip": "What the keyframe positions mean. progress: 0 at the first step, 1 at the last. step: the step number. sigma: the noise level."
+      },
+      "interpolation": {
+        "name": "interpolation",
+        "tooltip": "linear: values blend between keyframes. step: each value holds until the next keyframe."
+      },
+      "timeline": {
+        "name": "timeline",
+        "tooltip": "Optional. Rows from another Timeline node; this node adds its rows after them."
+      },
+      "more_rows": {
+        "name": "more rows",
+        "tooltip": "Optional. More rows, one per line: target | quantity | curve, then optional | clock and | interpolation."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "timeline",
+        "tooltip": "All rows. Connect it to KiLoRA Apply or to the next Timeline node."
+      },
+      "1": {
+        "name": "미리보기",
+        "tooltip": "Every row over the run: progress across, value up."
+      }
+    }
+  },
+  "KiLoRADepthMap": {
+    "display_name": "KiLoRA 깊이 맵",
+    "description": "마스크(SAM2 등 분할 도구) 또는 이미지(그 밝기: ControlNet 전처리기의 깊이, 라인아트, 포즈 맵)로 이미지 영역마다 깊이를 정합니다. start까지는 모든 영역이 하나의 깊이로 실행되어 구도가 평소처럼 잡힙니다. 그 뒤에는 각 영역이 자기 깊이로 실행됩니다. KiLoRA Apply 또는 KiLoRA LoRA Loader에 연결하세요.",
+    "inputs": {
+      "min_depth": {
+        "name": "min_depth",
+        "tooltip": "맵이 0(검정)인 곳의 깊이."
+      },
+      "max_depth": {
+        "name": "max_depth",
+        "tooltip": "맵이 1(흰색)인 곳의 깊이."
+      },
+      "invert": {
+        "name": "invert",
+        "tooltip": "깊이를 정하기 전에 검정과 흰색을 바꿉니다."
+      },
+      "gamma": {
+        "name": "gamma",
+        "tooltip": "깊이를 정하기 전에 맵의 모양을 바꿉니다. 1보다 크면 min_depth 쪽이 많아지고, 1보다 작으면 max_depth 쪽이 많아집니다."
+      },
+      "feather": {
+        "name": "feather",
+        "tooltip": "맵의 부드러운 가장자리(픽셀). 부드러운 가장자리는 깊이 사이에 보이는 이음매를 막습니다."
+      },
+      "start": {
+        "name": "start",
+        "tooltip": "맵이 적용되기 시작하는 샘플링 진행도(0.3: 스텝의 30% 이후). 그 전에는 모든 영역이 base로 실행되어 구도가 하나의 깊이일 때와 같습니다."
+      },
+      "base": {
+        "name": "base",
+        "tooltip": "start 전 모든 영역의 깊이와 텍스트 토큰의 깊이. -1: 맵의 평균 깊이(반올림)."
+      },
+      "mask": {
+        "name": "마스크",
+        "tooltip": "마스크. 예를 들어 SAM2의 출력. 1은 max_depth가 됩니다. 이미지도 연결되어 있으면 마스크를 씁니다."
+      },
+      "image": {
+        "name": "image",
+        "tooltip": "이미지. 그 밝기가 맵이 됩니다. 예를 들어 깊이, 라인아트, 포즈 전처리기의 출력."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "깊이 맵",
+        "tooltip": "깊이 맵. KiLoRA Apply 또는 KiLoRA LoRA Loader의 depth_map 입력에 연결하세요."
+      },
+      "1": {
+        "name": "미리보기",
+        "tooltip": "이미지로 본 맵: 검정은 min_depth, 흰색은 max_depth."
+      }
+    }
+  },
+  "KiLoRALayerConditioning": {
+    "display_name": "KiLoRA Layer",
+    "description": "Selects the axes for this conditioning and sets its mask.",
+    "inputs": {
+      "conditioning": {
+        "name": "conditioning",
+        "tooltip": "The conditioning for this layer."
+      },
+      "layer": {
+        "name": "layer",
+        "tooltip": "The axis for this layer. creative also runs functional."
+      },
+      "mask": {
+        "name": "마스크",
+        "tooltip": "Optional mask for this layer."
+      },
+      "alpha_source": {
+        "name": "alpha source",
+        "tooltip": "mask uses the connected mask. attention uses the previous step’s trigger maps for IP and the complement for creative."
+      },
+      "feather": {
+        "name": "feather",
+        "tooltip": "The soft edge of the regions, in pixels. Larger values blend the edge over a wider band."
+      },
+      "crop": {
+        "name": "crop",
+        "tooltip": "off: the whole image. auto: faster, crops the late steps with surrounding context."
+      },
+      "batch": {
+        "name": "batch",
+        "tooltip": "Run this layer in one batched model call with the other layers. Off: each layer runs as its own call, which is exact and at 1024 pixels faster. Turn it on for all layers to batch them."
+      },
+      "compose": {
+        "name": "compose",
+        "tooltip": "separate: each layer runs as its own model call. single: all layers run in one model call per guidance branch, and each image area reads its own layer text. Select single on every layer. The crop input is not used with single."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "conditioning",
+        "tooltip": "Conditioning for this layer."
+      }
+    }
+  },
+  "KiLoRALayerFilter": {
+    "display_name": "KiLoRA Layer Filter",
+    "description": "Limit added model function patches to one layer. Weight and object patches remain global.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "The model after the plugin."
+      },
+      "before": {
+        "name": "before",
+        "tooltip": "The model before the plugin."
+      },
+      "layer": {
+        "name": "layer",
+        "tooltip": "The layer where the plugin runs."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모델",
+        "tooltip": "모드를 불러온 모델."
+      },
+      "1": {
+        "name": "보고",
+        "tooltip": "일어난 일과 참고 사항."
+      }
+    }
+  },
+  "KiLoRASaveRecipe": {
+    "display_name": "KiLoRA Save Recipe",
+    "description": "Saves a mod list and settings as references without copying the weights.",
+    "inputs": {
+      "sets": {
+        "name": "모드 목록",
+        "tooltip": "The mod list to save."
+      },
+      "filename": {
+        "name": "파일 이름",
+        "tooltip": "The name of the recipe file."
+      },
+      "name": {
+        "name": "이름",
+        "tooltip": "The name shown for the recipe."
+      },
+      "license": {
+        "name": "license",
+        "tooltip": "The license for the recipe."
+      },
+      "settings": {
+        "name": "settings",
+        "tooltip": "Optional settings to save with the recipe."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "보고",
+        "tooltip": "일어난 일과 참고 사항."
+      }
+    }
+  },
+  "KiLoRADirectionNodes": {
+    "display_name": "KiLoRA Direction Nodes",
+    "description": "Add direction nodes from a stored library basis or one complete direction file.",
+    "inputs": {
+      "strength": {
+        "name": "강도",
+        "tooltip": "Strength of the direction nodes."
+      },
+      "chunk": {
+        "name": "chunk",
+        "tooltip": "Number of output directions per node."
+      },
+      "sets": {
+        "name": "모드 목록",
+        "tooltip": "다른 모드 목록 노드의 목록. 비우면 새 목록을 시작합니다."
+      },
+      "library_path": {
+        "name": "library path",
+        "tooltip": "Library index folder; empty uses the default."
+      },
+      "fine": {
+        "name": "Fine mode",
+        "tooltip": "Allow up to 64 depth steps for direction nodes."
+      },
+      "candidates": {
+        "name": "Candidates",
+        "tooltip": "Maximum direction nodes scored per token in fine mode."
+      },
+      "direction_file": {
+        "name": "Direction file",
+        "tooltip": "Optional path to a LoRA direction file with kilora_directions metadata. When set, use one node with the full saved change at each mount. Library path, chunk, fine and candidates apply only to the library basis."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모드 목록",
+        "tooltip": "다음 모드 목록 노드나 KiLoRA 모드 목록 적용에 연결합니다."
+      }
+    }
+  },
+  "KiLoRALoRALibrary": {
+    "display_name": "KiLoRA LoRA Library",
+    "description": "Select LoRAs at the first sampling step and save a recipe.",
+    "inputs": {
+      "model": {
+        "name": "모델",
+        "tooltip": "불러올 모델. 원래 모델은 바뀌지 않습니다."
+      },
+      "folders": {
+        "name": "folders",
+        "tooltip": "One LoRA folder path per line."
+      },
+      "prompt": {
+        "name": "prompt",
+        "tooltip": "Text used to find matching LoRAs."
+      },
+      "count": {
+        "name": "count",
+        "tooltip": "Maximum number of LoRAs to select."
+      },
+      "strength": {
+        "name": "강도",
+        "tooltip": "Strength of each selected LoRA."
+      },
+      "seed": {
+        "name": "seed",
+        "tooltip": "Seed for selection."
+      },
+      "min_relevance": {
+        "name": "min relevance",
+        "tooltip": "Minimum relevance score."
+      },
+      "include_tags": {
+        "name": "include tags",
+        "tooltip": "Include tags, separated by commas."
+      },
+      "exclude_tags": {
+        "name": "exclude tags",
+        "tooltip": "Exclude tags, separated by commas."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "Optional text encoder for selection."
+      },
+      "mask_a": {
+        "name": "마스크 a",
+        "tooltip": "선택. 영역 a 항목의 영역."
+      },
+      "mask_b": {
+        "name": "마스크 b",
+        "tooltip": "선택. 영역 b 항목의 영역."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "모델",
+        "tooltip": "모드를 불러온 모델."
+      },
+      "1": {
+        "name": "보고",
+        "tooltip": "일어난 일과 참고 사항."
+      },
+      "2": {
+        "name": "recipe",
+        "tooltip": "Path of the recipe written after the first sampling step."
+      }
+    }
+  },
+  "KiLoRASimilarLoRAs": {
+    "display_name": "KiLoRA Similar LoRAs",
+    "description": "Find installed LoRAs with similar content features in the same base family.",
+    "inputs": {
+      "lora": {
+        "name": "LoRA 파일",
+        "tooltip": "models/loras 에 있는 LoRA 파일."
+      },
+      "count": {
+        "name": "Count",
+        "tooltip": "Maximum number of similar LoRAs to list."
+      },
+      "similar_space": {
+        "name": "similarity space",
+        "tooltip": "Compare pooled content keys or vectors from a trained model."
+      },
+      "model_path": {
+        "name": "embedding model path",
+        "tooltip": "Path to a saved LayerChain model directory. The library basis must match the basis used to train it."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "보고",
+        "tooltip": "일어난 일과 참고 사항."
+      }
+    }
+  },
+  "KiLoRAPrepareLoRAs": {
+    "display_name": "KiLoRA LoRA 준비",
+    "description": "지원되는 LoRA 파일과 라우팅 키를 준비합니다. 모델을 연결하면 파일 순서로 선택한 조합을 준비합니다.",
+    "inputs": {
+      "paths": {
+        "name": "파일 또는 폴더",
+        "tooltip": "LoRA 폴더를 기준으로 한 줄에 경로 하나를 입력합니다. 비워 두면 모든 파일을 선택합니다."
+      },
+      "model": {
+        "name": "모델",
+        "tooltip": "이 모델과 조합의 키를 준비할 선택적 모델입니다."
+      },
+      "family": {
+        "name": "모델 계열",
+        "tooltip": "모델 없이 파일을 준비할 때 사용할 선택적 모델 계열입니다."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "보고",
+        "tooltip": "일어난 일과 참고 사항."
+      }
+    }
+  },
+  "KiLoRAMentionPrompt": {
+    "display_name": "KiLoRA 멘션 프롬프트",
+    "description": "@name 으로 라이브러리의 LoRA를 부르는 프롬프트를 인코딩합니다. 멘션은 텍스트 인코더 전에 제거되고 모드 목록에 추가됩니다.",
+    "inputs": {
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "텍스트 인코더."
+      },
+      "text": {
+        "name": "텍스트",
+        "tooltip": "프롬프트. @name 또는 @name:0.5 를 쓰면 파일 이름으로 LoRA 파일을 부릅니다. 값이 없으면 강도는 0.7입니다."
+      },
+      "sets": {
+        "name": "모드 목록",
+        "tooltip": "선택 사항. 멘션한 LoRA가 이 모드 목록에 추가됩니다."
+      },
+      "layer": {
+        "name": "layer",
+        "tooltip": "global: 멘션한 LoRA는 자체 축을 씁니다. 축을 고르면 멘션한 LoRA가 그 레이어의 마스크를 따릅니다."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "conditioning",
+        "tooltip": "멘션을 뺀 텍스트의 conditioning."
+      },
+      "1": {
+        "name": "모드 목록",
+        "tooltip": "멘션마다 항목 하나가 있는 모드 목록. KiLoRA Apply Mod List에 연결하세요."
+      },
+      "2": {
+        "name": "보고",
+        "tooltip": "각 멘션이 쓰는 파일과 프롬프트에 추가된 트리거 단어."
+      }
+    }
+  },
+  "KiLoRAPromptSet": {
+    "display_name": "KiLoRA Prompt Set",
+    "description": "Build prompt pairs from subjects, style and cue, or JSON. Chain nodes to add concepts.",
+    "inputs": {
+      "subjects": {
+        "name": "Subjects",
+        "tooltip": "One subject per line. An LLM node can supply this text."
+      },
+      "style": {
+        "name": "Style",
+        "tooltip": "Full style description used by the target prompt."
+      },
+      "cue": {
+        "name": "Cue",
+        "tooltip": "Short cue in the student prompt and the exported trigger words."
+      },
+      "label": {
+        "name": "Concept label",
+        "tooltip": "Letters, numbers, underscores or dashes. Used in the output filename."
+      },
+      "json": {
+        "name": "Prompt set JSON",
+        "tooltip": "Optional JSON concepts or explicit pairs. Overrides the text fields."
+      },
+      "prompt_set": {
+        "name": "Prompt set",
+        "tooltip": "Concepts and prompt pairs. Chain Prompt Set nodes to add concepts."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Prompt set",
+        "tooltip": "Validated concepts and prompt pairs."
+      },
+      "1": {
+        "name": "Report",
+        "tooltip": "Concept labels and pair counts."
+      }
+    }
+  },
+  "KiLoRASolveFromPrompts": {
+    "display_name": "KiLoRA Solve LoRA From Prompts",
+    "description": "Solve plain LoRAs from prompt sets with the connected model and CLIP. Files go to models/loras/kilora-solved/.",
+    "inputs": {
+      "model": {
+        "name": "Model",
+        "tooltip": "Base model used for sampling and fitting the LoRA."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "Text encoder for target, student and negative prompts."
+      },
+      "prompt_set": {
+        "name": "Prompt set",
+        "tooltip": "Concepts and prompt pairs. Chain Prompt Set nodes to add concepts."
+      },
+      "name": {
+        "name": "Name",
+        "tooltip": "Output file stem. Batch sets with one shared name receive numbered stems."
+      },
+      "mode": {
+        "name": "Mode",
+        "tooltip": "single writes one LoRA per concept; joint fits all concepts into one LoRA."
+      },
+      "rank": {
+        "name": "Rank",
+        "tooltip": "Rank of each fitted projection. Default 16."
+      },
+      "steps": {
+        "name": "Steps",
+        "tooltip": "Target trajectory steps. 0 uses the model family's default."
+      },
+      "size": {
+        "name": "Size",
+        "tooltip": "Square image size in pixels, a multiple of 16. 0 uses the model family's default."
+      },
+      "cfg": {
+        "name": "CFG",
+        "tooltip": "Guidance strength of the target trajectories. -1 uses the model family's default."
+      },
+      "seeds": {
+        "name": "Seeds",
+        "tooltip": "Space- or comma-separated integers. Default 811 1811."
+      },
+      "negative_prompt": {
+        "name": "Negative prompt",
+        "tooltip": "Negative conditioning for the target trajectories."
+      },
+      "overwrite": {
+        "name": "Overwrite",
+        "tooltip": "이름이 같은 기존 파일을 교체합니다. 그렇지 않으면 일치하는 파일을 재사용하고 새 입력은 짧은 해시가 포함된 이름으로 저장합니다."
+      },
+      "output": {
+        "name": "Output",
+        "tooltip": "lora writes plain LoRAs; kmod writes KiLoRA mods; both lists both formats."
+      },
+      "sets": {
+        "name": "Mod list",
+        "tooltip": "Append solved files at strength 0.7 to this mod list."
+      },
+      "preview": {
+        "name": "Preview",
+        "tooltip": "The first image is stored as the preview in each solved mod."
+      },
+      "overlap_penalty": {
+        "name": "겹침 페널티",
+        "tooltip": "0이면 꺼집니다. single 모드에서 개념이 여러 개이면 각 개념을 다른 개념의 입력 방향에 대한 페널티와 함께 다시 풉니다. 값이 클수록 겹침이 줄어듭니다."
+      },
+      "deflate": {
+        "name": "디플레이션",
+        "tooltip": "기본값은 꺼짐입니다. single 모드에서 개념을 순서대로 풉니다. 뒤의 각 개념은 목표에서 앞 개념들의 변화를 뺀 것에 맞춥니다."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Paths",
+        "tooltip": "One completed LoRA path per line."
+      },
+      "1": {
+        "name": "Mod list",
+        "tooltip": "Solved LoRAs imported at strength 0.7, ready for KiLoRA Apply."
+      },
+      "2": {
+        "name": "Report",
+        "tooltip": "Memory estimate, written files and reused files."
+      }
+    }
+  },
+  "KiLoRASolveFromImages": {
+    "display_name": "KiLoRA 이미지에서 LoRA 풀기",
+    "description": "최소 3장의 이미지가 공유하는 모습, 예를 들어 스타일의 LoRA를 풉니다. 검증 이미지 검사에 실패한 세트는 저장하지 않습니다. 저장 위치: models/loras/kilora-solved/. 사용하는 이미지의 권리는 사용자 책임입니다.",
+    "inputs": {
+      "model": {
+        "name": "Model",
+        "tooltip": "Base model used for sampling and fitting the LoRA."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "Text encoder for target, student and negative prompts."
+      },
+      "vae": {
+        "name": "VAE",
+        "tooltip": "이미지를 연결된 모델의 잠재 형식으로 인코딩하는 VAE입니다."
+      },
+      "name": {
+        "name": "이름",
+        "tooltip": "확장자를 제외한 파일 이름입니다. 문자, 숫자, 밑줄, 하이픈을 사용합니다."
+      },
+      "cue": {
+        "name": "단서",
+        "tooltip": "각 캡션과 함께 양쪽에 사용하고 LoRA 트리거 단어로 저장하는 단서입니다."
+      },
+      "rank": {
+        "name": "Rank",
+        "tooltip": "Rank of each fitted projection. Default 16."
+      },
+      "steps": {
+        "name": "Steps",
+        "tooltip": "Target trajectory steps. 0 uses the model family's default."
+      },
+      "cfg": {
+        "name": "CFG",
+        "tooltip": "Guidance strength of the target trajectories. -1 uses the model family's default."
+      },
+      "size": {
+        "name": "Size",
+        "tooltip": "Square image size in pixels, a multiple of 16. 0 uses the model family's default."
+      },
+      "seeds": {
+        "name": "Seeds",
+        "tooltip": "Space- or comma-separated integers. Default 811 1811."
+      },
+      "ignore_guard": {
+        "name": "검사 무시",
+        "tooltip": "검증 이미지의 노이즈 제거 손실이 개선되지 않아도 저장합니다. 보고서에 경고를 추가합니다."
+      },
+      "overwrite": {
+        "name": "Overwrite",
+        "tooltip": "이름이 같은 기존 파일을 교체합니다. 그렇지 않으면 일치하는 파일을 재사용하고 새 입력은 짧은 해시가 포함된 이름으로 저장합니다."
+      },
+      "images": {
+        "name": "이미지",
+        "tooltip": "IMAGE 배치입니다. 이미지 또는 폴더 중 하나를 사용합니다. 이미지 권리는 사용자 책임입니다."
+      },
+      "captions": {
+        "name": "캡션",
+        "tooltip": "이미지당 한 줄의 캡션입니다. 비워 두면 모든 이미지에 단서만 사용합니다."
+      },
+      "folder": {
+        "name": "폴더",
+        "tooltip": "같은 이름의 선택적 .txt 캡션이 있는 이미지 폴더입니다. 폴더 또는 이미지 중 하나를 사용합니다."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Paths",
+        "tooltip": "One completed LoRA path per line."
+      },
+      "1": {
+        "name": "Mod list",
+        "tooltip": "Solved LoRAs imported at strength 0.7, ready for KiLoRA Apply."
+      },
+      "2": {
+        "name": "Report",
+        "tooltip": "이미지 수, 검증 이미지 수, 처리 시간, 두 검사 손실, 상대 개선율, 저장하거나 재사용한 경로입니다."
+      }
+    }
+  },
+  "KiLoRAPack": {
+    "display_name": "KiLoRA Pack",
+    "description": "Bundle mods into models/kilora/<name>.kpack.json. Copy the pack and mods into one folder for sharing.",
+    "inputs": {
+      "mods": {
+        "name": "Mods",
+        "tooltip": "One mod filename or path per line. Accepts solve paths; plain LoRA lines are ignored."
+      },
+      "name": {
+        "name": "Name",
+        "tooltip": "Pack name and filename stem."
+      },
+      "strength": {
+        "name": "Strength",
+        "tooltip": "Strength for every mod entry. Default 0.7."
+      },
+      "depth": {
+        "name": "Depth",
+        "tooltip": "-1 uses the mod settings; zero or greater stores a pack depth."
+      },
+      "copy_mods": {
+        "name": "Copy mods",
+        "tooltip": "Copy the mods and pack into models/kilora/<name>/ for sharing."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Pack path",
+        "tooltip": "Saved .kpack.json file. Load it with KiLoRA Palette."
+      },
+      "1": {
+        "name": "Report",
+        "tooltip": "Each mod ID, version, cue and preview availability."
+      }
+    }
+  },
+  "KiLoRABuildEditorPack": {
+    "display_name": "KiLoRA Live: Build Editor Pack",
+    "description": "Build editor packs for live mode from the connected model and CLIP. The packs go to models/kilora/<name>/. Needs the plugin kilora-editor-chunk.",
+    "inputs": {
+      "model": {
+        "name": "Model",
+        "tooltip": "The base model. With one live mod on it, the packs are for that mod. Without a live mod, they are for the base model."
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "The text encoder of the model. It encodes each prompt and the empty caption."
+      },
+      "name": {
+        "name": "Name",
+        "tooltip": "The folder name in models/kilora. A new build with the same name replaces the folder."
+      },
+      "prompts": {
+        "name": "Prompts",
+        "tooltip": "JSON that maps each family name to a list of prompts. A family name that starts with _ adds to the common pack only."
+      },
+      "base_family": {
+        "name": "Base family",
+        "tooltip": "The base model family. auto uses the family of the loaded model."
+      },
+      "draws": {
+        "name": "Noise draws",
+        "tooltip": "Noise draws per prompt and caption. More draws give smoother directions and take longer."
+      },
+      "common": {
+        "name": "Common directions",
+        "tooltip": "The number of directions in the common pack."
+      },
+      "family": {
+        "name": "Family directions",
+        "tooltip": "The number of directions in each family pack."
+      },
+      "loras": {
+        "name": "LoRAs",
+        "tooltip": "LoRA files from models/loras that are applied while the packs are built. One name per line, optionally name:strength."
+      },
+      "orthogonalize": {
+        "name": "Orthogonalize",
+        "tooltip": "Remove the common directions and the earlier family packs from each family pack."
+      },
+      "size": {
+        "name": "Size",
+        "tooltip": "Image size in pixels. 0 uses the default of the base family."
+      },
+      "steps": {
+        "name": "Steps",
+        "tooltip": "Sampler steps per image. 0 uses the default of the base family."
+      },
+      "seed": {
+        "name": "Seed",
+        "tooltip": "The first seed of the images and noise draws."
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "Pack folder",
+        "tooltip": "The folder with the packs and the editor file. KiLoRA Live Packs finds the packs there."
+      },
+      "1": {
+        "name": "Report",
+        "tooltip": "Packs, directions per pack, events, seconds and the memory estimate."
+      }
+    }
+  }
+}

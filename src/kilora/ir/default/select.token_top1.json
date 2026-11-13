@@ -1,0 +1,172 @@
+{
+  "name": "select.token.top1",
+  "part": "select",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "inputs": {
+    "logits": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "noise": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "weights": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {
+    "one": {
+      "kind": "embedded",
+      "dtype": "float32",
+      "shape": [],
+      "axes": [],
+      "value": 1.0
+    },
+    "one_int": {
+      "kind": "embedded",
+      "dtype": "int64",
+      "shape": [],
+      "axes": [],
+      "value": 1
+    }
+  },
+  "instructions": [
+    {
+      "id": 0,
+      "op": "add",
+      "args": [
+        "logits",
+        "noise"
+      ],
+      "result": "noisy",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "softmax",
+      "args": [
+        "logits"
+      ],
+      "result": "probs",
+      "attributes": {
+        "axis": "experts"
+      }
+    },
+    {
+      "id": 2,
+      "op": "argmax",
+      "args": [
+        "noisy"
+      ],
+      "result": "choice",
+      "attributes": {
+        "axis": "experts"
+      }
+    },
+    {
+      "id": 3,
+      "op": "one_hot",
+      "args": [
+        "choice"
+      ],
+      "result": "hot_int",
+      "attributes": {
+        "axis": "experts",
+        "size_of": "logits"
+      }
+    },
+    {
+      "id": 4,
+      "op": "cast",
+      "args": [
+        "hot_int"
+      ],
+      "result": "hot",
+      "attributes": {
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": 5,
+      "op": "unsqueeze",
+      "args": [
+        "choice"
+      ],
+      "result": "choice_index",
+      "attributes": {
+        "axis": "experts",
+        "before": "tokens",
+        "after": true
+      }
+    },
+    {
+      "id": 6,
+      "op": "gather",
+      "args": [
+        "probs",
+        "choice_index"
+      ],
+      "result": "picked",
+      "attributes": {
+        "axis": "experts"
+      }
+    },
+    {
+      "id": 7,
+      "op": "add",
+      "args": [
+        "one",
+        "picked"
+      ],
+      "result": "picked_plus_one",
+      "attributes": {}
+    },
+    {
+      "id": 8,
+      "op": "detach",
+      "args": [
+        "picked"
+      ],
+      "result": "picked_detached",
+      "attributes": {}
+    },
+    {
+      "id": 9,
+      "op": "sub",
+      "args": [
+        "picked_plus_one",
+        "picked_detached"
+      ],
+      "result": "picked_weight",
+      "attributes": {}
+    },
+    {
+      "id": 10,
+      "op": "mul",
+      "args": [
+        "hot",
+        "picked_weight"
+      ],
+      "result": "weights",
+      "attributes": {}
+    }
+  ],
+  "identity": "af0a1919ba7e2d64a329fb1190b8928b39c766873694850cc609647be0b1abb9"
+}
