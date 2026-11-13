@@ -1701,7 +1701,10 @@ def _prepared(s: compute.LayerSet, dt: torch.dtype) -> _Prepared:
             p.cb1 = g["cb1"].contiguous()
             p.cw2 = g["cw2"].contiguous()
             p.cb2 = g["cb2"].contiguous()
-        p.up_pad = _pad(up, (p.CP, width))
+        if p.separable or compute.uses_adaptive(s):
+            p.up_pad = _pad(up, (p.CP, width))
+        else:
+            p.up_pad = torch.empty(0, device=dev)
         if s.form == "state":
             u = p.up_dt.float()
             same_up = dt == torch.float32 or dt == s.up.dtype
@@ -1871,7 +1874,7 @@ def _adaptive_import_gate(s, z, hist, y0, region, name, k, last):
     cols = z.shape[-1]
     f32 = torch.float32
     if "up_f32" not in hist:
-        hist["up_f32"] = compute._as(s.up, f32).detach().contiguous()
+        hist["up_f32"] = s.up.detach().float().contiguous()
         hist["first_norm"] = torch.empty(n, dtype=f32, device=dev)
         hist["first_rms"] = torch.empty((batch, out), dtype=f32, device=dev)
     zf = z.detach().reshape(n, cols).to(f32).contiguous()
@@ -1969,7 +1972,7 @@ def _derived_state_tables(lora, dt):
         p = _Prepared()
         p.cols = [s.up.shape[0] for s in lora]
         p.experts = [k[0].shape[0] for k in keys]
-        p.up = torch.cat([compute._as(s.up, dt).float() for s in lora], 0)
+        p.up = torch.cat([s.up.to(dt).float() for s in lora], 0)
         p.gram = p.up @ p.up.t()
         p.keys, p.key_maps, p.read_maps, p.den = [], [], [], []
         indices = []
@@ -1979,13 +1982,15 @@ def _derived_state_tables(lora, dt):
             p.keys.append(kin)
             p.den.append((k[1].float() / k[0].shape[-1]).contiguous())
             p.key_maps.append(p.up @ kin.float().t() if s.form == "state" else None)
-            down = compute._as(s.down, dt).float() if s.form == "state" else s.down.float()
+            down = s.down.to(dt).float() if s.form == "state" else s.down.float()
             p.read_maps.append(p.up @ down.t() if down.shape[-1] == p.up.shape[-1] else None)
             indices.append(
                 torch.arange(e, device=p.up.device).repeat_interleave(s.per_expert) + offset
             )
             offset += e
         p.column_expert = torch.cat(indices).contiguous()
+        if all(s.form != "state" for s in lora):
+            p.up = torch.empty(0, device=p.up.device)
     compute._cache_put(key, p)
     return p
 
@@ -3356,6 +3361,7 @@ def _torch_gate(s: compute.LayerSet, p, start, z_start, region, index=0):
 def _elementwise_ok(*tensors):
     return (
         HAVE_TRITON
+        and triton is not None
         and enabled()
         and not compute._EAGER
         and not torch.is_grad_enabled()

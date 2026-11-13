@@ -73,6 +73,7 @@ def _generate(tmp_path, monkeypatch, *, fused_check: bool, sync_counts=None):
     reasons: list[str] = []
     recorders: list[bool] = []
     if fused_check:
+        pytest.importorskip("triton")
         monkeypatch.setenv("KILORA_FUSED", "1")
         monkeypatch.setattr(fused, "HAVE_TRITON", True)
         monkeypatch.setattr(fused, "device_ok", lambda t: True)

@@ -532,7 +532,7 @@ def _step_metric(s: LayerSet, device) -> torch.Tensor:
     hit = _cache_get(key)
     if hit is not None:
         return hit
-    g = depth_step_metric(_as(s.up, torch.float32)).to(device)
+    g = depth_step_metric(s.up).to(device)
     _cache_put(key, g)
     return g
 
@@ -2870,7 +2870,7 @@ def split_gate(
             if active is not None:
                 zr = zr * active.to(zr.dtype)
             if "adaptive_gram" not in hist:
-                up = _as(s.up, torch.float32).detach()
+                up = s.up.detach().float()
                 hist["adaptive_gram"] = up @ up.t()
             reference = {}
             if not base_reference():
@@ -3251,7 +3251,7 @@ def _speculate_prepare(cache):
         for n, (key, rec) in enumerate(group):
             reference = {}
             if rec["adaptive"] and not base_reference():
-                up = _as(rec["set"].up, torch.float32)
+                up = rec["set"].up.float()
                 reference["first_norm"], reference["first_rms"] = change_stats(
                     first_changes[n], up, up @ up.t()
                 )
@@ -5550,9 +5550,7 @@ def _import_read_cross(st, ups):
     if hit is not None:
         return hit
     result = [
-        _as(up, torch.float32) @ _as(st.down, torch.float32).t()
-        if up.shape[-1] == st.down.shape[-1]
-        else None
+        up.float() @ st.down.float().t() if up.shape[-1] == st.down.shape[-1] else None
         for up in ups
     ]
     _cache_put(key, result)
@@ -5593,7 +5591,7 @@ def _exact_correction(st, x, coefs, weights, region, dtype):
             exact = exact * st.expert_mask[..., start : start + 1].to(dtype)
         if region is not None:
             exact = exact * region.to(dtype)
-        approx = coefs[..., start:end].to(dtype) @ _as(st.up[start:end], dtype)
+        approx = coefs[..., start:end].to(dtype) @ st.up[start:end].to(dtype)
         part = (exact - approx) * weights[..., expert : expert + 1].to(dtype)
         correction = part if correction is None else correction + part
     return correction
@@ -6472,15 +6470,15 @@ def _fused_module():
 def _lowrank_mats(lora: list[LayerSet]) -> tuple[torch.Tensor, list, list]:
     forms = "".join(s.form[0] for s in lora)
     key = _tensor_key(f"lowrank-{forms}", [t for s in lora for t in (s.up, s.down, s.router)])
+    up = torch.cat([s.up.float() for s in lora], 0)
     hit = _cache_get(key)
     if hit is not None:
-        return hit
-    up = torch.cat([s.up.float() for s in lora], 0)
+        gs, hs = hit
+        return up, gs, hs
     gs = [up @ s.down.float().t() if s.form == "state" else None for s in lora]
     hs = [up @ s.router.float().t() for s in lora]
-    value = (up, gs, hs)
-    _cache_put(key, value)
-    return value
+    _cache_put(key, (gs, hs))
+    return up, gs, hs
 
 
 def _run_lowrank(

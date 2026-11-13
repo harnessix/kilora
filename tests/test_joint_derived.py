@@ -129,6 +129,7 @@ def test_zero_set_matches_remaining_set(depth, zero, monkeypatch):
 @pytest.mark.parametrize("selection", ["sparsemax", "top1"])
 @pytest.mark.parametrize("masks", ["sample", "expect"])
 def test_joint_eager_fused_and_ir_agree(depth, scope, selection, masks, monkeypatch):
+    pytest.importorskip("triton")
     monkeypatch.setenv("KILORA_MASKS", masks)
     monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
     layers = [replace(s, routing_scope=scope, routing_select=selection) for s in sets()]
@@ -212,6 +213,8 @@ def prior_compute():
 def test_import_only_is_bit_exact_to_starting_branch(
     depth, backend, count, target, prior_compute, monkeypatch
 ):
+    if backend == "fused":
+        pytest.importorskip("triton")
     monkeypatch.setenv("KILORA_MASKS", "expect")
     monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
     monkeypatch.setenv("KILORA_FUSED", "1")
@@ -344,6 +347,8 @@ def test_saved_settings_and_environment_cannot_restore_state_learned_keys(mode, 
 
 @pytest.mark.parametrize("backend", ["loop", "lowrank", "path", "fused"])
 def test_direct_backends_follow_the_derived_state_contract(backend, monkeypatch):
+    if backend == "fused":
+        pytest.importorskip("triton")
     from kilora import fused
 
     monkeypatch.setenv("KILORA_MASKS", "expect")

@@ -175,6 +175,11 @@ def test_import_chain_freezes_routes_and_replays_current_input(monkeypatch, widt
     first = _call([s], 3, 0.3, cache, x=x, y0=y0)
     entry = cache["layer"]
     assert len(entry["chain_routes"]) == 3 and len(entry["chain_keeps"]) == 2
+    assert all(
+        isinstance(m, tuple) and m[0].dtype == torch.uint8
+        for step in entry["chain_keeps"]
+        for m in step
+    )
 
     def no_routing(*args, **kwargs):
         raise AssertionError("frozen chain routed again")
@@ -195,8 +200,24 @@ def test_import_chain_freezes_routes_and_replays_current_input(monkeypatch, widt
             "layer",
             stats={
                 "forced_routes_all": entry["chain_routes"],
-                "forced_read_keeps_all": entry["chain_keeps"],
+                "forced_read_keeps_all": [
+                    [R._unpack_keep(m) for m in step] for step in entry["chain_keeps"]
+                ],
             },
         )
     assert torch.equal(actual, expected)
     assert not torch.equal(actual, first)
+
+
+@pytest.mark.parametrize("cols", [1, 7, 8, 13, 64])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+def test_packed_read_masks_restore_the_same_values(cols, dtype, monkeypatch):
+    monkeypatch.setenv("KILORA_MASKS", "sample")
+    gen = torch.Generator().manual_seed(cols)
+    m = (torch.rand(2, 5, cols, generator=gen) < 0.5).to(dtype)
+    packed = R._pack_keep(m)
+    assert isinstance(packed, tuple) and packed[0].dtype == torch.uint8
+    assert packed[0].numel() == 2 * 5 * ((cols + 7) // 8)
+    restored = R._unpack_keep(packed)
+    assert restored.dtype == dtype and restored.shape == m.shape
+    assert torch.equal(restored, m)

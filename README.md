@@ -2,7 +2,7 @@
 
 KiLoRA routes several LoRA files together in diffusion models such as Anima, Z-Image and Flux. Each LoRA acts where it responds to the image, instead of all LoRAs adding their full change everywhere. KiLoRA also loads KiLoRA mods, which are routed LoRA experts saved in one file.
 
-The version is 0.0.9.
+The version is 0.0.10.
 
 ## Install
 

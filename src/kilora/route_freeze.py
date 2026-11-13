@@ -108,13 +108,65 @@ def run(call, x, y0, keyed, positions, target, regions, depth):
             built["chain_target"] = target
             built["chain_routes"] = routes
             built["chain_keeps"] = [
-                [keeps[(target, k)][i] for i in range(len(keyed))] for k in range(1, len(routes))
+                [_pack_keep(keeps[(target, k)][i]) for i in range(len(keyed))]
+                for k in range(1, len(routes))
             ]
     if built is not None and _CACHES:
         built["_ir_freeze_override"] = override
         built["_import_fixed_read"] = import_fixed_read()
         _CACHES[-1][target] = built
     return y
+
+
+def _pack_keep(m: torch.Tensor):
+    from .compute import expect_masks
+
+    if expect_masks() or m.dtype == torch.bool or not m.is_floating_point() or m.ndim == 0:
+        return m
+    cols = m.shape[-1]
+    bits = (m != 0).reshape(-1, cols).to(torch.uint8)
+    pad = (-cols) % 8
+    if pad:
+        bits = F.pad(bits, (0, pad))
+    shifts = torch.arange(8, device=m.device, dtype=torch.uint8)
+    packed = (bits.view(bits.shape[0], -1, 8) << shifts).sum(-1, dtype=torch.uint8)
+    return (packed, tuple(m.shape), m.dtype)
+
+
+def _unpack_keep(value) -> torch.Tensor:
+    if isinstance(value, tuple):
+        packed, shape, dtype = value
+        shifts = torch.arange(8, device=packed.device, dtype=torch.uint8)
+        bits = (packed.unsqueeze(-1) >> shifts) & 1
+        cols = shape[-1]
+        return bits.reshape(packed.shape[0], -1)[:, :cols].to(dtype).reshape(shape)
+    return value
+
+
+class _FrozenProduct(dict):
+    def __getitem__(self, key):
+        if key == "up":
+            return _product_up(self)
+        return super().__getitem__(key)
+
+    def __contains__(self, key):
+        return key == "up" or super().__contains__(key)
+
+    def get(self, key, default=None):
+        if key == "up" or super().__contains__(key):
+            return self[key]
+        return default
+
+
+def _product_up(entry) -> torch.Tensor:
+
+    lead = entry["scale"].shape[:-1]
+    parts = []
+    for up, qb in zip(entry["ups"], entry["up_gates"], strict=True):
+        folded = up.float()
+        folded = folded * qb.float() if qb is not None else folded.expand(*lead, *folded.shape)
+        parts.append(folded)
+    return torch.cat(parts, -2)
 
 
 def _step_weights(n: int, depth) -> list[float]:
@@ -157,7 +209,7 @@ def build(rec, keyed, positions, target, regions, depth, lead) -> dict | None:
         if override is not None:
             raise NotImplementedError("freeze override requires float32 three-dimensional routes")
         _note("IR driver refused freeze: unsupported route layout or dtype")
-    scales, ups, forms, exact = [], [], [], []
+    scales, ups, up_gates, forms, exact = [], [], [], [], []
     for i, s in enumerate(keyed):
         gates = [g[i].float() for g in steps]
         if s.iteration == "path" or s.aggregation == "replace":
@@ -169,31 +221,33 @@ def build(rec, keyed, positions, target, regions, depth, lead) -> dict | None:
         col = mean.repeat_interleave(s.per_expert, dim=-1)
         scale = s.scale.float() if isinstance(s.scale, torch.Tensor) else float(s.scale)
         col = col * scale
-        up = s.up.float()
         q = rec["gates"].get((target, i)) or rec["gates"].get((f"{target}#input{positions[i]}", 0))
         if q is not None:
             qa, qb = q
             col = col * qa.float().mean(-2)
-            up = up * qb.float()
             exact.append(
                 (s, mean * scale * qa.float().mean(-2), qb) if getattr(s, "exact", None) else None
             )
         else:
-            up = up.expand(*col.shape[:-1], *up.shape)
+            qb = None
             exact.append((s, mean * scale, None) if getattr(s, "exact", None) else None)
         scales.append(col)
-        ups.append(up)
+        ups.append(s.up)
+        up_gates.append(None if qb is None else qb.detach().clone())
         forms.append(s.form)
-    return {
-        "lead": lead,
-        "forms": forms,
-        "downs": [s.down for s in keyed],
-        "expert_masks": [s.expert_mask for s in keyed],
-        "scale": torch.cat(scales, -1),
-        "up": torch.cat(ups, -2),
-        "regions": list(regions),
-        "exact": exact,
-    }
+    return _FrozenProduct(
+        {
+            "lead": lead,
+            "forms": forms,
+            "downs": [s.down for s in keyed],
+            "expert_masks": [s.expert_mask for s in keyed],
+            "scale": torch.cat(scales, -1),
+            "ups": ups,
+            "up_gates": up_gates,
+            "regions": list(regions),
+            "exact": exact,
+        }
+    )
 
 
 def output(entry, x, y0, regions=None, masks=None) -> torch.Tensor:
@@ -207,13 +261,14 @@ def output(entry, x, y0, regions=None, masks=None) -> torch.Tensor:
             layers = [
                 dataclasses.replace(s, expert_mask=m) for s, m in zip(layers, masks, strict=True)
             ]
+        keeps = [[_unpack_keep(m) for m in step] for step in entry["chain_keeps"]]
         stats = {
             "forced_routes_all": entry["chain_routes"],
-            "forced_read_keeps_all": entry["chain_keeps"],
+            "forced_read_keeps_all": keeps,
         }
         if len(layers) == 1:
             stats["forced_routes"] = [step[0] for step in entry["chain_routes"]]
-            stats["forced_read_keeps"] = [step[0] for step in entry["chain_keeps"]]
+            stats["forced_read_keeps"] = [step[0] for step in keeps]
         return _replay_import_chain(
             x,
             y0,
@@ -238,7 +293,8 @@ def output(entry, x, y0, regions=None, masks=None) -> torch.Tensor:
             c = c * r.float()
         reads.append(c)
     c = torch.cat(reads, -1) * entry["scale"].unsqueeze(-2)
-    delta = torch.matmul(c, entry["up"])
+    up = _product_up(entry) if "ups" in entry else entry["up"]
+    delta = torch.matmul(c, up)
     if any(entry.get("exact", ())):
         import dataclasses
 
