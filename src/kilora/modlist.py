@@ -9,7 +9,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from .adapter import Settings, imported_schedule_fields, imported_settings
+from .adapter import (
+    Settings,
+    apply_imported_share_defaults,
+    imported_schedule_fields,
+    imported_settings,
+)
 from .bake import ScopedSet
 from .bindings import BINDINGS
 from .compute import derived_default_depth, derived_mode
@@ -215,13 +220,13 @@ def load_choice(choice: ModChoice, position: int, search_dirs=()) -> LoadedMod:
         from .references import resolve as resolve_reference
 
         mod = _cached_mod(choice.path)
-        manifest = mod.manifest
+        manifest = apply_imported_share_defaults(mod.manifest)
         sets = choice.session.sets() if choice.session is not None else mod.sets
         settings = replace(mod.settings)
         if (
             manifest.get("schedule_yields_to_depth")
             and (os.environ.get("KILORA_IMPORT_SCORE") or settings.import_score) == "derived"
-            and derived_mode() == "full"
+            and derived_mode(settings) == "full"
         ):
             manifest = {**manifest, "depth": {"recommended": derived_default_depth()}}
             manifest.pop("depth_schedule", None)
@@ -362,6 +367,7 @@ class LoadPlan:
                 roles=parse_policy(m.settings.token_roles),
                 import_score=m.settings.import_score,
                 derived_entry_temp=m.settings.derived_entry_temp,
+                derived_mode=s.extra.get("derived_mode"),
                 candidates=m.settings.candidates,
                 candidate_summary=m.settings.candidate_summary,
             )
@@ -385,6 +391,19 @@ class LoadPlan:
             experts = sum(s.num_experts for s in m.sets)
             lines.append(f"  {i}. {m.name} ({m.mod_id} {m.version}): strength {m.strength:+g}")
             lines.append(f"     sets: {sets}; {experts} experts per target")
+            edits_info = m.manifest.get("edits")
+            if isinstance(edits_info, dict):
+                options = edits_info.get("options")
+                options = options if isinstance(options, dict) else {}
+                mounts = edits_info.get("mounts")
+                if (
+                    options.get("edits") != "off"
+                    and isinstance(mounts, int)
+                    and not isinstance(mounts, bool)
+                    and mounts > 0
+                ):
+                    mark = str(edits_info.get("mark") or "")
+                    lines.append(f"     edits: {mounts} mounts {mark}".rstrip())
             for reason in self.reasons.get(m.mod_id, []):
                 lines.append(f"     {reason}")
             words = m.manifest.get("trigger_words") or []

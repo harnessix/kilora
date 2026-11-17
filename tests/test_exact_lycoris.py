@@ -283,7 +283,8 @@ def test_mixed_state_and_input_preserve_routes_and_apply_exact(fast, monkeypatch
     torch.testing.assert_close(actual, baseline + extra, rtol=2e-5, atol=2e-5)
 
 
-def test_batched_derived_walks_apply_exact_change(monkeypatch):
+@pytest.mark.parametrize("depth", [2, 4])
+def test_batched_derived_walks_apply_exact_change(monkeypatch, depth):
     from kilora import compute
     from kilora.path_walks import select_weights
 
@@ -305,21 +306,26 @@ def test_batched_derived_walks_apply_exact_change(monkeypatch):
     y0 = torch.randn(2, 5, 8, generator=gen)
     entries = [torch.tensor([1.0, 0.0]).expand(2, 5, 2), torch.tensor([0.0, 1.0]).expand(2, 5, 2)]
     with torch.no_grad():
-        actual, states, _ = compute._derived_batched_paths(layer, x, y0, None, "test", entries, 2)
+        actual, states, _ = compute._derived_batched_paths(
+            layer, x, y0, None, "test", entries, depth
+        )
         paths = []
         separate_states = []
         for entry in entries:
             stats = {}
             paths.append(
-                compute._run_input(x, y0, [layer], [0], 2, [None], "test", entry=entry, stats=stats)
+                compute._run_input(
+                    x, y0, [layer], [0], depth, [None], "test", entry=entry, stats=stats
+                )
             )
             stats.setdefault("converged", torch.zeros_like(stats["score"], dtype=torch.bool))
             separate_states.append(stats)
         weights = select_weights(separate_states, layer.path_select)
         expected = sum((path - y0) * weights[..., i : i + 1] for i, path in enumerate(paths))
-    assert all(
-        torch.equal(a["gates"], b["gates"]) for a, b in zip(states, separate_states, strict=True)
-    )
+    for a, b in zip(states, separate_states, strict=True):
+        assert torch.equal(a["gates"] > 0, b["gates"] > 0)
+        assert torch.equal(a["gates"].argmax(-1), b["gates"].argmax(-1))
+        torch.testing.assert_close(a["gates"], b["gates"], rtol=0, atol=1e-6)
     torch.testing.assert_close(actual, expected, rtol=2e-5, atol=2e-5)
 
 

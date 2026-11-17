@@ -24,7 +24,7 @@ from ..base_weights import BaseWeights, is_quantized_weight, read_base_weight
 from ..bindings import BINDINGS, COMFY_PREFIX, Binding
 from ..compute import DEPTH_STEP_DEFAULTS, check_depth_step, check_routing
 from ..errors import KiLoRAError
-from ..families import detect_binding, layout_resolver
+from ..families import detect_binding, layout_resolver, video_latent_size
 from ..fixed_change import fixed_copy, is_fixed
 from ..i18n import text
 from ..lora_import import import_lora
@@ -48,10 +48,16 @@ def _prepare_sampling_memory(executor, patcher, *args, **kwargs):
     original = model.memory_required
     had_local = "memory_required" in model.__dict__
     local = model.__dict__.get("memory_required")
+    decide_placement(patcher, args[0] if args else None)
     extra = patcher.model_options.get(_MEMORY_KEY, 0)
     previous = patcher.__dict__.get("_kilora_estimating", False)
     patcher.__dict__["_kilora_estimating"] = True
-    model.memory_required = lambda *a, **kw: original(*a, **kw) + extra
+    options = patcher.model_options
+
+    def estimate(*a, **kw):
+        return original(*a, **kw) + extra + _reserve_estimate(options, a[0] if a else None)
+
+    model.memory_required = estimate
     try:
         return executor(patcher, *args, **kwargs)
     finally:
@@ -75,7 +81,139 @@ def _sampling_wrappers(options: dict) -> dict:
     return sampling
 
 
-def _working_memory(patcher: Any, plans: dict, changes: dict) -> None:
+def _plan_bytes(plan: Any, size: int) -> int:
+    total = 0
+    for _, _, target in plan.parts:
+        for layer in target.sets:
+            for name in ("down", "up", "routing_down", "routing_up"):
+                value = getattr(layer, name, None)
+                if isinstance(value, torch.Tensor):
+                    total += value.numel() * size
+            for parts in (layer.exact or {}).values():
+                total += sum(p.numel() for p in parts if isinstance(p, torch.Tensor)) * size
+            for name in ("router", "keys_in", "keys_out", "share_transition_weighted"):
+                value = getattr(layer, name, None)
+                if isinstance(value, torch.Tensor):
+                    total += value.numel() * 4
+            for name in ("rows_in", "rows_out"):
+                value = getattr(layer, name, None)
+                if isinstance(value, torch.Tensor):
+                    total += value.numel() * value.element_size()
+            if layer.gate:
+                total += sum(t.numel() for t in layer.gate.values()) * 4
+    return total
+
+
+_PLACEMENT_KEY = "kilora_placement"
+_HOST_BLOCKS = 3
+
+
+class _Placement:
+    def __init__(self, plans: Sequence[Any], size: int, other: int) -> None:
+        self.plans = [weakref.ref(p) for p in plans]
+        blocks: dict[Any, int] = {}
+        for plan in plans:
+            nbytes = _plan_bytes(plan, size)
+            block = plan.parts[0][2].place[0] if plan.parts else None
+            blocks[block] = blocks.get(block, 0) + nbytes
+        self.bytes = sum(blocks.values())
+        self.block_bytes = max(blocks.values(), default=0)
+        self.other = other
+        self.host = False
+
+    def __copy__(self) -> _Placement:
+        return self
+
+    def __deepcopy__(self, memo) -> _Placement:
+        return self
+
+    def device_bytes(self) -> int:
+        if not self.host:
+            return self.bytes
+        return min(self.bytes, self.block_bytes * _HOST_BLOCKS)
+
+    def fits(self, free: int, model: int, loaded: int, working: int) -> bool:
+        return self.bytes + max(model - loaded, 0) + working <= free
+
+    def to_host(self) -> None:
+        from types import SimpleNamespace
+
+        from ..library.prefetch import PlanPrefetch
+
+        if self.host:
+            return
+        plans = [plan for plan in (ref() for ref in self.plans) if plan is not None]
+        self.host = True
+        for plan in plans:
+            plan._cache.clear()
+            for _, _, target in plan.parts:
+                for layer in target.sets:
+                    _layer_to_cpu(layer)
+        plans = [plan for plan in plans if plan._prefetch is None and plan.parts]
+        if plans:
+            PlanPrefetch(
+                plans,
+                {"mode": "auto", "window": 1, "report": SimpleNamespace(prefetch_wait_seconds=0.0)},
+            )
+
+
+def _layer_to_cpu(layer: Any) -> None:
+    def cpu(value):
+        return (
+            value.cpu() if isinstance(value, torch.Tensor) and value.device.type != "cpu" else value
+        )
+
+    for key, value in list(vars(layer).items()):
+        if isinstance(value, torch.Tensor):
+            setattr(layer, key, cpu(value))
+    if layer.gate:
+        layer.gate = {k: cpu(v) for k, v in layer.gate.items()}
+    if layer.exact:
+        layer.exact = {i: tuple(cpu(p) for p in parts) for i, parts in layer.exact.items()}
+
+
+def decide_placement(patcher: Any, noise_shape: Any = None, mm: Any = None) -> bool:
+    options = getattr(patcher, "model_options", None)
+    placement = options.get(_PLACEMENT_KEY) if isinstance(options, dict) else None
+    if placement is None:
+        return False
+    if placement.host:
+        return True
+    if mm is None:
+        try:
+            import comfy.model_management as mm
+        except ImportError:
+            return False
+    device = getattr(patcher, "load_device", None)
+    if device is None or torch.device(device).type == "cpu":
+        return False
+    try:
+        free = int(mm.get_free_memory(device))
+        model = int(patcher.model_size())
+        loaded = int(patcher.loaded_size()) if hasattr(patcher, "loaded_size") else 0
+        working = 0
+        if noise_shape is not None:
+            shape = [noise_shape[0] * 2, *list(noise_shape[1:])]
+            working = int(patcher.model.memory_required(shape))
+        if hasattr(mm, "minimum_inference_memory"):
+            working += int(mm.minimum_inference_memory())
+    except Exception as e:
+        log.debug("KiLoRA: no memory estimate for the placement (%s)", e)
+        return False
+    if placement.fits(free, model, loaded, working):
+        return False
+    placement.to_host()
+    options[_MEMORY_KEY] = placement.other + placement.device_bytes()
+    log.info(
+        "KiLoRA: the device copy (%.2f GB) does not fit beside the model (%.2f GB free); "
+        "it stays on the CPU and moves per block at use",
+        placement.bytes / 1e9,
+        free / 1e9,
+    )
+    return True
+
+
+def _working_memory(patcher: Any, plans: dict, changes: dict, transfer: Any = None) -> None:
     model = patcher.model
     dtype = getattr(model, "manual_cast_dtype", None)
     if dtype is None and hasattr(model, "get_dtype"):
@@ -83,29 +221,21 @@ def _working_memory(patcher: Any, plans: dict, changes: dict) -> None:
     if not isinstance(dtype, torch.dtype):
         dtype = next(model.parameters()).dtype
     size = torch.empty((), dtype=dtype).element_size()
-    count = 0
-    for plan in plans.values():
-        for _, _, target in plan.parts:
-            for layer in target.sets:
-                for name in (
-                    "router",
-                    "keys_in",
-                    "keys_out",
-                    "rows_in",
-                    "rows_out",
-                    "down",
-                    "up",
-                    "share_transition_weighted",
-                ):
-                    value = getattr(layer, name, None)
-                    if isinstance(value, torch.Tensor):
-                        count += value.numel()
-                if layer.gate:
-                    count += sum(t.numel() for t in layer.gate.values())
+    total = sum(_plan_bytes(plan, size) for plan in plans.values())
+    other = 0
     for items in changes.values():
         for item in items:
-            count += sum(v.numel() for v in vars(item).values() if isinstance(v, torch.Tensor))
-    patcher.model_options[_MEMORY_KEY] = count * size
+            other += size * sum(
+                v.numel() for v in vars(item).values() if isinstance(v, torch.Tensor)
+            )
+    total += other
+    if transfer is None and plans:
+        placement = _Placement(list(plans.values()), size, other)
+        patcher.model_options[_PLACEMENT_KEY] = placement
+        total = other + placement.device_bytes()
+    else:
+        patcher.model_options.pop(_PLACEMENT_KEY, None)
+    patcher.model_options[_MEMORY_KEY] = total
     _sampling_wrappers(patcher.model_options)[_MEMORY_KEY] = [_prepare_sampling_memory]
     if not hasattr(patcher, "memory_required"):
         return
@@ -119,6 +249,7 @@ def _working_memory(patcher: Any, plans: dict, changes: dict) -> None:
                 0
                 if self.__dict__.get("_kilora_estimating")
                 else self.model_options.get(_MEMORY_KEY, 0)
+                + _reserve_estimate(self.model_options, args[0] if args else None)
             )
             return base.memory_required(self, *args, **kwargs) + extra
 
@@ -128,6 +259,137 @@ def _working_memory(patcher: Any, plans: dict, changes: dict) -> None:
             {"memory_required": memory_required, "_kilora_memory_class": True},
         )
     patcher.__class__ = _MEMORY_CLASSES[base]
+
+
+_RESERVE_KEY = "kilora_freeze_reserve"
+_CENSUS_COLUMNS = 64
+_CENSUS_EXPERTS = 8
+_CENSUS_VALUE = 4
+_DEFAULT_PATCH = 2
+
+
+def working_memory_bytes(
+    phase: str, *, tokens: int, width: int, sets: int, depth: int, rows: int | None = None
+) -> int:
+
+    tokens, width, sets, depth = (max(int(v), 1) for v in (tokens, width, sets, depth))
+    f = _CENSUS_VALUE
+    if phase == "freeze_record":
+        held = sets * 2 * tokens * width * f
+        records = depth * sets * tokens * (_CENSUS_EXPERTS + _CENSUS_COLUMNS) * f
+        step = tokens * (_CENSUS_COLUMNS + width) * f
+        return held + records + step
+    if phase == "live_write":
+        rows = width if rows is None else max(int(rows), 1)
+        inputs = tokens * width * f
+        reads = sets * depth * tokens * _CENSUS_COLUMNS * f
+        write = 3 * rows * width * f
+        return inputs + reads + write
+    raise ValueError(f"unknown working memory phase {phase!r}")
+
+
+def _loaded_entries(mm: Any, patchers) -> list:
+    keep = [p for p in patchers or () if p is not None]
+    if not keep:
+        return []
+    return [
+        item
+        for item in getattr(mm, "current_loaded_models", None) or ()
+        if any(getattr(item, "model", None) is p for p in keep)
+    ]
+
+
+def reserve_working_memory(
+    device: Any, reserve_bytes: int, *, phase: str, mm: Any = None, keep: Any = ()
+) -> int:
+
+    reserve_bytes = int(reserve_bytes)
+    if device is None or reserve_bytes <= 0:
+        return 0
+    device = torch.device(device)
+    if device.type == "cpu":
+        return 0
+    if mm is None:
+        try:
+            import comfy.model_management as mm
+        except ImportError:
+            return 0
+    try:
+        kept = _loaded_entries(mm, keep)
+        if kept:
+            try:
+                mm.free_memory(reserve_bytes, device, keep_loaded=kept)
+            except TypeError:
+                mm.free_memory(reserve_bytes, device)
+        else:
+            mm.free_memory(reserve_bytes, device)
+        free = int(mm.get_free_memory(device))
+    except Exception as e:
+        log.debug("KiLoRA: no working memory reserve for %s (%s)", phase, e)
+        return 0
+    log.info(
+        "KiLoRA: %s reserves %.0f MiB of working memory on %s (%.0f MiB free)",
+        phase,
+        reserve_bytes / 2**20,
+        device,
+        free / 2**20,
+    )
+    return free
+
+
+def freeze_reserve_shapes(plans: dict | None, depth: Any, patch: int | None) -> dict | None:
+    width = sets = 0
+    for plan in (plans or {}).values():
+        keyed = [
+            s
+            for s in getattr(plan, "sets", ())
+            if getattr(s, "down", None) is not None and getattr(s, "route_freeze", None) is not None
+        ]
+        if not keyed:
+            continue
+        sets = max(sets, len(keyed))
+        for s in keyed:
+            up = getattr(s, "up", None)
+            if isinstance(up, torch.Tensor) and up.dim() >= 1:
+                width = max(width, int(up.shape[-1]))
+    if not sets or not width:
+        return None
+    try:
+        depth = max(int(math.ceil(float(depth))), 1)
+    except (TypeError, ValueError):
+        depth = 1
+    return {"width": width, "sets": sets, "depth": depth, "patch": patch or _DEFAULT_PATCH}
+
+
+def _shape_tokens(shape: Any, patch: int) -> int:
+    try:
+        dims = [int(n) for n in shape]
+    except TypeError:
+        return 0
+    if len(dims) < 3:
+        return 0
+    return max(dims[0] * math.prod(dims[2:]) // (patch * patch), 1)
+
+
+def freeze_reserve_bytes(shapes: dict | None, shape: Any) -> int:
+    if not shapes:
+        return 0
+    tokens = _shape_tokens(shape, shapes["patch"])
+    if not tokens:
+        return 0
+    return working_memory_bytes(
+        "freeze_record",
+        tokens=tokens,
+        width=shapes["width"],
+        sets=shapes["sets"],
+        depth=shapes["depth"],
+    )
+
+
+def _reserve_estimate(options: Any, shape: Any) -> int:
+    if not isinstance(options, dict):
+        return 0
+    return freeze_reserve_bytes(options.get(_RESERVE_KEY), shape)
 
 
 @dataclass(frozen=True)
@@ -300,6 +562,7 @@ def _import_result(
         os.environ.get("KILORA_IMPORT_SCORE"),
         os.environ.get("KILORA_LYCORIS_APPLY"),
         lycoris_apply,
+        os.environ.get("KILORA_IMPORT_HOST_DTYPE"),
     )
     if key not in _LORA_CACHE:
         if len(_LORA_CACHE) > 32:
@@ -341,14 +604,9 @@ def _fixed_changes(plan: LoadPlan, chain: Sequence[ModEntry] = ()) -> dict[str, 
     out: dict[str, list] = {}
     for m in plan.mods:
         e = _entry_of(m, chain)
-        joint = m.label is not None and m.label.startswith("routed LoRAs")
-        axis = (
-            "ip"
-            if joint and m.label.startswith("routed LoRAs (ip)")
-            else e.axis
-            if e is not None and not joint
-            else "creative"
-        )
+        joint_axis = _share_axis(m)
+        joint = joint_axis is not None
+        axis = joint_axis if joint else e.axis if e is not None else "creative"
         tag = JOINT_SETS[axis] if joint else (entry_name(e) if e is not None else (m.label or ""))
         for section in m.sections:
             for path, changes in layer_changes([section], m.strength).items():
@@ -394,6 +652,70 @@ def live_session(entry: ModEntry, env: LiveEnv | None):
         return None
     env = env or LiveEnv()
     return session_for(entry.path, saves_dir=env.saves_dir)
+
+
+def _storage_ptr(tensor: torch.Tensor):
+    if tensor.numel() == 0:
+        return None
+    return tensor.untyped_storage().data_ptr()
+
+
+def _mutable_experts(original) -> tuple[set, set]:
+
+    objects, storage = set(), set()
+    adapter = getattr(original, "adapter_set", None)
+    if adapter is None:
+        return objects, storage
+    for expert in adapter.experts.values():
+        for tensor in (expert.down, expert.up):
+            if not isinstance(tensor, torch.Tensor):
+                continue
+            objects.add(id(tensor))
+            try:
+                pointer = _storage_ptr(tensor)
+            except RuntimeError:
+                pointer = None
+            if pointer is not None:
+                storage.add(pointer)
+    return objects, storage
+
+
+def _share_readonly(obj, memo: dict, mutable_ids: set, mutable_storage: set, seen: set) -> None:
+    identity = id(obj)
+    if identity in seen:
+        return
+    seen.add(identity)
+    if isinstance(obj, torch.Tensor):
+        if identity in mutable_ids:
+            return
+        try:
+            pointer = _storage_ptr(obj)
+        except RuntimeError:
+            return
+        if pointer is None or pointer not in mutable_storage:
+            memo[identity] = obj
+        return
+    if isinstance(obj, dict):
+        for value in obj.values():
+            _share_readonly(value, memo, mutable_ids, mutable_storage, seen)
+        return
+    if isinstance(obj, (list, tuple)):
+        for value in obj:
+            _share_readonly(value, memo, mutable_ids, mutable_storage, seen)
+        return
+    values = getattr(obj, "__dict__", None)
+    if isinstance(values, dict):
+        for value in values.values():
+            _share_readonly(value, memo, mutable_ids, mutable_storage, seen)
+
+
+def _copy_for_apply(original):
+
+    memo: dict = {}
+    mutable_ids, mutable_storage = _mutable_experts(original)
+    _share_readonly(original, memo, mutable_ids, mutable_storage, set())
+    with torch.inference_mode(False):
+        return copy.deepcopy(original, memo)
 
 
 JOINT_SET = "routed-loras"
@@ -447,6 +769,7 @@ def joint_choice(
             "KILORA_IMPORT_SCORE",
             "KILORA_LYCORIS_APPLY",
             "KILORA_CONTENT_KEYS",
+            "KILORA_IMPORT_HOST_DTYPE",
         )
     )
     key = (
@@ -489,8 +812,7 @@ def joint_choice(
                     _ROUTED_CACHE.popitem(last=False)
             _ROUTED_CACHE.move_to_end(key)
             original = _ROUTED_CACHE[key]
-            with torch.inference_mode(False):
-                result = copy.deepcopy(original)
+            result = _copy_for_apply(original)
             if original.adapter_set is not None:
                 from .. import derived_cache
 
@@ -516,6 +838,8 @@ def joint_choice(
             saves_dir,
             sections=result.sections,
             create=open_session,
+            content_keys=os.environ.get("KILORA_CONTENT_KEYS", content_keys),
+            lycoris_apply=os.environ.get("KILORA_LYCORIS_APPLY") or lycoris_apply,
         )
         if source_info
         else None
@@ -583,6 +907,45 @@ def _joint_lora(e: ModEntry, axis: str = "creative") -> bool:
     return e.kind == "lora" and e.enabled and e.axis == axis
 
 
+def _share_sources(manifest: Any) -> list[dict]:
+    edits = (manifest or {}).get("edits") if isinstance(manifest, dict) else None
+    sources = edits.get("sources") if isinstance(edits, dict) else None
+    if not isinstance(sources, list):
+        return []
+    return [s for s in sources if isinstance(s, dict) and isinstance(s.get("path"), str)]
+
+
+def _share_axis(m: Any) -> str | None:
+
+    label = getattr(m, "label", None) or ""
+    if label.startswith("routed LoRAs (ip)"):
+        return "ip"
+    if label.startswith("routed LoRAs"):
+        return "creative"
+    sources = _share_sources(getattr(m, "manifest", None))
+    if not sources:
+        return None
+    for s in getattr(m, "sets", ()):
+        for axis, name in JOINT_SETS.items():
+            if getattr(s, "name", None) == name:
+                return axis
+    axis = str(sources[0].get("axis") or "creative")
+    return axis if axis in JOINT_SETS else "creative"
+
+
+def _share_entries(m: Any) -> list[ModEntry]:
+    sources = _share_sources(getattr(m, "manifest", None))
+    axis = _share_axis(m) if sources else None
+    out = []
+    for s in sources:
+        try:
+            strength = float(s.get("strength", 1.0))
+        except (TypeError, ValueError):
+            strength = 1.0
+        out.append(ModEntry("lora", s["path"], strength, axis=axis or "creative"))
+    return out
+
+
 def _routed_groups(chain: Sequence[ModEntry], joint: bool) -> dict[str, list[ModEntry]]:
     if not joint:
         return {}
@@ -629,6 +992,39 @@ def choices_for(
             joined.add(entry.axis)
             continue
         if entry.kind == "mod":
+            session = live_session(entry, env) if entry.enabled else None
+            if session is None and entry.enabled:
+                from ..adapter import apply_imported_share_defaults
+                from ..live_imports import session_for_shared_edits
+                from ..modfile import read_manifest
+
+                share = apply_imported_share_defaults(read_manifest(entry.path))
+
+                def rebuild(sources, share=share):
+                    nonlocal shapes_model
+                    if shapes_model is None:
+                        shapes_model = shape_model(diffusers_shapes(patcher, binding))
+                    axis = str(sources[0].get("axis") or "creative")
+                    axis = axis if axis in JOINT_SETS else "creative"
+                    files = [
+                        ModEntry("lora", str(s["path"]), float(s.get("strength", 1.0)), axis=axis)
+                        for s in sources
+                    ]
+                    choice, _ = joint_choice(
+                        patcher,
+                        files,
+                        binding,
+                        shapes_model,
+                        content_keys=share.get("content_keys", content_keys),
+                        lycoris_apply=share.get("lycoris_apply", lycoris_apply),
+                        open_session=True,
+                        saves_dir=(env or LiveEnv()).saves_dir,
+                    )
+                    return choice.session
+
+                session = session_for_shared_edits(
+                    entry.path, patcher.model.diffusion_model, build=rebuild
+                )
             choices.append(
                 ModChoice(
                     path=entry.path,
@@ -636,7 +1032,7 @@ def choices_for(
                     prior=entry.prior,
                     enabled=entry.enabled,
                     label=os.path.basename(entry.path),
-                    session=live_session(entry, env) if entry.enabled else None,
+                    session=session,
                 )
             )
         elif entry.kind in ("direction", "direction_file"):
@@ -866,6 +1262,8 @@ def clear(patcher: Any) -> Any:
         remove_layer_alpha(options)
         options.pop(APPLIED_KEY, None)
         options.pop(_MEMORY_KEY, None)
+        options.pop(_PLACEMENT_KEY, None)
+        options.pop(_RESERVE_KEY, None)
         _sampling_wrappers(options).pop(_MEMORY_KEY, None)
     injections = getattr(out, "injections", None)
     if isinstance(injections, dict):
@@ -945,13 +1343,22 @@ def live_action(patcher: Any, action: str, name: str, mod: str):
             kept = None
             if queue is not None and action in ("undo", "reset", "load"):
                 kept = queue.keep_pending(s.editor_state, action)
+            retained = (
+                queue.capture_pending_branches(s.editor_state)
+                if queue is not None and action in ("undo", "reset", "load")
+                else {}
+            )
             try:
                 result = _live_action_one(s, action, name)
             except Exception:
+                if queue is not None:
+                    queue.restore_pending_branches(s.editor_state, retained)
                 for branch, _ in kept or []:
                     if branch in s.editor_state.forest.branches:
                         queue.cancel_keep(s.editor_state, branch)
                 raise
+            if queue is not None:
+                queue.restore_pending_branches(s.editor_state, retained)
             for branch, numbers in kept or []:
                 lines.append(f"{s.mod_id}: kept on side branch {branch} after {action}")
                 log.info("live writes %s kept on side branch %s after %s", numbers, branch, action)
@@ -1202,10 +1609,13 @@ def apply(
     needs_host = {
         target
         for target, plan in plans.items()
-        if any(s.form == "input" and effective_import_score(s) == "derived" for s in plan.sets)
+        if any(
+            s.form == "input"
+            and effective_import_score(s) == "derived"
+            and derived_mode(s) == "full"
+            for s in plan.sets
+        )
     }
-    if needs_host and derived_mode() != "full":
-        needs_host.clear()
     host_norms = host_weight_norms(out, needs_host) if needs_host else {}
     for target in needs_host:
         for layer_set in plans[target].sets:
@@ -1305,7 +1715,7 @@ def apply(
                 f"Expert {name}: {len(mounts)} text mounts; text change reaches "
                 f"{reached} of {len(targets)} cross-attention projections."
             )
-    _working_memory(out, placed, fixed_by_path)
+    _working_memory(out, placed, fixed_by_path, transfer)
     clear_working_copies = None
     if hasattr(out, "add_callback_with_key"):
         plan_refs = [weakref.ref(item) for item in placed.values()]
@@ -1468,6 +1878,7 @@ def apply(
         mount_share_tags=share_tags | ({JOINT_SET} if share_observer is not None else set()),
         share_observer=share_observer,
         collect_routing_features=routing_features_enabled or any(cross_weights),
+        depth=used,
         graph_mutable=bool(
             transfer
             or timeline
@@ -1483,6 +1894,9 @@ def apply(
     )
     if axis_alpha == "auto" and alpha_mask is not None:
         _mask_alpha_wrapper(out, alpha_mask)
+    if getattr(token_depth, "auto", None) is not None:
+        token_depth.use_apply_depth(used)
+        _auto_depth_wrapper(out, token_depth)
     _gate_stats_wrapper(out, gate_stats)
     from .auto_alpha import trigger_ids
     from .layer_alpha import install_layer_alpha
@@ -1524,6 +1938,25 @@ def _gate_stats_wrapper(out: Any, mode: str) -> None:
             if previous is not None:
                 return previous(apply_model, args)
             return apply_model(args["input"], args["timestep"], **args["c"])
+
+    if hasattr(out, "set_model_unet_function_wrapper"):
+        out.set_model_unet_function_wrapper(wrapper)
+    else:
+        options["model_function_wrapper"] = wrapper
+
+
+def _auto_depth_wrapper(out: Any, depth_map: Any) -> None:
+    options = out.model_options
+    previous = options.get("model_function_wrapper")
+
+    def wrapper(apply_model, args):
+        def invoke(call_args):
+            if previous is not None:
+                return previous(apply_model, call_args)
+            return apply_model(call_args["input"], call_args["timestep"], **call_args["c"])
+
+        chunks = len(args.get("cond_or_uncond") or ()) or 1
+        return depth_map.call(invoke, args, _progress(args), chunks)
 
     if hasattr(out, "set_model_unet_function_wrapper"):
         out.set_model_unet_function_wrapper(wrapper)
@@ -1699,9 +2132,10 @@ def _with_regions(plan: Any, chain: Sequence[ModEntry]) -> list:
     by_path = {os.fspath(e.path): e.region for e in chain if e.region is not None}
     by_label = {os.path.basename(e.path): e.region for e in chain if e.region is not None}
     scoped = plan.scoped_sets()
-    regions, roles, axes, tags = [], [], [], []
+    regions, roles, axes, tags, shares = [], [], [], [], []
     for m in plan.mods:
         e = _entry_of(m, chain)
+        shares.extend([_share_entries(m) if m.path is not None else None] * len(m.sets))
         axes.extend([e.axis if e is not None else "creative"] * len(m.sets))
         tags.extend([entry_name(e) if e is not None else (m.label or "")] * len(m.sets))
         lora_file = e.path if e is not None and e.kind == "lora" else None
@@ -1714,7 +2148,7 @@ def _with_regions(plan: Any, chain: Sequence[ModEntry]) -> list:
     groups = {axis: [e for e in chain if _joint_lora(e, axis)] for axis in JOINT_SETS}
     panels = next((e.panels for e in reversed(chain) if e.panels is not None), None)
     out = []
-    for s, r, p, a, tag in zip(scoped, regions, roles, axes, tags, strict=True):
+    for s, r, p, a, tag, share in zip(scoped, regions, roles, axes, tags, shares, strict=True):
         joint_axis = next(
             (
                 axis
@@ -1723,7 +2157,7 @@ def _with_regions(plan: Any, chain: Sequence[ModEntry]) -> list:
             ),
             None,
         )
-        loras = groups.get(joint_axis, [])
+        loras = share or groups.get(joint_axis, [])
         if joint_axis is not None:
             a = joint_axis
         s = dataclasses.replace(
@@ -1823,6 +2257,7 @@ def _key_mask_by_step(
     mount_share_tags: frozenset[str] | set[str] = frozenset(),
     collect_routing_features: bool = False,
     share_observer: Any = None,
+    depth: Any = 1,
 ) -> None:
     from ..call_values import (
         active_axes,
@@ -1843,9 +2278,10 @@ def _key_mask_by_step(
         speculative_cache_bytes,
         step_carry,
     )
+    from ..depth_map import current_measurement
     from ..region import latent_size, token_layouts
     from ..roles import reference_shapes, shapes_of
-    from ..route_freeze import fold_counts, freezing
+    from ..route_freeze import fold_counts, freezing, release_after_records
 
     options = getattr(out, "model_options", None)
     if options is None:
@@ -1878,6 +2314,14 @@ def _key_mask_by_step(
         for name, p in (plans or {}).items()
         if any(s.down is not None for s in p.sets)
     }
+    reserve_shapes = freeze_reserve_shapes(plans, depth, patch)
+    if reserve_shapes is None:
+        options.pop(_RESERVE_KEY, None)
+    else:
+        options[_RESERVE_KEY] = reserve_shapes
+    freeze_reserve = FreezeReserve(
+        min((t for t in targets.values() if t is not None), default=None), reserve_shapes
+    )
     share_keys = {
         s.key
         for p in (plans or {}).values()
@@ -1907,6 +2351,8 @@ def _key_mask_by_step(
     )
 
     def model_call(apply_model, args):
+        from .probe_rows import current_render_probe
+
         nonlocal speculation_reported
         c = dict(args.get("c") or {})
         ids = c.pop("kilora_layer_ids", None)
@@ -2085,6 +2531,7 @@ def _key_mask_by_step(
         graphs.generation(kind, cache)
         frozen = freezing(cache)
         size = tuple(args["input"].shape[2:])
+        size = video_latent_size(family, size, args.get("c") or {})
         progress_value = _progress(args)
         progress = sampling_progress(progress_value)
         layouts = (
@@ -2189,6 +2636,7 @@ def _key_mask_by_step(
             key_pass = getattr(previous, "_kilora_key_pass", None)
             if (
                 graphs_requested()
+                and current_measurement() is None
                 and not ablation_settings.force_loop()
                 and os.environ.get("KILORA_CARRY_STEPS") is None
                 and os.environ.get("KILORA_GATE_COHERENCE") is None
@@ -2204,6 +2652,8 @@ def _key_mask_by_step(
                 and compose_ids is None
                 and (key_pass is None or key_pass.done)
                 and patcher_ref() is not None
+                and options.get("kilora_render_probe") is None
+                and current_render_probe() is None
                 and graph_safe(
                     patcher_ref(),
                     args,
@@ -2216,7 +2666,8 @@ def _key_mask_by_step(
             ):
                 result = graphs.call(args, cache, invoke)
             else:
-                result = invoke(args)
+                probe = current_render_probe() or options.get("kilora_render_probe")
+                result = invoke(args) if probe is None else probe.call(invoke, args)
             for key, (total, count) in collected.items():
                 shares[key] = torch.where(
                     count > 0,
@@ -2237,7 +2688,8 @@ def _key_mask_by_step(
         if reported and progress_value == 0:
             fold_report.update(folded=0, replayed=0, recording=0)
             reported = False
-        with fold_counts(fold_report):
+        freeze_reserve.before_call(args, progress_value)
+        with fold_counts(fold_report), release_after_records():
             if first_sample:
                 first_sample = False
                 from .. import fused
@@ -2269,6 +2721,29 @@ def _key_mask_by_step(
         out.set_model_unet_function_wrapper(wrapper)
     else:
         options["model_function_wrapper"] = wrapper
+
+
+class FreezeReserve:
+    def __init__(self, freeze_at: float | None, shapes: dict | None) -> None:
+        self.freeze_at = freeze_at
+        self.shapes = shapes
+        self.last: float | None = None
+        self.done = False
+
+    def before_call(self, args: dict, progress: float) -> int:
+        if self.freeze_at is None or not self.shapes:
+            return 0
+        if self.last is not None and progress < self.last:
+            self.done = False
+        self.last = progress
+        if self.done or progress < self.freeze_at:
+            return 0
+        self.done = True
+        x = args.get("input")
+        if not isinstance(x, torch.Tensor):
+            return 0
+        reserve = freeze_reserve_bytes(self.shapes, tuple(x.shape))
+        return reserve_working_memory(x.device, reserve, phase="freeze_record")
 
 
 def _text_tokens(args: dict) -> int | None:

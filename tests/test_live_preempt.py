@@ -106,22 +106,20 @@ def _measured(monkeypatch, fire_count, env=(), observes=False):
     return value, measure.timing, waits
 
 
-def test_a_render_stops_the_sample_and_the_sample_runs_again(monkeypatch):
+def test_a_render_does_not_stop_a_write_call(monkeypatch):
     reference, timing0, _ = _measured(monkeypatch, 0)
     assert timing0["preempts"] == 0
-    value, timing, waits = _measured(monkeypatch, 2)
+    value, timing, _waits = _measured(monkeypatch, 2)
     assert value == reference
-    assert timing["preempts"] >= 1 and waits
-    assert timing["preempt_wait_s"] >= 0.0 and timing["preempt_dropped_s"] >= 0.0
+    assert timing["preempts"] == 0 and timing["preempt_dropped_s"] == 0.0
     assert len(timing["trial_s"]) == 1
 
 
-def test_a_learning_render_with_block_observers_stops_the_sample(monkeypatch):
+def test_a_learning_render_with_block_observers_does_not_stop_a_write_call(monkeypatch):
     reference, _, _ = _measured(monkeypatch, 0)
-    value, timing, waits = _measured(monkeypatch, 2, observes=True)
-    assert timing["preempts"] >= 1 and waits
+    value, timing, _waits = _measured(monkeypatch, 2, observes=True)
+    assert timing["preempts"] == 0
     assert value == reference
-    assert live_queue.recorders_active() is False
 
 
 @pytest.mark.parametrize(

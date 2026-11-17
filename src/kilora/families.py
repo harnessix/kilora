@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import fnmatch
 import re
 from collections.abc import Mapping, Sequence
 
@@ -21,7 +22,15 @@ from .family_spec import (
 )
 from .presets import PRESETS, Preset
 
-__all__ = ["FAMILIES", "detect", "detect_names", "get_family", "normalize_for", "register"]
+__all__ = [
+    "FAMILIES",
+    "detect",
+    "detect_names",
+    "get_family",
+    "normalize_for",
+    "register",
+    "video_latent_size",
+]
 
 TEXT = TokenLayout("text1d")
 
@@ -415,6 +424,37 @@ FAMILIES: dict[str, FamilySpec] = {
         markers=("blocks.*.attn.qkv_proj",),
         extra={"exclude_names": ("audio_*", "*.audio_*")},
     ),
+    "minimax-h3": FamilySpec(
+        family="minimax-h3",
+        solve_sampling={"steps": 8, "cfg": 1.0, "size": 512},
+        image_token_target="blocks.0.attn.qkv_proj",
+        content_blocks=50,
+        classes=("MiniMaxH3Model",),
+        include=tuple(
+            f"blocks.*.{layer}"
+            for layer in ("attn.qkv_proj", "attn.out_proj", "mlp.fc1", "mlp.fc2")
+        ),
+        exclude=(
+            "blocks.*.adaln_proj.*",
+            "blocks.*.attn.to_gate_compress",
+            "token_*",
+            "condition_proj",
+            "video_patch_proj",
+            "audio_patch_proj",
+            "time_embedder.*",
+            "final_layer.*",
+        ),
+        layouts=(("*", TokenLayout("video3d", (1, 2, 2), text="prefix")),),
+        names=minimax_h3_image_names,
+        router_seed=135,
+        description="MiniMax-H3: packed text, conditions, audio, then target video",
+        markers=("blocks.*.attn.qkv_proj", "video_patch_proj", "audio_patch_proj"),
+        extra={
+            "exclude_classes": ("MiniMaxH3ImageModel",),
+            "class_markers": ("video_patch_proj", "audio_patch_proj"),
+            "audio_names": ("audio_patch_proj", "final_layer.audio_out"),
+        },
+    ),
     "wan": FamilySpec(
         family="wan",
         content_blocks=40,
@@ -561,8 +601,57 @@ def detect(module: nn.Module, root: str = "diffusion_model") -> FamilySpec | Non
                 [name for name, _ in module.named_modules()]
             ):
                 continue
+            if not _class_extra_matches(spec, module):
+                continue
             return spec
     return None
+
+
+def _class_extra_matches(spec: FamilySpec, module: nn.Module) -> bool:
+    excluded = spec.extra.get("exclude_classes", ())
+    if excluded and {c.__name__ for c in type(module).__mro__} & set(excluded):
+        return False
+    markers = spec.extra.get("class_markers", ())
+    if markers:
+        names = {name for name, _ in module.named_modules()}
+        return all(marker in names for marker in markers)
+    return True
+
+
+_KEY_SUFFIXES = (
+    ".lora_A.default.weight",
+    ".lora_B.default.weight",
+    ".lora_A.weight",
+    ".lora_B.weight",
+    ".lora_down.weight",
+    ".lora_up.weight",
+    ".lora.down.weight",
+    ".lora.up.weight",
+    ".alpha",
+    ".dora_scale",
+    ".weight",
+    ".bias",
+)
+
+
+def _module_stem(path: str) -> str:
+    for prefix in DIFFUSION_PREFIXES:
+        if path.startswith(prefix):
+            path = path[len(prefix) :]
+            break
+    for suffix in _KEY_SUFFIXES:
+        if path.endswith(suffix):
+            return path[: -len(suffix)]
+    return path
+
+
+def _matches_h3_video(spec: FamilySpec, paths: Sequence[str]) -> bool:
+    names = [_module_stem(p) for p in paths]
+    if spec.matches_names(names):
+        return True
+    blocks = any(re.fullmatch(r"blocks\.\d+\.attn\.qkv_proj", n) for n in names)
+    audio = spec.extra.get("audio_names", ())
+    return blocks and any(fnmatch.fnmatchcase(n, a) for n in names for a in audio)
 
 
 def detect_names(paths: Sequence[str], root: str = "diffusion_model") -> FamilySpec | None:
@@ -571,6 +660,10 @@ def detect_names(paths: Sequence[str], root: str = "diffusion_model") -> FamilyS
         if spec.root != root or spec.extra.get("require_class"):
             continue
         names = paths
+        if spec.family == "minimax-h3":
+            if _matches_h3_video(spec, paths):
+                found.append(spec)
+            continue
         if spec.family == "minimax-h3-image":
             names = []
             for path in paths:
@@ -592,7 +685,25 @@ def detect_binding(module: nn.Module) -> Binding | None:
     return BINDINGS.get(spec.family) if spec is not None else None
 
 
-BLOCK_LISTS: dict[str, str] = {"anima": "blocks", "minimax-h3-image": "blocks"}
+BLOCK_LISTS: dict[str, str] = {
+    "anima": "blocks",
+    "minimax-h3-image": "blocks",
+    "minimax-h3": "blocks",
+}
+
+LORA_SIBLINGS: dict[str, tuple[str, ...]] = {"minimax-h3-image": ("minimax-h3",)}
+
+
+def video_latent_size(family: str | None, size: tuple[int, ...], cond: Mapping) -> tuple:
+
+    if family != "minimax-h3":
+        return size
+    shapes = cond.get("latent_shapes")
+    shapes = getattr(shapes, "cond", shapes)
+    if not isinstance(shapes, (list, tuple)) or len(shapes) < 2:
+        return size
+    video = tuple(int(n) for n in shapes[0])
+    return video[2:] if len(video) == 5 else size
 
 
 def block_list(family: str | None, model: nn.Module) -> tuple[str, list[tuple[int, nn.Module]]]:

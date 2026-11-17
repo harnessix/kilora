@@ -11,7 +11,9 @@ from typing import Any
 import torch
 from safetensors.torch import load_file, save_file
 
+from kilora.branches import BranchStore, EditBranch
 from kilora.editor_packs import PACK_SUFFIX, read_pack, write_pack
+from kilora.path_merge import share_until_write
 
 FORMAT = "kilora-chunk-editor"
 EDITOR_VERSION = "1.0.0"
@@ -215,6 +217,21 @@ class ChunkState:
         hist = {c.family: torch.full((HISTORY, c.q.shape[0]), float("nan")) for c in editor.chunks}
         return ChunkState(coef, hist, list(enabled or editor.family_names()))
 
+    def fork(self):
+        import copy
+
+        return ChunkState(
+            share_until_write(self.coef),
+            {k: v.clone() for k, v in self.hist.items()},
+            list(self.enabled),
+            self.events,
+            copy.deepcopy(self.stack),
+            {k: v.clone() for k, v in self.extra.items()},
+            {k: v.clone() for k, v in self.prior.items()},
+            share_until_write(self.node_coef),
+            {k: (u.clone(), v.clone()) for k, (u, v) in self.residual.items()},
+        )
+
     def snapshot(self) -> dict:
         return {
             "coef": {k: v.clone() for k, v in self.coef.items()},
@@ -366,85 +383,6 @@ class ChunkState:
 
 
 @dataclass
-class EditBranch:
-    id: str
-    parent: str | None
-    state: ChunkState
-    seed: int | None = None
-    temperature: float | None = None
-    depth: int | None = None
-    paths: list = field(default_factory=list)
-    action: str | None = None
-    writes: list[int] = field(default_factory=list)
-    merge_pairs: list = field(default_factory=list)
-
-
-class BranchStore:
-    def __init__(self, state: ChunkState):
-        self.branches = {"main": EditBranch("main", None, state)}
-        self.head = self.current = "main"
-        self.serial = 0
-
-    @property
-    def state(self) -> ChunkState:
-        return self.branches[self.current].state
-
-    def fork(self, parent: str | None = None, *, seed=None, temperature=None, depth=None) -> str:
-        import copy
-
-        parent = self.head if parent is None else parent
-        source = self.branches[parent].state
-        self.serial += 1
-        branch_id = f"branch-{self.serial}"
-        state = ChunkState(
-            dict(source.coef),
-            {k: v.clone() for k, v in source.hist.items()},
-            list(source.enabled),
-            source.events,
-            copy.deepcopy(source.stack),
-            {k: v.clone() for k, v in source.extra.items()},
-            {k: v.clone() for k, v in source.prior.items()},
-            dict(source.node_coef),
-            {k: (u.clone(), v.clone()) for k, (u, v) in source.residual.items()},
-        )
-        self.branches[branch_id] = EditBranch(branch_id, parent, state, seed, temperature, depth)
-        return branch_id
-
-    def checkout(self, branch_id: str) -> None:
-        if branch_id not in self.branches:
-            raise KeyError(branch_id)
-        self.current = branch_id
-
-    def promote(self, branch_id: str) -> None:
-        self.checkout(branch_id)
-        self.head = branch_id
-
-    def delete(self, branch_id: str) -> None:
-        if branch_id == self.head or branch_id == self.current:
-            raise ValueError("cannot delete the head or current branch")
-        del self.branches[branch_id]
-
-    def list(self) -> list[dict]:
-        import copy
-
-        return [
-            dict(
-                id=b.id,
-                parent=b.parent,
-                seed=b.seed,
-                temperature=b.temperature,
-                depth=b.depth,
-                paths=copy.deepcopy(b.paths),
-                action=b.action,
-                writes=list(b.writes),
-                head=b.id == self.head,
-                current=b.id == self.current,
-            )
-            for b in self.branches.values()
-        ]
-
-
-@dataclass
 class ChunkWriter:
     editor: ChunkEditor
     times: Sequence[float]
@@ -468,6 +406,7 @@ class ChunkWriter:
     ir_parts: Any = None
     explore: float = 0.0
     draw: bool = False
+    average_estimate: Any = None
 
     @staticmethod
     def exploration_scale(chunk, counts, explore):
@@ -527,6 +466,14 @@ class ChunkWriter:
             for i, key in enumerate(pool):
                 slopes[key] = float(est[i])
                 bins[key] = [float(est[i])] * len(self.times)
+        mean_values = None
+        if self.average_estimate is not None:
+            mean_values = self.average_estimate(
+                {
+                    key: torch.tensor([value, *bins[key]], dtype=torch.float64)
+                    for key, value in slopes.items()
+                }
+            )
         for fam in state.coef:
             row = torch.full((state.hist[fam].shape[1],), float("nan"))
             for (f_, j), s in slopes.items():
@@ -538,7 +485,14 @@ class ChunkWriter:
             if c.family not in state.enabled:
                 continue
             h_ = state.hist[c.family]
-            m = torch.nanmean(h_, 0)
+            if mean_values is None:
+                m = torch.nanmean(h_, 0)
+            else:
+                m = torch.zeros(h_.shape[1])
+                for j in range(m.numel()):
+                    value = mean_values.get((c.family, j))
+                    if value is not None:
+                        m[j] = value[0]
             step[c.family] = -torch.nan_to_num(m, nan=0.0)
         info = {}
         if self.modulate is not None:

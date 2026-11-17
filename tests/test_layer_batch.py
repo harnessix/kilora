@@ -344,7 +344,8 @@ def test_layer_node_batch_input_is_off_by_default():
     from kilora.comfyui import nodes as N
 
     types_ = N.KiLoRALayerConditioning.INPUT_TYPES()
-    assert list(types_["optional"])[-2:] == ["batch", "compose"]
+    names = list(types_["optional"])
+    assert names[-4:] == ["batch", "compose", "region_penalty", "mount_scope"]
     assert types_["optional"]["batch"][1]["default"] is False
 
 

@@ -466,17 +466,25 @@ def learn_from_images(
     for number, index in enumerate(fitted):
         say(f"learn from images: capture image {number + 1} of {len(fitted)}")
         tagged += [_Tagged(sample, index) for sample in samples([items[index]], cue, settings)]
-    terms = image_terms(
-        session,
-        tagged,
-        progress=progress,
-        model=model,
-        editor=editor,
-        frames=_frames(session, editor),
-        responses=responses,
-        p_out=p_out,
-        mask=mask,
-    )
+    routes = _route_record(session)
+    with _recording_routes(session, routes):
+        terms = image_terms(
+            session,
+            tagged,
+            progress=progress,
+            model=model,
+            editor=editor,
+            frames=_frames(session, editor),
+            responses=responses,
+            p_out=p_out,
+            mask=mask,
+        )
+    if routes is not None and not routes.empty:
+        from .live_experts import mask_terms, record_history, write_target
+
+        target = write_target(session, routes, state)
+        record_history(session, routes)
+        terms = mask_terms(terms, by_target, target) if target else []
     if patterns:
         terms = [term for term in terms if mount_matches(term.node, patterns)]
     report.terms = len(terms)
@@ -555,3 +563,19 @@ def learn_from_images(
 def _frames(session, editor):
     recorder = editor.recorder(session) if hasattr(editor, "recorder") else None
     return (getattr(recorder, "frames", None) if recorder is not None else None) or {}
+
+
+def _route_record(session):
+    if not hasattr(session, "_source") or not hasattr(session, "_section_pairs"):
+        return None
+    from .live_experts import RouteRecord
+
+    return RouteRecord()
+
+
+def _recording_routes(session, routes):
+    if routes is None:
+        return contextlib.nullcontext()
+    from .live_experts import recording_routes
+
+    return recording_routes(session, routes)

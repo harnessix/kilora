@@ -23,6 +23,8 @@ from kilora.program import interpret
         (1.0, float("nan"), 1.0, 1.0, []),
         (1.0, 1.0, 1.0, float("nan"), []),
         (1.0, 0.8, 1.0, 0.95, []),
+        (5.96e-8, 0.0, 1.0, 1.0, []),
+        (1e-3, 0.0, 1.0, 1.0, []),
     ],
 )
 def test_guard_matches_native(gap0, gap1, spread0, spread1, diffs):
@@ -42,6 +44,7 @@ def test_guard_matches_native(gap0, gap1, spread0, spread1, diffs):
         "noise": session.guard_last["gap_noise"],
         "gap_drop": editors.GUARD_GAP_DROP,
         "gap_noise_k": editors.GUARD_GAP_NOISE_K,
+        "gap_floor": editors.GUARD_GAP_FLOOR,
         "spread_low": editors.GUARD_SPREAD[0],
         "spread_high": editors.GUARD_SPREAD[1],
     }
@@ -71,6 +74,7 @@ def test_seeded_guard_scores_and_paired_noise():
             "noise": session.guard_last["gap_noise"],
             "gap_drop": editors.GUARD_GAP_DROP,
             "gap_noise_k": editors.GUARD_GAP_NOISE_K,
+            "gap_floor": editors.GUARD_GAP_FLOOR,
             "spread_low": editors.GUARD_SPREAD[0],
             "spread_high": editors.GUARD_SPREAD[1],
         }

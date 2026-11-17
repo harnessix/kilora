@@ -47,6 +47,7 @@ def test_identity_strength_and_space(tmp_path):
         m for m in moves(session) if m.target == target and m.expert == 0 and m.part == "core"
     ]
     assert len(core_moves) == 4
+    aligned = session._source.experts[target]
     session.set_options(core_dims=1)
     assert (
         len(
@@ -60,7 +61,7 @@ def test_identity_strength_and_space(tmp_path):
     )
     core_moves[0].apply(session.state, 0.3)
     changed = session.sets()[0].experts[target]
-    a, b = clean.down[0, 0], clean.up[0, 0].T
+    a, b = aligned.down[0, 0], aligned.up[0, 0].T
     delta = changed.up[0, 0].T @ a - b @ a
     qb = torch.linalg.qr(b).Q
     qa = torch.linalg.qr(a.T).Q
@@ -71,9 +72,9 @@ def test_identity_strength_and_space(tmp_path):
     session.state[target]["strength_0"].zero_()
     changed = session.sets()[0].experts[target]
     assert torch.count_nonzero(changed.up[0]) == 0
-    assert torch.equal(changed.up[1], clean.up[1])
+    assert torch.equal(changed.up[1], aligned.up[1])
     session.edits = "off"
-    assert session.sets()[0] is session._source
+    assert session.sets()[0] is session._plain_set
 
 
 def test_save_load_edits(tmp_path):
@@ -115,10 +116,10 @@ def test_lokr_modes(tmp_path, monkeypatch):
         imported = import_loras(paths, model, rank=4, lycoris_apply=mode)
         shapes = {t: list(e.down.shape) for t, e in imported.adapter_set.experts.items()}
         session = imported_session_for(imported.adapter_set, sources, "toy", shapes)
+        original = session._source.experts[Q]
         own = [m for m in moves(session) if m.target == Q and m.expert == 0]
         assert sum(m.part == "strength" for m in own) == 1
         assert sum(m.part == "core" for m in own) == (4 if mode == "truncated" else 0)
-        original = session._source.experts[Q]
         assert torch.equal(session.sets()[0].experts[Q].up, original.up)
         if mode == "exact":
             x = torch.randn(2, 16)

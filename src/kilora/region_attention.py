@@ -526,10 +526,10 @@ def comfy_override(
     def composed_self(current, q, sq):
         from .comfyui import layer_compose
 
-        strength = layer_compose.self_penalty(state.progress)
+        layouts, rows = current
+        strength = layer_compose.self_penalty(state.progress, layouts[0])
         if strength <= 0:
             return None
-        layouts, rows = current
         batch = q.shape[0]
         picked = _row_layouts(layouts, rows, batch)
         key = (sq, batch, q.dtype, q.device, strength, tuple(id(x) for x in picked))

@@ -27,13 +27,19 @@ def test_transition_application_matches_native(monkeypatch):
     check_invariants("transition", output)
 
 
+@pytest.mark.parametrize("form", ["input", "state"])
 @pytest.mark.parametrize("empty", [False, True])
-def test_entry_logits_match_native(monkeypatch, empty):
+def test_entry_logits_match_native(monkeypatch, empty, form):
     for name in ("KILORA_DERIVED_DIFFUSE", "KILORA_DERIVED_MODE", "KILORA_DERIVED_ROWS"):
         monkeypatch.delenv(name, raising=False)
     torch.manual_seed(116)
     s = dataclasses.replace(
-        planted(), down=torch.randn(12, 16), up=torch.randn(12, 16), per_expert=4, tau=1.25
+        planted(),
+        down=torch.randn(12, 16),
+        up=torch.randn(12, 16),
+        per_expert=4,
+        tau=1.25,
+        form=form,
     )
     x = torch.randn(2, 7, 16)
     if empty:
@@ -51,9 +57,25 @@ def test_entry_logits_match_native(monkeypatch, empty):
         "epsilon": torch.tensor(compute.SCORE_EPS),
         "temperature_in": torch.tensor(1.0),
     }
-    program = default_program("entry", sizes={"batch": 2, "tokens": 7, "experts": 3, "per": 4})
+    variant = "chance" if form == "input" else "default"
+    program = default_program(
+        "entry", variant, sizes={"batch": 2, "tokens": 7, "experts": 3, "per": 4}
+    )
     output = interpret(program, inputs, {})
     assert torch.equal(output["logits"], compute.derived_logits(s, x))
+    if form == "input":
+        projected = (x @ kin.flatten(0, 1).T).unflatten(-1, kin.shape[:2])
+        energy = torch.linalg.vector_norm(x, dim=-1, keepdim=True).square()
+        rank = rows.float()
+        width = x.shape[-1]
+        variance = 2 * rank * (width - rank) / (width * width * (width + 2))
+        expected = s.tau * torch.where(
+            (rank > 0) & (rank < width),
+            (projected.square().sum(-1) / (energy + compute.SCORE_EPS) - rank / width)
+            / torch.where(variance > 0, variance, 1.0).sqrt(),
+            0.0,
+        )
+        assert torch.equal(output["logits"], expected)
     check_invariants("entry", output)
 
 
@@ -75,13 +97,19 @@ def test_prepared_cosine_transition_matches_native_with_zero_row(monkeypatch):
     assert torch.allclose(got[1:].sum(-1), torch.ones(2), rtol=0, atol=1e-6)
 
 
+@pytest.mark.parametrize("form", ["input", "state"])
 @pytest.mark.parametrize("empty", [False, True])
-def test_entry_from_input_matches_native(monkeypatch, empty):
+def test_entry_from_input_matches_native(monkeypatch, empty, form):
     for name in ("KILORA_DERIVED_DIFFUSE", "KILORA_DERIVED_MODE", "KILORA_DERIVED_ROWS"):
         monkeypatch.delenv(name, raising=False)
     torch.manual_seed(117)
     s = dataclasses.replace(
-        planted(), down=torch.randn(12, 16), up=torch.randn(12, 16), per_expert=4, tau=1.25
+        planted(),
+        down=torch.randn(12, 16),
+        up=torch.randn(12, 16),
+        per_expert=4,
+        tau=1.25,
+        form=form,
     )
     x = torch.randn(2, 7, 16)
     if empty:
@@ -98,10 +126,25 @@ def test_entry_from_input_matches_native(monkeypatch, empty):
         "temperature_in": torch.tensor(1.0),
     }
     program = default_program(
-        "entry", "from_input", sizes={"batch": 2, "tokens": 7, "experts": 3, "per": 4, "key": 16}
+        "entry",
+        "chance_from_input" if s.form == "input" else "from_input",
+        sizes={"batch": 2, "tokens": 7, "experts": 3, "per": 4, "key": 16},
     )
     output = interpret(program, inputs, {})
     assert torch.equal(output["logits"], compute.derived_logits(s, x))
+    if form == "input":
+        projected = (x @ keys.flatten(0, 1).T).unflatten(-1, keys.shape[:2])
+        energy = torch.linalg.vector_norm(x, dim=-1, keepdim=True).square()
+        rank = rows.float()
+        width = x.shape[-1]
+        variance = 2 * rank * (width - rank) / (width * width * (width + 2))
+        expected = s.tau * torch.where(
+            (rank > 0) & (rank < width),
+            (projected.square().sum(-1) / (energy + compute.SCORE_EPS) - rank / width)
+            / torch.where(variance > 0, variance, 1.0).sqrt(),
+            0.0,
+        )
+        assert torch.equal(output["logits"], expected)
     check_invariants("entry", output)
 
 
@@ -143,7 +186,9 @@ def test_prepared_basis_through_entry_matches_native_entries(monkeypatch):
     x = torch.randn(2, 7, 16)
     keys, rows = prepare_derived_bases(s.down, s.per_expert)
     program = default_program(
-        "entry", "from_input", sizes={"batch": 2, "tokens": 7, "experts": 3, "per": 4, "key": 16}
+        "entry",
+        "chance_from_input" if s.form == "input" else "from_input",
+        sizes={"batch": 2, "tokens": 7, "experts": 3, "per": 4, "key": 16},
     )
     inputs = {
         "x": x,

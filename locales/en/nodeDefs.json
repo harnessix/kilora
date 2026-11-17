@@ -239,7 +239,7 @@
       },
       "depth": {
         "name": "depth",
-        "tooltip": "Number of passes. -1 uses the depth the mod recommends."
+        "tooltip": "Number of passes. -1 uses the depth the mod recommends (imported LoRAs: 4)."
       }
     }
   },
@@ -257,7 +257,7 @@
       },
       "depth": {
         "name": "depth",
-        "tooltip": "Number of passes. -1 uses the depth the mod recommends."
+        "tooltip": "Number of passes. -1 uses the depth the mod recommends (imported LoRAs: 4)."
       },
       "iteration": {
         "name": "iteration",
@@ -285,7 +285,7 @@
       },
       "path_width": {
         "name": "path width",
-        "tooltip": "Path iteration only. The number of walks: they start from the best experts of the first step, and each walk goes on from its own query. A larger width finds the right expert after a wrong first step. 0 uses the mod's value (1 by default: one walk)."
+        "tooltip": "Path iteration only. The number of walks: they start from the best experts of the first step, and each walk goes on from its own query. A larger width finds the right expert after a wrong first step. 0 uses the mod's value (imported LoRAs: 3 walks; other mods: 1)."
       },
       "path_select": {
         "name": "path select",
@@ -488,9 +488,61 @@
         "name": "edits",
         "tooltip": "Edits change each LoRA core matrix and strength per layer, plus pack terms. Source files are never written. off restores the imported LoRAs exactly. unchanged keeps the current choice."
       },
+      "live_expert_mass": {
+        "name": "traversed mass",
+        "tooltip": "A live write edits an expert only if its route mass on the recorded paths is above this fraction of its layer's mass. -1: unchanged. The default is 0.05."
+      },
+      "live_expert_top": {
+        "name": "traversed experts per layer",
+        "tooltip": "The most experts per layer that one live write edits, by route mass. 0: unchanged. The default is 4."
+      },
+      "live_expert_history": {
+        "name": "route history",
+        "tooltip": "The number of recorded prompts whose route mass the session keeps to find shared experts. 0: unchanged. The default is 16."
+      },
+      "live_expert_copies": {
+        "name": "copies per expert",
+        "tooltip": "The most copies of one shared expert that live writes add. -1: unchanged. The default is 2."
+      },
+      "write_measure": {
+        "name": "write measure",
+        "tooltip": "How a live write finds its direction. forward: one clean forward and a set of forwards with small noise on the outputs of the target experts (the default). candidates: measure each candidate move with paired forwards. unchanged keeps the current choice."
+      },
+      "forward_draws": {
+        "name": "noise draws",
+        "tooltip": "The number of noise draws of the forward estimate. More draws give a steadier direction and cost more time. 0: unchanged. The default is 4."
+      },
+      "forward_sigma": {
+        "name": "noise size",
+        "tooltip": "The size of the forward estimate's noise, as a fraction of the output RMS of each expert. -1: unchanged. The default is 0.05."
+      },
+      "forward_chunk": {
+        "name": "rows per model call",
+        "tooltip": "The number of sample rows in one model call of a write. A row is one noise sample or one noise draw. A lower number uses less GPU memory. 0: unchanged. The default is 8."
+      },
+      "write_resolution": {
+        "name": "write resolution",
+        "tooltip": "The long side, in pixels, of the samples of a write. A write learns from a smaller copy of the image: 256 to 4096, rounded to 16. A lower number makes a write faster. 0: the render resolution. -1: unchanged. The default is 512. Writes already ran at 512 px before this setting: they used the measurement size (measure_size). This setting names that control."
+      },
+      "probe_rows": {
+        "name": "render probe rows",
+        "tooltip": "Collect write measurements during rendering. On by default. Image learning and writes without a complete render measurement use their own noise samples."
+      },
+      "probe_call": {
+        "name": "render probe call",
+        "tooltip": "Separate runs each probe after the image call. Larger batches can change image-row rounding even on the CPU, so separate is the only supported value. The image call keeps its original rows. Probe measurements do not update image records or step caches."
+      },
+      "probe_budget": {
+        "name": "probe row budget",
+        "tooltip": "Maximum perturbed rows per render, counting caption and empty-caption rows. The default 2 samples one caption for one antithetic pair per render. The write seed selects caption or empty caption with equal probability. Budgets of 4 or more retain both captions. Complete pairs are retained; fewer than two rows skips probes. Acceptance retains both captions for the prompt and collapse guard. Clean reference and acceptance rows are additional. Larger budgets allow more draws when the session is idle. Pairs run over consecutive eligible sampling steps, with two caption rows per probe call. A short schedule falls back to ordinary write samples."
+      },
+      "probe_draws": {
+        "name": "render probe draws",
+        "tooltip": "Maximum noise draws collected in a render. 0 uses the forward draws setting; -1 keeps the current value. Complete positive and negative pairs are kept. Fewer draws reduce the render work."
+      },
       "measure_samples": {
         "name": "samples per write measurement",
-        "tooltip": "Samples per write measurement: the same noise and timesteps for every trial. More samples measure more steadily and cost more time. 1 = one sample at the middle timestep."
+        "tooltip": "The noise samples of one write. The write draws each sample for itself: a noise level from the model's training schedule and a noise image. Every trial of the write uses the same samples. The accept check uses the same number of other samples. More samples measure more steadily and cost more time."
       },
       "learn": {
         "name": "learning signal",
@@ -658,7 +710,7 @@
       },
       "depth": {
         "name": "depth",
-        "tooltip": "Number of passes. -1 uses the depth the mod recommends."
+        "tooltip": "Number of passes. -1 uses the depth the mod recommends (imported LoRAs: 4)."
       },
       "iteration": {
         "name": "iteration",
@@ -1286,7 +1338,7 @@
   },
   "KiLoRADepthMap": {
     "display_name": "KiLoRA Depth Map",
-    "description": "A depth per image area, from a mask (SAM2 and other segmenters) or an image (its brightness: depth, lineart or pose maps from ControlNet preprocessors). Until start, every area runs one depth, so the layout forms as usual. Then each area runs its own depth. Connect it to KiLoRA Apply or KiLoRA LoRA Loader.",
+    "description": "A depth per image area, from a mask (SAM2 and other segmenters) or an image (its brightness: depth, lineart or pose maps from ControlNet preprocessors). Until start, every area runs one depth, so the layout forms as usual. Then each area runs its own depth. Connect it to KiLoRA Apply or KiLoRA LoRA Loader. Without a mask or an image, source auto measures the map during sampling: more depth on detail and where the LoRAs change the image most, with the same mean depth.",
     "inputs": {
       "min_depth": {
         "name": "min_depth",
@@ -1316,6 +1368,10 @@
         "name": "base",
         "tooltip": "The depth of every area before start, and of text tokens. -1: the mean depth of the map, rounded."
       },
+      "source": {
+        "name": "source",
+        "tooltip": "Where the map comes from. mask or image: the connected input (the mask comes first). auto: measured at the step of start from the image detail, the KiLoRA change and the route disagreement. Without a connected mask or image, auto is used."
+      },
       "mask": {
         "name": "mask",
         "tooltip": "A mask, for example from SAM2. 1 gives max_depth. If an image is also connected, the mask is used."
@@ -1323,6 +1379,26 @@
       "image": {
         "name": "image",
         "tooltip": "An image. Its brightness is the map, for example the output of a depth, lineart or pose preprocessor."
+      },
+      "mean_depth": {
+        "name": "mean_depth",
+        "tooltip": "auto: the mean depth over the image. -1 uses the depth of KiLoRA Apply, so the cost stays the same as that uniform depth. Lower values are faster."
+      },
+      "detail_weight": {
+        "name": "detail_weight",
+        "tooltip": "auto: the weight of the image detail (the fine structure of the clean image estimate)."
+      },
+      "change_weight": {
+        "name": "change_weight",
+        "tooltip": "auto: the weight of the KiLoRA change (where the LoRAs change the image most)."
+      },
+      "disagreement_weight": {
+        "name": "disagreement_weight",
+        "tooltip": "auto: the weight of the route disagreement (where the LoRAs compete). 0 turns it off."
+      },
+      "smooth": {
+        "name": "smooth",
+        "tooltip": "auto: the Gaussian width in tokens that smooths the combined map before the depths are chosen. The map of a painted image is noisy; 2 gives areas. 0 turns it off."
       }
     },
     "outputs": {
@@ -1371,6 +1447,14 @@
       "compose": {
         "name": "compose",
         "tooltip": "separate: each layer runs as its own model call. single: all layers run in one model call per guidance branch, and each image area reads its own layer text. Select single on every layer. The crop input is not used with single."
+      },
+      "region_penalty": {
+        "name": "region penalty",
+        "tooltip": "With compose single: how strongly image areas of different layers stop reading each other in the early steps. 0 turns it off. The value of the first layer is used, and every layer must set the same value."
+      },
+      "mount_scope": {
+        "name": "mount scope",
+        "tooltip": "With compose single: all applies a layer's mods to the image area of the layer and to its own text. cross_kv applies them only to the cross-attention keys and values of its own text, so a LoRA without those weights has no effect. Every layer must set the same value."
       }
     },
     "outputs": {
@@ -1827,6 +1911,42 @@
       "folder": {
         "name": "Folder",
         "tooltip": "Folder of images with optional same-name .txt captions. Use either folder or images."
+      },
+      "contrast_components": {
+        "name": "Contrast components",
+        "tooltip": "Add up to four principal directions of the per-image mean contrasts to the shared mean. Limited to the number of fitted images minus one, after holding out images. Default 4; 0 writes the previous mean-only weights. The fit still uses Rank. Applies only to this unmasked image solve."
+      },
+      "masks": {
+        "name": "Masks",
+        "tooltip": "One mask per image, in image order. The solve learns only the masked region. Leave this empty to use the whole image."
+      },
+      "mask_contrast": {
+        "name": "Mask contrast",
+        "tooltip": "With masks, tokens compares each masked token and mean compares the masked average. Ignored without masks."
+      },
+      "two_stage": {
+        "name": "Two stages",
+        "tooltip": "Solve style first, then character with that style active on the student. Masks select the character; their inverse selects style. Without masks, both use whole images. Writes separate creative style and ip character files."
+      },
+      "mask_start": {
+        "name": "Mask start",
+        "tooltip": "With masks, start the aligned student at this fraction of the full schedule. Default 0.4. Ignored without masks."
+      },
+      "mask_samples": {
+        "name": "Mask samples",
+        "tooltip": "With masks, space- or comma-separated fractions of the full schedule, at or after Mask start and at most 1.0, for example 0.5 0.75 1.0. Empty keeps the three original sample positions. Ignored without masks."
+      },
+      "refit_rounds": {
+        "name": "Refit rounds",
+        "tooltip": "Additional closed-form solves after resampling student trajectories with the previous solution active. 0 keeps the original solve; up to 8 rounds. Only the last result is checked and saved."
+      },
+      "guard_rule": {
+        "name": "Guard rule",
+        "tooltip": "loss chooses the lowest held-out loss below the base loss, within the live drift bound. drift chooses the largest scale within that bound with loss at most 1.25 times the base loss. Default loss."
+      },
+      "trajectory_check": {
+        "name": "Trajectory check",
+        "tooltip": "Check two unrelated prompts with 8 sampling steps using the first solve seed, size and cfg. Reject a scale if latent spatial standard deviation falls below 0.5 times the base or relative L2 distance exceeds 1.0, then try smaller allowed scales. No VAE decoding. Default off."
       }
     },
     "outputs": {
@@ -1840,7 +1960,7 @@
       },
       "2": {
         "name": "Report",
-        "tooltip": "Image and hold-out counts, solve times, both guard losses, relative gain and the saved or reused path."
+        "tooltip": "Image and hold-out counts, contrast components, measured rank per mount (singular values above 0.001 of the largest), solve times, both guard losses, relative gain and the saved or reused path."
       }
     }
   },

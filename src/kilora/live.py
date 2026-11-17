@@ -32,6 +32,7 @@ from .modfile import (
     save_mod,
 )
 from .sets import AdapterSet, KeyedExperts
+from .write_estimates import reset_write_estimates
 
 log = logging.getLogger("kilora.live")
 
@@ -624,7 +625,11 @@ class LiveSession:
         tensors = self.editor_snapshot()
         if self.pinned is None or tensors is None:
             return tensors
-        metadata = {"pin": self.pinned, "write_branch": self.pinned_write_branch}
+        metadata = {
+            "pin": self.pinned,
+            "write_branch": self.pinned_write_branch,
+            "targets": list(self._pinned_state),
+        }
         tensors["pin/metadata"] = torch.tensor(
             list(json.dumps(metadata).encode()), dtype=torch.uint8
         )
@@ -638,7 +643,7 @@ class LiveSession:
         if tensors is None or "pin/metadata" not in tensors:
             return
         metadata = json.loads(bytes(tensors["pin/metadata"].tolist()))
-        state = {}
+        state = {target: {} for target in metadata.get("targets", ())}
         for key, value in tensors.items():
             if key.startswith("pin/state/"):
                 target, _, part = key[len("pin/state/") :].rpartition("/")
@@ -704,12 +709,45 @@ class LiveSession:
             branch=None if forest is None else forest.current,
         )
         self.state = self.pending
+        reset_write_estimates(self)
         self.revision += 1
         self.pending, self._pending_info = None, None
         time = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
         self.commits.append(Commit(time, info.images, info.speed, info.scaled, info.message))
         name = self._autosave()
         return f"Saved. {len(self.commits)} commits. Autosave {name}."
+
+    def commit_part(
+        self, part: str, editor_before: Mapping[str, torch.Tensor] | None = None
+    ) -> str:
+        if self.pending is None:
+            raise KiLoRAError("there is no pending update to save")
+        if not len(self.undo_log) or not self.commits:
+            return self.commit(editor_before=editor_before)
+        log_ = self.undo_log
+        entry = log_._entries[-1]
+        last_editor, last_previous = log_.last_editor, log_.last_previous
+        old, commits = log_.pop(self.state)
+        log_.last_editor, log_.last_previous = last_editor, last_previous
+        log_.push(
+            old,
+            self.pending,
+            commits,
+            entry.editor,
+            entry.previous,
+            branch=entry.branch,
+            whole_editor=entry.whole_editor,
+            branch_after=entry.branch_after,
+        )
+        self.state = self.pending
+        reset_write_estimates(self)
+        self.revision += 1
+        self.pending, self._pending_info = None, None
+        last = self.commits[-1]
+        if not last.source.endswith(f"+{part}"):
+            self.commits[-1] = dataclasses.replace(last, source=f"{last.source}+{part}")
+        name = self._autosave()
+        return f"Saved with its {part} part. {len(self.commits)} commits. Autosave {name}."
 
     def undo(self) -> str:
         if self.pending is not None:
@@ -742,6 +780,7 @@ class LiveSession:
                 raise KiLoRAError("nothing to undo on this branch")
         whole_editor = self.undo_log._entries[index].whole_editor
         self.state, self.commits = self.undo_log.pop(self.state, index)
+        reset_write_estimates(self)
         if self.editor_state is not None:
             if self.undo_log.last_editor is not None:
                 if forest is not None and not whole_editor:
@@ -768,6 +807,7 @@ class LiveSession:
                 old, clean, self.commits, before, self.previous_snapshot(), branch=forest.current
             )
             self.state = clean
+            reset_write_estimates(self)
             self.pending = None
             self.revision += 1
             return "Reset the current branch."
@@ -780,6 +820,7 @@ class LiveSession:
         self._pending_editor = None
         self.previous = None
         self.state = clean
+        reset_write_estimates(self)
         self.commits = []
         self.pending = None
         self.revision += 1
@@ -892,6 +933,9 @@ class LiveSession:
             previous = save.previous
         if set(state) != set(self.layout.targets):
             raise ModFormatError(f"save {name!r} does not match layout {self.layout.id}")
+        prepare = getattr(self, "_prepare_editor_load", None)
+        if prepare is not None:
+            prepare(editor)
         loaded = _copy(state)
         forest = getattr(self.editor_state, "forest", None)
         before = self.editor_snapshot()
@@ -939,6 +983,7 @@ class LiveSession:
             {k: v.clone() for k, v in previous.items()} if self.keep_previous and previous else None
         )
         self.state = loaded
+        reset_write_estimates(self)
         if not preserved:
             self._restore_pin(editor)
         self.commits = list(commits)

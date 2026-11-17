@@ -31,6 +31,15 @@ __all__ = [
 SECTION_PREFIX = "kilora/section/"
 
 
+def _on_input(tensor: torch.Tensor, strength: float, x: torch.Tensor) -> torch.Tensor:
+
+    if strength != 1.0:
+        tensor = tensor * strength
+    if tensor.device == x.device and tensor.dtype == x.dtype:
+        return tensor
+    return tensor.to(device=x.device, dtype=x.dtype)
+
+
 class LayerChange:
     strength: float = 1.0
 
@@ -47,8 +56,8 @@ class LowRankChange(LayerChange):
         key = (x.device, x.dtype)
         if key not in self._cast:
             self._cast[key] = (
-                self.down.to(x.device, x.dtype),
-                (self.up * self.strength).to(x.device, x.dtype),
+                _on_input(self.down, 1.0, x),
+                _on_input(self.up, self.strength, x),
             )
         down, up = self._cast[key]
         from .fused import add_cast
@@ -64,7 +73,7 @@ class DenseChange(LayerChange):
     def add(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         key = (x.device, x.dtype)
         if key not in self._cast:
-            self._cast[key] = (self.delta * self.strength).to(x.device, x.dtype)
+            self._cast[key] = _on_input(self.delta, self.strength, x)
         return y + F.linear(x, self._cast[key]).to(y.dtype)
 
 
@@ -77,8 +86,8 @@ class KronChange(LayerChange):
         key = (x.device, x.dtype)
         if key not in self._cast:
             self._cast[key] = (
-                (self.w1 * self.strength).to(x.device, x.dtype),
-                self.w2.to(x.device, x.dtype),
+                _on_input(self.w1, self.strength, x),
+                _on_input(self.w2, 1.0, x),
             )
         w1, w2 = self._cast[key]
         lead = x.shape[:-1]

@@ -176,6 +176,8 @@ def test_maps_survive_a_save_and_load():
     _, _, reads = _recorded()
     store = ImportHistory([])
     store.block_maps.update(reads)
+    branch = store.fork()
+    store.checkout(branch)
     tensors = store.state_tensors()
     assert any(k.startswith(BlockMaps.PREFIX) for k in tensors)
     loaded = ImportHistory([])
@@ -185,12 +187,16 @@ def test_maps_survive_a_save_and_load():
     old = {k: v for k, v in tensors.items() if not k.startswith(BlockMaps.PREFIX)}
     loaded.load_tensors(old)
     assert not loaded.block_maps.sums
+    assert loaded.forest.current == branch
+    loaded.checkout("main")
+    for level in range(LEVELS - 1):
+        assert torch.equal(loaded.block_maps.map(level), store.block_maps.map(level))
     from kilora.live import _fixed_part
 
     assert set(_fixed_part(tensors)) == set(_fixed_part(old))
 
 
-def test_clamped_top_and_its_downward_step():
+def test_clamped_top_and_its_downward_step(monkeypatch):
     _, _, reads = _recorded()
     maps = BlockMaps()
     maps.update(reads)
@@ -220,6 +226,10 @@ def test_clamped_top_and_its_downward_step():
     counts = prediction_counts({}, {}, {}, errors)
     assert counts["eps_clamp_steps"] == len(reads) and counts["eps_clamp_nodes"] == LEVELS
     assert counts["eps_steps"] == len(reads) and counts["eps_nodes"] == LEVELS
+    monkeypatch.delenv("KILORA_PREDICTION_DEBUG", raising=False)
+    note = prediction_note({}, {}, {}, errors, 0.5)
+    assert "eps_" not in note and "target_forward_s=0.50" in note
+    monkeypatch.setenv("KILORA_PREDICTION_DEBUG", "1")
     note = prediction_note({}, {}, {}, errors, 0.5)
     assert f"eps_clamp_nodes={LEVELS}" in note and "target_forward_s=0.50" in note
 
@@ -347,6 +357,7 @@ def test_imported_block_reads_leave_outputs_and_state_equal(imported_session):
     from kilora.live_imports import ImportEditor, import_source_frames
 
     session, model = imported_session
+    session.align_for_moves()
     weights = {}
     for target in session.state:
         try:

@@ -242,7 +242,7 @@ def _render(middle=None):
 
 
 @pytest.mark.async_live
-def test_a_render_beside_a_stopping_write_gives_the_render_alone(monkeypatch):
+def test_a_render_beside_a_running_write_gives_the_render_alone(monkeypatch):
     for name in (live_write.TIMING_ENV, live_write.FLIPS_ENV):
         monkeypatch.delenv(name, raising=False)
     alone, before, after = _render()
@@ -250,32 +250,29 @@ def test_a_render_beside_a_stopping_write_gives_the_render_alone(monkeypatch):
     reference, _ = _write(0)
 
     inside = threading.Barrier(2, timeout=TIMEOUT)
-    unwound = threading.Barrier(2, timeout=TIMEOUT)
     results: dict = {}
     errors: list[BaseException] = []
 
     def render():
         try:
-            results["render"] = _render(lambda: (inside.wait(), unwound.wait()))
+            results["render"] = _render(inside.wait)
         except BaseException as error:
             errors.append(error)
             inside.abort()
-            unwound.abort()
 
     def write():
         try:
-            results["write"] = _write(1, on_fire=inside.wait, on_wait=unwound.wait)
+            results["write"] = _write(1, on_fire=inside.wait)
         except BaseException as error:
             errors.append(error)
             inside.abort()
-            unwound.abort()
 
     _join([threading.Thread(target=render), threading.Thread(target=write)], errors)
     y, before, after = results["render"]
     assert before and after
     assert torch.equal(y, alone)
     value, timing = results["write"]
-    assert timing["preempts"] >= 1
+    assert timing["preempts"] == 0
     assert value == reference
 
 

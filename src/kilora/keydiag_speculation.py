@@ -15,7 +15,7 @@ def speculation(record, index, tolerance=1e-5):
     s = record["sets"][index]
     if s.form != "input" or s.down is None or s.up is None:
         return {"skipped": "not an imported input set"}
-    if compute.import_score(s) != "derived" or compute.derived_mode() != "full":
+    if compute.import_score(s) != "derived" or compute.derived_mode(s) != "full":
         return {"skipped": "requires derived full mode"}
     if "KILORA_SHARE_TRANSITION" in os.environ:
         return {"skipped": "requires default transition gamma"}

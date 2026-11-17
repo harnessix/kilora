@@ -115,6 +115,10 @@ class TargetPlan:
                 token_depth=self._token_depth(h),
                 expert_scales=self._expert_scales(),
             )
+        if self.token_depth is not None and getattr(self.token_depth, "auto", None) is not None:
+            from .depth_map import note_change
+
+            note_change(h, y)
         return y
 
     def _expert_scales(self) -> list | None:
@@ -351,6 +355,7 @@ class TargetPlan:
                     jump_threshold=s.jump_threshold,
                     import_score=s.import_score,
                     derived_entry_temp=s.derived_entry_temp,
+                    derived_mode=s.derived_mode,
                     host_weight_norm=s.host_weight_norm,
                     share_transition_weighted=move(s.share_transition_weighted, torch.float32),
                     direction_core=move(s.direction_core, torch.float32),
@@ -517,6 +522,7 @@ class ScopedSet:
     roles: str = "auto"
     import_score: str = "derived"
     derived_entry_temp: float | None = None
+    derived_mode: str | None = None
     panels: Any = None
     expert_regions: Any = None
     expert_roles: Any = None
@@ -562,8 +568,8 @@ def plan_targets(
             if ex.has_lora:
                 experts, routes, rank, n_in = ex.down.shape
                 per = routes * rank
-                down = ex.down.float().reshape(experts * per, n_in)
-                up = ex.up.float().reshape(experts * per, ex.out_features)
+                down = ex.down.reshape(experts * per, n_in)
+                up = ex.up.reshape(experts * per, ex.out_features)
             scale = s.strength
             plan.sets.append(
                 LayerSet(
@@ -572,17 +578,11 @@ def plan_targets(
                     down=down,
                     up=up,
                     routing_down=(
-                        None
-                        if ex.routing_down is None
-                        else ex.routing_down.float().reshape_as(down)
+                        None if ex.routing_down is None else ex.routing_down.reshape_as(down)
                     ),
-                    routing_up=(
-                        None if ex.routing_up is None else ex.routing_up.float().reshape_as(up)
-                    ),
+                    routing_up=(None if ex.routing_up is None else ex.routing_up.reshape_as(up)),
                     routing_source=derived_cache.routing_source(ex),
-                    exact={
-                        i: tuple(part.float() for part in parts) for i, parts in ex.exact.items()
-                    },
+                    exact={i: tuple(parts) for i, parts in ex.exact.items()},
                     router=s.router_for(target).float(),
                     keys_in=ex.keys_in.float(),
                     keys_out=ex.keys_out.float(),
@@ -627,6 +627,7 @@ def plan_targets(
                     direction_core=s.extra.get("direction_core"),
                     direction_sources=s.extra.get("direction_sources"),
                     derived_entry_temp=item.derived_entry_temp,
+                    derived_mode=item.derived_mode or s.extra.get("derived_mode"),
                     fine=s.extra.get("fine", False),
                     direction_candidates=s.extra.get("candidates", 16),
                     gate=None if ex.gate is None else {k: v.float() for k, v in ex.gate.items()},
@@ -684,8 +685,8 @@ def _merge_plain_sets(plan: TargetPlan) -> None:
         if len(idx) < 2:
             continue
         first = plan.sets[idx[0]]
-        down = torch.cat([plan.sets[i].down for i in idx])
-        up = torch.cat([plan.sets[i].up * float(plan.sets[i].scale) for i in idx])
+        down = torch.cat([plan.sets[i].down.float() for i in idx])
+        up = torch.cat([plan.sets[i].up.float() * float(plan.sets[i].scale) for i in idx])
         merged[idx[0]] = dataclasses.replace(
             first, down=down, up=up, per_expert=int(down.shape[0]), scale=1.0
         )
@@ -902,9 +903,10 @@ def bake(model: nn.Module, sets: Sequence[ScopedSet | AdapterSet], depth: int) -
     from .compute import derived_mode, import_score
 
     for target, plan in plans.items():
-        if not any(s.form == "input" and import_score(s) == "derived" for s in plan.sets):
-            continue
-        if derived_mode() != "full":
+        if not any(
+            s.form == "input" and import_score(s) == "derived" and derived_mode(s) == "full"
+            for s in plan.sets
+        ):
             continue
         weight = read_base_weight(modules[target], target)
         if (

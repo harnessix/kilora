@@ -16,7 +16,7 @@ from safetensors import safe_open
 from ._version import __version__
 from .adapter import Settings
 from .adaptive_gate import DEFAULT_KAPPA, check_gate_mode, check_kappa
-from .compute import check_routing
+from .compute import SAVED_DERIVED_MODE_MISSING, check_routing, derived_mode
 from .config import check_depth, check_depth_range
 from .errors import ModFormatError, UnsupportedFeatureError
 from .host_copy import host_copies, host_copy_map
@@ -250,6 +250,12 @@ def _pack_sets(
     if settings.derived_entry_temp is not None:
         adapter["derived_entry_temp"] = settings.derived_entry_temp
     adapter["import_score"] = settings.import_score
+    imports = [s for s in sets if s.form == "input"]
+    if imports:
+        tagged = next(
+            (s.extra["derived_mode"] for s in imports if s.extra.get("derived_mode")), None
+        )
+        adapter["derived_mode"] = derived_mode(tagged or settings.derived_mode)
     if settings.candidate_summary != "keys":
         adapter["candidate_summary"] = settings.candidate_summary
     if settings.candidates:
@@ -305,6 +311,8 @@ def _pack_sets(
             record["learned"] = True
         if s.frozen:
             record["frozen"] = True
+        if s.extra.get("apply_once"):
+            record["apply_once"] = True
         set_records.append(record)
     return tensors, adapter
 
@@ -552,6 +560,15 @@ def check_support(manifest: dict[str, Any], label: str = "this mod") -> None:
         )
 
 
+def _saved_derived_mode(adapter: dict[str, Any]) -> str | None:
+    if not any(r.get("form", "state") == "input" for r in adapter["sets"]):
+        return None
+    mode = adapter.get("derived_mode", SAVED_DERIVED_MODE_MISSING)
+    if mode not in ("full", "keys"):
+        raise ModFormatError(f"'derived_mode' must be 'full' or 'keys', got {mode!r}")
+    return mode
+
+
 def _unpack_sets(
     adapter: dict[str, Any], tensors: dict[str, torch.Tensor]
 ) -> tuple[list[AdapterSet], Settings]:
@@ -564,6 +581,7 @@ def _unpack_sets(
             else "keys",
         ),
         derived_entry_temp=adapter.get("derived_entry_temp"),
+        derived_mode=_saved_derived_mode(adapter),
         depth=check_depth(int(adapter["depth"])),
         train_depth=check_depth_range(train_depth) if train_depth else None,
         last_step_training=bool(adapter.get("last_step_training", False)),
@@ -663,6 +681,10 @@ def _unpack_sets(
             extra["axis"] = record["axis"]
         if "trained_with_kilora" in record:
             extra["trained_with_kilora"] = bool(record["trained_with_kilora"])
+        if record.get("apply_once"):
+            extra["apply_once"] = True
+        if record.get("form", "state") == "input":
+            extra["derived_mode"] = settings.derived_mode
         sets.append(
             AdapterSet(
                 name=record["name"],

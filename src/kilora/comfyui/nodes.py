@@ -273,6 +273,11 @@ class KiLoRALayerConditioning:
                 "crop": (["off", "auto"], {"default": "off"}),
                 "batch": ("BOOLEAN", {"default": False}),
                 "compose": (["separate", "single"], {"default": "separate"}),
+                "region_penalty": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.1},
+                ),
+                "mount_scope": (["cross_kv", "all"], {"default": "all"}),
             },
         }
 
@@ -291,6 +296,8 @@ class KiLoRALayerConditioning:
         crop="off",
         batch=False,
         compose="separate",
+        region_penalty=None,
+        mount_scope=None,
     ):
         import comfy.hooks as hooks
 
@@ -316,6 +323,10 @@ class KiLoRALayerConditioning:
                     "kilora_crop": crop,
                     "kilora_layer_batch": bool(batch),
                     "kilora_compose": compose,
+                    "kilora_region_penalty": (
+                        None if region_penalty is None else float(region_penalty)
+                    ),
+                    "kilora_mount_scope": None if mount_scope is None else str(mount_scope),
                 },
             ]
             for value, meta in result
@@ -1814,6 +1825,8 @@ DEPTH_MAP = dropin.DEPTH_MAP
 
 
 class KiLoRADepthMap:
+    SOURCES = ("auto", "mask", "image")
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -1825,8 +1838,33 @@ class KiLoRADepthMap:
                 "feather": ("INT", {"default": 16, "min": 0, "max": 512}),
                 "start": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 1.0, "step": 0.05}),
                 "base": ("FLOAT", {"default": -1.0, "min": -1.0, "max": 16.0, "step": 0.5}),
+                "source": (list(cls.SOURCES), {"default": "mask"}),
             },
-            "optional": {"mask": ("MASK",), "image": ("IMAGE",)},
+            "optional": {
+                "mask": ("MASK",),
+                "image": ("IMAGE",),
+                "mean_depth": (
+                    "FLOAT",
+                    {"default": -1.0, "min": -1.0, "max": 16.0, "step": 0.25, "advanced": True},
+                ),
+                "detail_weight": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.05, "advanced": True},
+                ),
+                "change_weight": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.05, "advanced": True},
+                ),
+                "disagreement_weight": (
+                    "FLOAT",
+                    {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.05, "advanced": True},
+                ),
+                "smooth": (
+                    "FLOAT",
+                    {"default": 2.0, "min": 0.0, "max": 16.0, "step": 0.25, "advanced": True},
+                ),
+            },
+            "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
     RETURN_TYPES = (DEPTH_MAP, "IMAGE")
@@ -1834,18 +1872,48 @@ class KiLoRADepthMap:
     FUNCTION = "build"
     CATEGORY = CATEGORY
 
+    _auto_maps: dict = {}
+
     def build(
-        self, min_depth, max_depth, invert, gamma, feather, start, base, mask=None, image=None
+        self,
+        min_depth,
+        max_depth,
+        invert,
+        gamma,
+        feather,
+        start,
+        base,
+        source="mask",
+        mask=None,
+        image=None,
+        mean_depth=-1.0,
+        detail_weight=1.0,
+        change_weight=1.0,
+        disagreement_weight=0.0,
+        smooth=2.0,
+        unique_id=None,
     ):
         from ..depth_map import luminance, make_depth_map
 
-        if mask is not None:
+        if source != "auto" and mask is not None:
             values = mask if mask.dim() == 3 else mask.reshape(-1, *mask.shape[-2:])
             source = "mask"
-        elif image is not None:
+        elif source != "auto" and image is not None:
             values, source = luminance(image), "image"
         else:
-            raise patching.KiLoRAError("connect a mask or an image to KiLoRA Depth Map")
+            return self._auto(
+                min_depth,
+                max_depth,
+                feather,
+                start,
+                base,
+                mean_depth,
+                detail_weight,
+                change_weight,
+                disagreement_weight,
+                smooth,
+                unique_id,
+            )
         try:
             m = make_depth_map(
                 values,
@@ -1868,6 +1936,72 @@ class KiLoRADepthMap:
         if mask is not None and image is not None:
             report += " The image is not used: the mask comes first."
         preview = m.values[..., None].expand(*m.values.shape, 3).contiguous()
+        return {"ui": {"text": [report]}, "result": (m, preview)}
+
+    def _auto(
+        self,
+        min_depth,
+        max_depth,
+        feather,
+        start,
+        base,
+        mean_depth,
+        detail_weight,
+        change_weight,
+        disagreement_weight,
+        smooth=2.0,
+        unique_id=None,
+    ):
+        import torch
+
+        from ..depth_map import make_auto_depth_map
+        from .depth_preview import show_measured
+
+        try:
+            m = make_auto_depth_map(
+                min_depth,
+                max_depth,
+                start,
+                None if base < 0 else base,
+                mean_depth,
+                detail_weight,
+                change_weight,
+                disagreement_weight,
+                feather,
+                smooth,
+            )
+        except ValueError as exc:
+            raise patching.KiLoRAError(str(exc)) from None
+        m.on_measured = lambda values: show_measured(values, unique_id)
+        key = (
+            min_depth,
+            max_depth,
+            feather,
+            start,
+            base,
+            mean_depth,
+            detail_weight,
+            change_weight,
+            disagreement_weight,
+            smooth,
+        )
+        last = type(self)._auto_maps.get(key)
+        measured = last.measured() if last is not None else None
+        type(self)._auto_maps.clear()
+        type(self)._auto_maps[key] = m
+        if measured is not None:
+            values = measured.detach().float().cpu()
+            preview = values[..., None].expand(*values.shape, 3).contiguous()
+        else:
+            preview = torch.full((1, 64, 64, 3), 0.5)
+        mean = "the Apply depth" if mean_depth < 0 else f"{mean_depth:g}"
+        report = (
+            f"Depth map auto: measured at progress {m.start:g}, depth {min(min_depth, max_depth):g}"
+            f" to {max(min_depth, max_depth):g} with the mean {mean}; weights detail "
+            f"{detail_weight:g}, change {change_weight:g}, disagreement "
+            f"{disagreement_weight:g}; smoothing {smooth:g} tokens. The measured map shows "
+            f"on this node after the run."
+        )
         return {"ui": {"text": [report]}, "result": (m, preview)}
 
 
@@ -2073,6 +2207,25 @@ class KiLoRALiveOptions:
                 "measure": (["unchanged", "compressed", "full"], {"default": "unchanged"}),
                 "measure_combos": ("INT", {"default": 0, "min": 0, "max": 256, "step": 1}),
                 "edits": (["unchanged", "on", "off"], {"default": "unchanged"}),
+                "live_expert_mass": (
+                    "FLOAT",
+                    {"default": -1.0, "min": -1.0, "max": 1.0, "step": 0.01},
+                ),
+                "live_expert_top": ("INT", {"default": 0, "min": 0, "max": 64, "step": 1}),
+                "live_expert_history": ("INT", {"default": 0, "min": 0, "max": 256, "step": 1}),
+                "live_expert_copies": ("INT", {"default": -1, "min": -1, "max": 16, "step": 1}),
+                "write_measure": (["unchanged", "forward", "candidates"], {"default": "unchanged"}),
+                "forward_draws": ("INT", {"default": 0, "min": 0, "max": 256, "step": 1}),
+                "forward_sigma": (
+                    "FLOAT",
+                    {"default": -1.0, "min": -1.0, "max": 1.0, "step": 0.01},
+                ),
+                "forward_chunk": ("INT", {"default": 0, "min": 0, "max": 64, "step": 1}),
+                "write_resolution": ("INT", {"default": -1, "min": -1, "max": 4096, "step": 1}),
+                "probe_rows": (["unchanged", "on", "off"], {"default": "unchanged"}),
+                "probe_call": (["unchanged", "separate"], {"default": "unchanged"}),
+                "probe_budget": ("INT", {"default": -1, "min": -1, "max": 512, "step": 1}),
+                "probe_draws": ("INT", {"default": -1, "min": -1, "max": 256, "step": 1}),
                 "measure_samples": ("INT", {"default": 0, "min": 0, "max": 64, "step": 1}),
                 "learn": (["unchanged", "measure", "prediction"], {"default": "unchanged"}),
             },
@@ -2099,6 +2252,19 @@ class KiLoRALiveOptions:
         edits="unchanged",
         measure_samples=0,
         learn="unchanged",
+        live_expert_mass=-1.0,
+        live_expert_top=0,
+        live_expert_history=0,
+        live_expert_copies=-1,
+        write_measure="unchanged",
+        forward_draws=0,
+        forward_sigma=-1.0,
+        forward_chunk=0,
+        write_resolution=-1,
+        probe_rows="unchanged",
+        probe_call="unchanged",
+        probe_draws=-1,
+        probe_budget=-1,
     ):
         from ..live_imports import ImportedLiveSession
 
@@ -2143,6 +2309,26 @@ class KiLoRALiveOptions:
                 measure_combos=measure_combos or None,
                 measure_samples=measure_samples or None,
             )
+        experts = {
+            "live_expert_mass": None if live_expert_mass < 0 else float(live_expert_mass),
+            "live_expert_top": live_expert_top or None,
+            "live_expert_history": live_expert_history or None,
+            "live_expert_copies": None if live_expert_copies < 0 else int(live_expert_copies),
+            "write_measure": None if write_measure == "unchanged" else write_measure,
+            "forward_draws": forward_draws or None,
+            "forward_sigma": None if forward_sigma <= 0 else float(forward_sigma),
+            "forward_chunk": forward_chunk or None,
+            "write_resolution": None if write_resolution < 0 else int(write_resolution),
+            "probe_rows": None if probe_rows == "unchanged" else probe_rows == "on",
+            "probe_call": None if probe_call == "unchanged" else probe_call,
+            "probe_budget": None if probe_budget < 0 else int(probe_budget),
+            "probe_draws": None if probe_draws < 0 else int(probe_draws),
+        }
+        experts = {name: value for name, value in experts.items() if value is not None}
+        if experts:
+            if not isinstance(sessions[0], ImportedLiveSession):
+                raise patching.KiLoRAError("live expert settings are only for imported sessions")
+            sessions[0].set_options(**experts)
         if pin != "unchanged":
             from kilora.live_queue import queue_for
 

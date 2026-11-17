@@ -234,6 +234,16 @@ def sampler(patcher, conds, sigma, x=None):
         (None, {"kilora_alpha_mask": True}, "KiLoRA Apply has an alpha mask"),
         (None, {"family": "sdxl"}, "the model family is not Anima or Cosmos"),
         (None, {"separate": True}, "the mods carry state across steps"),
+        (
+            lambda c: c[0][1].update(kilora_region_penalty=0.0),
+            {},
+            "the layers set different region penalties or mount scopes",
+        ),
+        (
+            lambda c: c[0][1].update(kilora_mount_scope="cross_kv"),
+            {},
+            "the layers set different region penalties or mount scopes",
+        ),
     ],
 )
 def test_each_fallback_cause_runs_separate_with_one_info_line(
@@ -382,8 +392,23 @@ def test_two_layers_with_single_give_two_rows_per_step(comfy_stub, caplog):
     assert rows <= 2
 
 
-def test_single_guided_result_reads_the_same_weights_in_both_branches(comfy_stub, caplog):
-    (first, _), records = single_run(caplog)
+def scoped_layers(**settings):
+    conds = single_layers()
+    for c in conds[0]:
+        c.update(settings)
+    return conds
+
+
+@pytest.mark.parametrize("how", ["constant", "layers"])
+def test_single_guided_result_reads_the_same_weights_in_both_branches(
+    how, comfy_stub, caplog, monkeypatch
+):
+    if how == "constant":
+        monkeypatch.setattr(lc, "MOUNT_SCOPE", "all")
+        conds = None
+    else:
+        conds = scoped_layers(kilora_mount_scope="all")
+    (first, _), records = single_run(caplog, conds)
     cond, uncond = first
     guided = uncond + CFG * (cond - uncond)
     assert torch.isfinite(guided).all()
@@ -398,3 +423,38 @@ def test_single_guided_result_reads_the_same_weights_in_both_branches(comfy_stub
     assert torch.allclose(image[0][inside], torch.full((16,), 1 - lc.BETA))
     assert torch.equal(image[0][~inside], torch.zeros(48))
     assert torch.equal(words[0], torch.tensor([0.0] * 4 + [1.0] * 4))
+
+
+def test_the_default_mount_scope_keeps_the_layers_on_the_image_tokens(comfy_stub, caplog):
+    _, records = single_run(caplog)
+    inside = box()[0] > 0
+    for record in records:
+        image, _words = record["ip"]
+        assert not torch.equal(image, torch.zeros_like(image))
+        assert torch.allclose(image[0][inside], torch.full((16,), 1 - lc.BETA))
+
+
+def test_the_cross_kv_mount_scope_takes_the_layers_off_the_image_tokens(comfy_stub, caplog):
+    _, records = single_run(caplog, scoped_layers(kilora_mount_scope="cross_kv"))
+    for record in records:
+        image, words = record["ip"]
+        assert torch.equal(image, torch.zeros_like(image))
+        assert torch.equal(words[0], torch.tensor([0.0] * 4 + [1.0] * 4))
+
+
+def test_the_run_log_reports_the_settings_of_the_sample(comfy_stub, caplog):
+    single_run(caplog, scoped_layers(kilora_region_penalty=0.5, kilora_mount_scope="all"))
+    lines = [r.getMessage() for r in caplog.records if "self-attention penalty" in r.getMessage()]
+    assert lines == [
+        f"KiLoRA: compose single: self-attention penalty 0.5 until progress "
+        f"{lc.self_end():g}, mount scope all."
+    ]
+
+
+def test_the_run_log_reports_the_constants_without_the_inputs(comfy_stub, caplog):
+    single_run(caplog)
+    lines = [r.getMessage() for r in caplog.records if "self-attention penalty" in r.getMessage()]
+    assert lines == [
+        f"KiLoRA: compose single: self-attention penalty 1 until progress "
+        f"{lc.self_end():g}, mount scope all."
+    ]

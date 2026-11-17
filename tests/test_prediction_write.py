@@ -411,6 +411,7 @@ def test_imported_prediction_write_moves_core_strength_and_terms(imported):
     from kilora.live_imports import ImportEditor, TermMove, import_source_frames
 
     session, model = imported
+    session.align_for_moves()
     sources = import_source_frames(session, _weights(session, model))
     target = next(iter(sources))
     ex = session._source.experts[target]

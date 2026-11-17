@@ -239,7 +239,7 @@
       },
       "depth": {
         "name": "derinlik",
-        "tooltip": "Geçiş sayısı. -1 modun önerdiği derinliği kullanır."
+        "tooltip": "Geçiş sayısı. -1 modun önerdiği derinliği kullanır (içe aktarılan LoRA'lar: 4)."
       }
     }
   },
@@ -257,7 +257,7 @@
       },
       "depth": {
         "name": "derinlik",
-        "tooltip": "Geçiş sayısı. -1 modun önerdiği derinliği kullanır."
+        "tooltip": "Geçiş sayısı. -1 modun önerdiği derinliği kullanır (içe aktarılan LoRA'lar: 4)."
       },
       "iteration": {
         "name": "yineleme",
@@ -285,7 +285,7 @@
       },
       "path_width": {
         "name": "yol genişliği",
-        "tooltip": "Yalnızca yol yinelemesi için. Yürüyüş sayısı: ilk adımın en iyi uzmanlarından başlarlar ve her yürüyüş kendi sorgusundan devam eder. Daha büyük bir genişlik, yanlış bir ilk adımdan sonra doğru uzmanı bulur. 0 modun değerini kullanır (varsayılan 1: bir yürüyüş)."
+        "tooltip": "Yalnızca yol yinelemesi için. Yürüyüş sayısı: ilk adımın en iyi uzmanlarından başlarlar ve her yürüyüş kendi sorgusundan devam eder. Daha büyük bir genişlik, yanlış bir ilk adımdan sonra doğru uzmanı bulur. 0 modun değerini kullanır (içe aktarılan LoRA'lar: 3 yürüyüş; diğer modlar: 1)."
       },
       "path_select": {
         "name": "yol seçimi",
@@ -488,6 +488,58 @@
         "name": "düzenlemeler",
         "tooltip": "Düzenlemeler her LoRA için katman başına çekirdek matrisi ve gücü, ayrıca paket terimlerini değiştirir. Kaynak dosyalara asla yazılmaz. off içe aktarılan LoRA dosyalarını tam olarak geri yükler. unchanged geçerli seçimi korur."
       },
+      "live_expert_mass": {
+        "name": "geçilen kütle",
+        "tooltip": "Canlı bir yazma, bir uzmanı yalnızca kaydedilen yollardaki rota kütlesi, katmanının kütlesinin bu oranının üzerindeyse düzenler. -1: değişmez. Varsayılan 0.05."
+      },
+      "live_expert_top": {
+        "name": "katman başına geçilen uzman",
+        "tooltip": "Bir canlı yazmanın rota kütlesine göre düzenlediği, katman başına en fazla uzman sayısı. 0: değişmez. Varsayılan 4."
+      },
+      "live_expert_history": {
+        "name": "rota geçmişi",
+        "tooltip": "Oturumun ortak uzmanları bulmak için rota kütlesini tuttuğu kayıtlı istemlerin sayısı. 0: değişmez. Varsayılan 16."
+      },
+      "live_expert_copies": {
+        "name": "uzman başına kopya",
+        "tooltip": "Canlı yazmaların eklediği, bir ortak uzmanın en fazla kopya sayısı. -1: değişmez. Varsayılan 2."
+      },
+      "write_measure": {
+        "name": "yazma ölçümü",
+        "tooltip": "Canlı bir yazmanın yönünü nasıl bulduğu. forward: bir temiz ileri geçiş ve hedef uzmanların çıktılarında küçük gürültü olan bir dizi ileri geçiş (varsayılan). candidates: her aday hareketi eşleşmiş ileri geçişlerle ölçer. unchanged mevcut seçimi korur."
+      },
+      "forward_draws": {
+        "name": "gürültü çekimi",
+        "tooltip": "Forward tahmininin gürültü çekimi sayısı. Daha çok çekim daha kararlı bir yön verir ve daha çok zamana mal olur. 0: değişmez. Varsayılan 4."
+      },
+      "forward_sigma": {
+        "name": "gürültü boyutu",
+        "tooltip": "Forward tahmininin gürültüsünün boyutu; her uzmanın çıktı RMS değerinin bir oranı olarak. -1: değişmez. Varsayılan 0.05."
+      },
+      "forward_chunk": {
+        "name": "geçiş başına çekim",
+        "tooltip": "Tek bir toplu ileri geçişteki gürültü çekimi sayısı. Daha düşük bir sayı daha az GPU belleği kullanır. 0: değişmez. Varsayılan 4."
+      },
+      "write_resolution": {
+        "name": "yazma çözünürlüğü",
+        "tooltip": "Bir yazmanın örneklerinin piksel cinsinden uzun kenarı. Yazma, görüntünün küçültülmüş bir kopyasından öğrenir: 256 ile 4096 arası, 16'ya yuvarlanır. Daha küçük bir sayı yazmayı hızlandırır. 0: render çözünürlüğü. -1: değişmez. Varsayılan 512. Yazmalar bu ayardan önce de 512 px ile çalışıyordu: ölçüm boyutunu (measure_size) kullanıyorlardı. Bu ayar o denetime bir ad verir."
+      },
+      "probe_rows": {
+        "name": "render probe rows",
+        "tooltip": "Collect write measurements during rendering. On by default. Image learning and writes without a complete render measurement use their own noise samples."
+      },
+      "probe_call": {
+        "name": "render probe call",
+        "tooltip": "Separate runs each probe after the image call. Larger batches can change image-row rounding even on the CPU, so separate is the only supported value. The image call keeps its original rows. Probe measurements do not update image records or step caches."
+      },
+      "probe_budget": {
+        "name": "probe row budget",
+        "tooltip": "Maximum perturbed rows per render, counting caption and empty-caption rows. The default 2 samples one caption for one antithetic pair per render. The write seed selects caption or empty caption with equal probability. Budgets of 4 or more retain both captions. Complete pairs are retained; fewer than two rows skips probes. Acceptance retains both captions for the prompt and collapse guard. Clean reference and acceptance rows are additional. Larger budgets allow more draws when the session is idle. Pairs run over consecutive eligible sampling steps, with two caption rows per probe call. A short schedule falls back to ordinary write samples."
+      },
+      "probe_draws": {
+        "name": "render probe draws",
+        "tooltip": "Maximum noise draws collected in a render. 0 uses the forward draws setting; -1 keeps the current value. Complete positive and negative pairs are kept. Fewer draws reduce the render work."
+      },
       "measure_samples": {
         "name": "samples per write measurement",
         "tooltip": "Samples per write measurement: the same noise and timesteps for every trial. More samples measure more steadily and cost more time. 1 = one sample at the middle timestep."
@@ -658,7 +710,7 @@
       },
       "depth": {
         "name": "derinlik",
-        "tooltip": "Geçiş sayısı. -1 modun önerdiği derinliği kullanır."
+        "tooltip": "Geçiş sayısı. -1 modun önerdiği derinliği kullanır (içe aktarılan LoRA'lar: 4)."
       },
       "iteration": {
         "name": "yineleme",
@@ -1286,7 +1338,7 @@
   },
   "KiLoRADepthMap": {
     "display_name": "KiLoRA Derinlik Haritası",
-    "description": "Bir maskeden (SAM2 ve diğer bölütleyiciler) ya da bir görüntüden (parlaklığı: ControlNet ön işlemcilerinden derinlik, lineart veya poz haritaları) görüntünün her alanı için bir derinlik. start'a kadar her alan tek bir derinlikle çalışır, böylece yerleşim her zamanki gibi oluşur. Sonra her alan kendi derinliğiyle çalışır. KiLoRA Apply veya KiLoRA LoRA Loader'a bağlayın.",
+    "description": "Bir maskeden (SAM2 ve diğer bölütleyiciler) ya da bir görüntüden (parlaklığı: ControlNet ön işlemcilerinden derinlik, lineart veya poz haritaları) görüntünün her alanı için bir derinlik. start'a kadar her alan tek bir derinlikle çalışır, böylece yerleşim her zamanki gibi oluşur. Sonra her alan kendi derinliğiyle çalışır. KiLoRA Apply veya KiLoRA LoRA Loader'a bağlayın. Maske veya görüntü yoksa source auto haritayı örnekleme sırasında ölçer: ayrıntıda ve LoRA'ların görüntüyü en çok değiştirdiği yerde daha fazla derinlik, aynı ortalama derinlikle.",
     "inputs": {
       "min_depth": {
         "name": "min_depth",
@@ -1316,6 +1368,10 @@
         "name": "base",
         "tooltip": "start'tan önce her alanın ve metin tokenlarının derinliği. -1: haritanın ortalama derinliği, yuvarlanmış."
       },
+      "source": {
+        "name": "source",
+        "tooltip": "Haritanın kaynağı. mask veya image: bağlı giriş (önce maske). auto: start adımında görüntü ayrıntısından, KiLoRA değişikliğinden ve rota anlaşmazlığından ölçülür. Bağlı maske veya görüntü yoksa auto kullanılır."
+      },
       "mask": {
         "name": "maske",
         "tooltip": "Bir maske, örneğin SAM2'den. 1, max_depth verir. Bir görüntü de bağlıysa maske kullanılır."
@@ -1323,6 +1379,26 @@
       "image": {
         "name": "image",
         "tooltip": "Bir görüntü. Parlaklığı haritadır, örneğin bir derinlik, lineart veya poz ön işlemcisinin çıktısı."
+      },
+      "mean_depth": {
+        "name": "mean_depth",
+        "tooltip": "auto: görüntü üzerindeki ortalama derinlik. -1, KiLoRA Apply derinliğini kullanır, böylece maliyet o tek tip derinlikle aynı kalır. Daha düşük değerler daha hızlıdır."
+      },
+      "detail_weight": {
+        "name": "detail_weight",
+        "tooltip": "auto: görüntü ayrıntısının ağırlığı (temiz görüntü tahmininin ince yapısı)."
+      },
+      "change_weight": {
+        "name": "change_weight",
+        "tooltip": "auto: KiLoRA değişikliğinin ağırlığı (LoRA'ların görüntüyü en çok değiştirdiği yer)."
+      },
+      "disagreement_weight": {
+        "name": "disagreement_weight",
+        "tooltip": "auto: rota anlaşmazlığının ağırlığı (LoRA'ların yarıştığı yer). 0 kapatır."
+      },
+      "smooth": {
+        "name": "smooth",
+        "tooltip": "auto: derinlikler seçilmeden önce birleşik haritayı yumuşatan Gauss genişliği (token olarak). Boyanmış bir görüntünün haritası gürültülüdür; 2 alanlar verir. 0 kapatır."
       }
     },
     "outputs": {
@@ -1371,6 +1447,14 @@
       "compose": {
         "name": "compose",
         "tooltip": "separate: each layer runs as its own model call. single: all layers run in one model call per guidance branch, and each image area reads its own layer text. Select single on every layer. The crop input is not used with single."
+      },
+      "region_penalty": {
+        "name": "region penalty",
+        "tooltip": "compose single ile: farklı katmanların görüntü alanlarının ilk adımlarda birbirini okumayı ne kadar güçlü bıraktığı. 0 kapatır. İlk katmanın değeri kullanılır ve her katman aynı değeri ayarlamalıdır."
+      },
+      "mount_scope": {
+        "name": "mount scope",
+        "tooltip": "compose single ile: all bir katmanın modlarını katmanın görüntü alanına ve kendi metnine uygular. cross_kv onları yalnızca kendi metninin cross-attention anahtarlarına ve değerlerine uygular, bu yüzden bu ağırlıkları olmayan bir LoRA'nın etkisi olmaz. Her katman aynı değeri ayarlamalıdır."
       }
     },
     "outputs": {
@@ -1827,6 +1911,42 @@
       "folder": {
         "name": "Klasör",
         "tooltip": "Aynı adlı isteğe bağlı .txt açıklamaları içeren görüntü klasörü. Klasör veya görüntü kullanın."
+      },
+      "contrast_components": {
+        "name": "Kontrast bileşenleri",
+        "tooltip": "Her görüntünün ortalama kontrastlarından en fazla dört ana yönü ortak ortalamaya ekler. Doğrulama görüntüleri ayrıldıktan sonra, uydurmada kullanılan görüntü sayısının bir eksiğiyle sınırlıdır. Varsayılan 4; 0, yalnızca ortalamaya dayanan önceki ağırlıkları yazar. Uydurma işlemi ayarlanan rank değerini kullanmaya devam eder. Yalnızca maskesiz görüntülerden yapılan bu çözüm için geçerlidir."
+      },
+      "masks": {
+        "name": "Maskeler",
+        "tooltip": "Görüntü sırasıyla her görüntü için bir maske. Çözüm yalnızca maskelenmiş bölgeyi öğrenir. Görüntünün tamamını kullanmak için boş bırakın."
+      },
+      "mask_contrast": {
+        "name": "Maskeli karşılaştırma",
+        "tooltip": "Maske varken tokens maskelenmiş her belirteci, mean ise maskelenmiş ortalamayı karşılaştırır. Maske yoksa bu ayar yok sayılır."
+      },
+      "two_stage": {
+        "name": "İki aşama",
+        "tooltip": "Önce stili, ardından bu stil öğrenci modelinde etkinken karakteri çözer. Maskeler karakteri, tersleri ise stili seçer. Maske yoksa her iki aşama da görüntülerin tamamını kullanır. Stil için creative, karakter için ip olmak üzere ayrı dosyalar yazar."
+      },
+      "mask_start": {
+        "name": "Maske başlangıcı",
+        "tooltip": "Maskelerle, hizalanmış öğrenci yörüngesini tam zaman çizelgesinin bu oranında başlatır. Varsayılan 0.4. Maske yoksa yok sayılır."
+      },
+      "mask_samples": {
+        "name": "Maske örnekleri",
+        "tooltip": "Maskelerle: tam zaman çizelgesinin boşluk veya virgülle ayrılmış oranları; Maske başlangıcından 1.0 değerine kadar, örneğin 0.5 0.75 1.0. Boş bırakılırsa ilk üç konum korunur. Maske yoksa yok sayılır."
+      },
+      "refit_rounds": {
+        "name": "Yeniden uyarlama turları",
+        "tooltip": "Önceki çözüm etkinken öğrenci yörüngeleri yeniden örneklendikten sonra ek kapalı biçimli çözümler üretir. 0 ilk çözümü korur; en fazla 8 tur. Yalnızca son sonuç denetlenir ve kaydedilir."
+      },
+      "guard_rule": {
+        "name": "Denetim kuralı",
+        "tooltip": "loss, canlı düzenleyicinin sapma sınırı içinde temel kayıptan düşük en küçük doğrulama kaybını seçer. drift, aynı sınır içinde kaybı temelin en fazla 1.25 katı olan en büyük ölçeği seçer. Varsayılan loss."
+      },
+      "trajectory_check": {
+        "name": "Yörünge denetimi",
+        "tooltip": "Çözümün ilk tohumu, boyutu ve cfg değeriyle ilgisiz iki istemi 8 örnekleme adımında denetler. Gizil verinin uzamsal standart sapması tabanın 0,5 katının altına düşerse veya göreli L2 uzaklığı 1,0 değerini aşarsa ölçeği reddeder ve izin verilen daha küçük ölçekleri dener. VAE çözümlemesi yapılmaz. Varsayılan olarak kapalıdır."
       }
     },
     "outputs": {

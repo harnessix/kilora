@@ -276,6 +276,19 @@ def test_the_same_entry_twice_is_removed_once():
     assert not stack
 
 
+def test_hidden_entries_return_after_the_block():
+    stack = ContextStack("kilora_test_stack_hidden")
+    a, b = object(), object()
+    with stack.pushed(a):
+        with stack.hidden() as entries:
+            assert entries == (a,) and not stack
+            with stack.pushed(b):
+                assert list(stack) == [b]
+            assert not stack
+        assert list(stack) == [a]
+    assert not stack
+
+
 def test_layer_depth_is_per_context():
     assert compute._LAYER_DEPTH.get() == 0
     block = torch.nn.Identity()

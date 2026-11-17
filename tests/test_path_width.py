@@ -12,6 +12,11 @@ from kilora import path_walks as P
 from kilora.compute import LayerSet, dropout_key, run_layer
 
 
+@pytest.fixture(autouse=True)
+def _keys_arm(monkeypatch):
+    monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
+
+
 def _y0(seed=1, width=16):
     return torch.randn(2, 9, width, generator=torch.Generator().manual_seed(seed))
 

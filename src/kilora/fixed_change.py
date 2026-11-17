@@ -165,6 +165,7 @@ def _fixed_class(base: type) -> type:
 def fixed_copy(
     module: nn.Module, changes: Sequence[LayerChange], *, source: nn.Module | None = None
 ) -> nn.Module:
+
     if is_fixed(module):
         if source is None:
             source = module

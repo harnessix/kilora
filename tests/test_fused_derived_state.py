@@ -488,7 +488,7 @@ def _census(monkeypatch, run):
 
     rates = []
     with monkeypatch.context() as m:
-        for name in ("_token_rates_kernel", "_channel_rates_kernel"):
+        for name in ("_gate_token_kernel", "_gate_channel_kernel"):
             kernel = getattr(adaptive_gate, name)
 
             class Launcher:

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import dataclasses
 import math
+import os
 
 import pytest
 import torch
@@ -9,9 +10,15 @@ from test_comfyui import denoiser, folders
 from test_lowrank_depth import _sets
 from test_output_gate import _gated
 
+from kilora import adaptive_gate
 from kilora import compute as C
-from kilora.adaptive_gate import adaptive_keep, resolve_mode
+from kilora.adaptive_gate import _token_gram, adaptive_keep, resolve_mode, token_cross
 from kilora.compute import LayerSet, dropout_key, run_layer, split_gate, step_carry
+
+
+@pytest.fixture(autouse=True)
+def _keys_arm(monkeypatch):
+    monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
 
 
 def _y0(seed=1, width=16, offset=0.0):
@@ -27,6 +34,38 @@ def _run(y0, sets, depth, fast, monkeypatch, regions=None):
 
 def _mode(sets, mode, **kw):
     return [dataclasses.replace(s, gate_mode=mode, **kw) for s in sets]
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [(2, 4096, 32), (2, 3, 512, 32), (2, 77, 32), (2, 4096, 8)]
+    + [(2, tokens, 8) for tokens in (96, 48, 24, 12, 6)],
+)
+@pytest.mark.parametrize("cross", [False, True])
+def test_token_gram_matches_direct_product(shape, cross):
+    g = torch.Generator().manual_seed(17)
+    a = torch.rand(shape, generator=g)
+    b = torch.rand((*shape[:-1], shape[-1] + 3), generator=g) if cross else a
+    actual = token_cross(a, b) if cross else _token_gram(a)
+    torch.testing.assert_close(actual, a.transpose(-1, -2) @ b, rtol=1e-5, atol=0)
+
+
+@pytest.mark.parametrize("tokens", [512, 77])
+@pytest.mark.parametrize("cross", [False, True])
+def test_token_products_compile(tokens, cross):
+    g = torch.Generator().manual_seed(19)
+    a = torch.rand(2, tokens, 8, generator=g)
+    b = torch.rand(2, tokens, 8, generator=g)
+    product = token_cross if cross else _token_gram
+    compiled = torch.compile(product, backend="eager", dynamic=False, fullgraph=True)
+    args = (a, b) if cross else (a,)
+    torch.testing.assert_close(compiled(*args), product(*args), rtol=1e-5, atol=0)
+
+
+def test_token_gram_noncontiguous_signed_input():
+    v = torch.randn(2, 32, 512, generator=torch.Generator().manual_seed(18)).transpose(-1, -2)
+    expected = v.transpose(-1, -2) @ v
+    torch.testing.assert_close(_token_gram(v), expected, rtol=1e-5, atol=1e-4)
 
 
 @pytest.mark.parametrize("carry", ["dropped", "drop"])
@@ -500,3 +539,164 @@ def test_apply_head_history_checks_resolved_gate_and_width(denoiser, folders, mo
             base, chain, 3, gate_history=history, path_width=width, output_gate=gate
         )
         assert torch.isfinite(patched.run(x)).all()
+
+
+_KERNELS = pytest.mark.skipif(
+    adaptive_gate.triton is None
+    or (not torch.cuda.is_available() and os.environ.get("TRITON_INTERPRET") != "1"),
+    reason="needs CUDA or the Triton interpreter",
+)
+_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+_KERNEL_CHOICE = C.fused_gate_enabled
+
+
+def _torch_gate(monkeypatch, on):
+    choice = _KERNEL_CHOICE if on else (lambda z: False)
+    monkeypatch.setattr(adaptive_gate, "fused_gate_enabled", choice)
+    monkeypatch.setattr(C, "fused_gate_enabled", choice)
+
+
+def _gate_inputs(seed, batch=2, tokens=150, cols=40, out=72, history=True, active=False):
+    g = torch.Generator().manual_seed(seed)
+    z = torch.randn(batch, tokens, cols, generator=g)
+    before = torch.randn(batch, tokens, cols, generator=g)
+    hist = torch.randn(batch, tokens, cols, generator=g) if history else None
+    up = torch.randn(cols, out, generator=g) / cols**0.5
+    norm = torch.rand(batch, tokens, generator=g) * 4 + 0.1
+    rms = torch.rand(batch, out, generator=g) + 0.05
+    mask = (torch.rand(batch, tokens, 1, generator=g) > 0.3) if active else None
+    if mask is not None:
+        z, before = z * mask, before * mask
+    return [None if t is None else t.to(_DEVICE) for t in (z, before, hist, up, norm, rms, mask)]
+
+
+@_KERNELS
+@pytest.mark.parametrize("shape", [(2, 150, 40, 72), (1, 9, 8, 24), (3, 70, 96, 130)])
+@pytest.mark.parametrize("history", [False, True])
+@pytest.mark.parametrize("active", [False, True])
+@pytest.mark.parametrize("first", ["none", "given", "made"])
+@pytest.mark.parametrize("coherence", [True, False])
+def test_gate_kernels_match_the_torch_path(shape, history, active, first, coherence, monkeypatch):
+    monkeypatch.delenv("KILORA_GATE_BASE_REFERENCE", raising=False)
+    monkeypatch.setenv("KILORA_FUSED_CPU", "1")
+    batch, tokens, cols, out = shape
+    z, before, hist, up, norm, rms, mask = _gate_inputs(
+        7, batch, tokens, cols, out, history=history, active=active
+    )
+    gram = up @ up.t()
+    first_norm, first_rms = adaptive_gate.change_stats(z - before, up, gram, mask)
+    ref = {} if first == "none" else dict(first_norm=first_norm, first_rms=first_rms)
+    _torch_gate(monkeypatch, False)
+    expected = adaptive_keep(
+        z,
+        before,
+        hist,
+        up,
+        norm,
+        rms,
+        coherence=coherence,
+        active=mask,
+        gram=gram,
+        first_step=False,
+        **ref,
+    )
+    _torch_gate(monkeypatch, True)
+    with dropout_key(5, 2):
+        base = C.dropout_base("blk#0#adaptive", 3)
+        got = adaptive_gate.gate_call(
+            z,
+            before,
+            hist,
+            up,
+            gram,
+            norm,
+            rms,
+            1.0,
+            coherence,
+            mask,
+            **({} if first != "given" else ref),
+            first_change=first == "made",
+            base=base,
+        )
+        u = C.dropout_uniforms((got[0].numel() + got[1].numel(),), "blk#0#adaptive", 3, z.device)
+    qa, qb, new, made_norm, made_rms, mask_a, mask_b = got
+    for e, r in zip(expected, (qa, qb, new), strict=True):
+        torch.testing.assert_close(r, e, rtol=1e-5, atol=1e-5)
+    if first == "made":
+        torch.testing.assert_close(made_norm, first_norm, rtol=1e-5, atol=1e-6)
+        torch.testing.assert_close(made_rms, first_rms, rtol=1e-5, atol=1e-6)
+    else:
+        assert made_norm is None and made_rms is None
+    n = qa.numel()
+    draws = (u < torch.cat((qa.reshape(-1), qb.reshape(-1)))).float()
+    assert torch.equal(mask_a.reshape(-1), draws[:n])
+    assert torch.equal(mask_b.reshape(-1), draws[n:])
+
+
+@_KERNELS
+@pytest.mark.parametrize("cols", [24, 96])
+@pytest.mark.parametrize("reference", ["0", "1"])
+@pytest.mark.parametrize("masks", ["sample", "expect"])
+@pytest.mark.parametrize("active", [False, True])
+def test_split_gate_kernels_match_the_torch_path(cols, reference, masks, active, monkeypatch):
+    monkeypatch.setenv("KILORA_FUSED_CPU", "1")
+    monkeypatch.setenv("KILORA_GATE_BASE_REFERENCE", reference)
+    monkeypatch.setenv("KILORA_MASKS", masks)
+    g = torch.Generator().manual_seed(11)
+    out, tokens = 40, 70
+    s = LayerSet(
+        router=torch.randn(8, out, generator=g),
+        keys_in=torch.randn(3, 3, 8, generator=g),
+        keys_out=torch.randn(3, 2, 8, generator=g),
+        per_expert=cols // 3,
+        down=torch.randn(cols, 20, generator=g),
+        up=(torch.randn(cols, out, generator=g) / cols**0.5),
+        form="input",
+        gate_mode="adaptive",
+    )
+    s.up = s.up.to(_DEVICE)
+    steps = [torch.randn(2, tokens, cols, generator=g).to(_DEVICE) for _ in range(4)]
+    norm = (torch.rand(2, tokens, generator=g) * 3 + 0.1).to(_DEVICE)
+    rms = (torch.rand(2, out, generator=g) + 0.05).to(_DEVICE)
+    act = (torch.rand(2, tokens, 1, generator=g) > 0.3).to(_DEVICE) if active else None
+    last = None
+    if active:
+        last = (torch.rand(2, tokens, 1, generator=g) > 0.5).to(_DEVICE)
+
+    def run(on):
+        _torch_gate(monkeypatch, on)
+        hist, parts = {}, []
+        with torch.no_grad(), dropout_key(7, 3):
+            for k, z in enumerate(steps, start=1):
+                a, b = split_gate(
+                    s,
+                    z,
+                    hist,
+                    norm,
+                    rms,
+                    None,
+                    "blk",
+                    0,
+                    k,
+                    None,
+                    last=k == 4 if last is None else last & (k == 4),
+                    active=act,
+                )
+                parts.append((a, b, hist["m"], *hist["q"]))
+        return parts, hist
+
+    expected, old = run(False)
+    got, new = run(True)
+    for step, (e_step, g_step) in enumerate(zip(expected, got, strict=True)):
+        a0, b0, m0, qa0, qb0 = e_step
+        a1, b1, m1, qa1, qb1 = g_step
+        torch.testing.assert_close(qa1, qa0, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(qb1, qb0, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(m1, m0, rtol=1e-5, atol=1e-5)
+        if masks == "sample" and step < 3:
+            assert torch.equal(a1, a0) and torch.equal(b1, b0)
+        torch.testing.assert_close(a1, a0, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(b1, b0, rtol=1e-5, atol=1e-5)
+    if reference == "0":
+        torch.testing.assert_close(new["first_norm"], old["first_norm"], rtol=1e-5, atol=1e-6)
+        torch.testing.assert_close(new["first_rms"], old["first_rms"], rtol=1e-5, atol=1e-6)

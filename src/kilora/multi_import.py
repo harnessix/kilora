@@ -552,6 +552,7 @@ def import_loras(
     parts: dict[str, dict[int, tuple[torch.Tensor, torch.Tensor]]] = {}
     unit_ups: dict[str, dict[int, torch.Tensor]] = {}
     records: list[dict[str, Any]] = []
+    file_dtypes: set[torch.dtype] = set()
     unmatched: dict[str, list[str]] = {}
     matched_keys: dict[str, int] = {}
     sections: list[Section] = []
@@ -616,6 +617,10 @@ def import_loras(
             if checkpoint is not None:
                 checkpoint()
             found = resolve(stem)
+            if found:
+                file_dtypes.update(
+                    v.dtype for k, v in tensors.items() if k != "alpha" and v.is_floating_point()
+                )
             if not found:
                 body = stem.removeprefix("lora_unet_").removeprefix("diffusion_model.")
                 if _never_target(body) and "down" in tensors and "up" in tensors:
@@ -1098,6 +1103,11 @@ def import_loras(
             (keys,) = cached_keys
         if key_time is not None:
             key_time(time.perf_counter() - started)
+        stored = _host_dtype(file_dtypes)
+        if stored is not None:
+            with torch.inference_mode(False):
+                down, up = down.to(stored), up.to(stored)
+                unit_up = up if not units else unit_up.to(stored)
         keyed[target] = KeyedExperts(
             down=down,
             up=up,
@@ -1154,6 +1164,14 @@ def import_loras(
 
 
 _KEYS_FROM = "unscaled-1"
+
+
+def _host_dtype(dtypes: set[torch.dtype]) -> torch.dtype | None:
+    if os.environ.get("KILORA_IMPORT_HOST_DTYPE", "file").strip() == "float32":
+        return None
+    if len(dtypes) == 1 and next(iter(dtypes)) in (torch.bfloat16, torch.float16):
+        return next(iter(dtypes))
+    return None
 
 
 def _strength_sign(weight) -> float:

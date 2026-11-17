@@ -277,8 +277,11 @@ def test_h3_image_rows_at_block_input():
 def test_name_detection_for_image_without_audio(prefix, suffix):
     paths = [prefix + "blocks.3.attn.qkv_proj" + suffix]
     assert detect_names(paths).family == "minimax-h3-image"
-    for audio in ("audio_patch_proj", "final_layer.audio_out", "blocks.0.audio_attn.qkv_proj"):
-        assert detect_names([*paths, prefix + audio + ".weight"]) is None
+    for audio in ("audio_patch_proj", "final_layer.audio_out"):
+        found = detect_names([*paths, prefix + audio + ".weight"])
+        assert found is not None and found.family == "minimax-h3"
+    absent = prefix + "blocks.0.audio_attn.qkv_proj.weight"
+    assert detect_names([*paths, absent]) is None
 
 
 def test_h3_image_rows_use_patched_latent_grid():

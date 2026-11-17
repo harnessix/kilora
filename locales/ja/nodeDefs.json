@@ -239,7 +239,7 @@
       },
       "depth": {
         "name": "深さ",
-        "tooltip": "繰り返し回数。-1 はモッドの推奨値を使います。"
+        "tooltip": "繰り返し回数。-1 はモッドの推奨値を使います（インポートした LoRA: 4）。"
       }
     }
   },
@@ -257,7 +257,7 @@
       },
       "depth": {
         "name": "深さ",
-        "tooltip": "繰り返し回数。-1 はモッドの推奨値を使います。"
+        "tooltip": "繰り返し回数。-1 はモッドの推奨値を使います（インポートした LoRA: 4）。"
       },
       "iteration": {
         "name": "反復方式",
@@ -285,7 +285,7 @@
       },
       "path_width": {
         "name": "パス幅",
-        "tooltip": "パス反復のみ。歩みの数: 最初のステップの上位エキスパートから始まり、各歩みは自分のクエリから進みます。幅を大きくすると、最初のステップを誤っても正しいエキスパートを見つけます。0 はモッドの値を使います（既定は 1: 歩み 1 つ）。"
+        "tooltip": "パス反復のみ。歩みの数: 最初のステップの上位エキスパートから始まり、各歩みは自分のクエリから進みます。幅を大きくすると、最初のステップを誤っても正しいエキスパートを見つけます。0 はモッドの値を使います（インポートした LoRA: 歩み 3 つ。ほかのモッド: 1）。"
       },
       "path_select": {
         "name": "パス選択",
@@ -488,6 +488,58 @@
         "name": "編集",
         "tooltip": "編集は各LoRAの層ごとのコア行列と強度、およびパック項を変更します。元のファイルには書き込みません。offでインポートしたLoRAを完全に復元します。unchangedは現在の選択を維持します。"
       },
+      "live_expert_mass": {
+        "name": "通過した質量",
+        "tooltip": "ライブ書き込みは、記録された経路上でのエキスパートのルート質量が、そのレイヤーの質量のこの割合を超える場合にのみ、そのエキスパートを編集します。-1：変更なし。既定値は 0.05 です。"
+      },
+      "live_expert_top": {
+        "name": "レイヤーごとの通過エキスパート数",
+        "tooltip": "1 回のライブ書き込みが編集する、ルート質量順のレイヤーあたりの最大エキスパート数。0：変更なし。既定値は 4 です。"
+      },
+      "live_expert_history": {
+        "name": "ルート履歴",
+        "tooltip": "共有エキスパートを見つけるために、セッションがルート質量を保持する記録済みプロンプトの数。0：変更なし。既定値は 16 です。"
+      },
+      "live_expert_copies": {
+        "name": "エキスパートごとのコピー数",
+        "tooltip": "ライブ書き込みが追加する、1 つの共有エキスパートのコピーの最大数。-1：変更なし。既定値は 2 です。"
+      },
+      "write_measure": {
+        "name": "書き込みの測定",
+        "tooltip": "ライブ書き込みが方向を見つける方法。forward：クリーンな順伝播 1 回と、対象エキスパートの出力に小さなノイズを加えた一組の順伝播（既定）。candidates：各候補の動きをペアの順伝播で測定します。unchanged は現在の選択を保ちます。"
+      },
+      "forward_draws": {
+        "name": "ノイズのドロー数",
+        "tooltip": "forward 推定のノイズのドロー数。ドロー数が多いほど方向が安定しますが、時間がかかります。0：変更なし。既定値は 4 です。"
+      },
+      "forward_sigma": {
+        "name": "ノイズの大きさ",
+        "tooltip": "forward 推定のノイズの大きさ。各エキスパートの出力 RMS に対する割合で表します。-1：変更なし。既定値は 0.05 です。"
+      },
+      "forward_chunk": {
+        "name": "順伝播ごとのドロー数",
+        "tooltip": "1 回のバッチ順伝播に含まれるノイズのドロー数。小さいほど GPU メモリの使用量が減ります。0：変更なし。既定値は 4 です。"
+      },
+      "write_resolution": {
+        "name": "書き込み解像度",
+        "tooltip": "書き込みのサンプルの長辺（ピクセル）。書き込みは画像の縮小コピーから学習します：256～4096、16 単位で丸めます。小さいほど書き込みが速くなります。0：レンダーの解像度。-1：変更なし。既定値は 512 です。 この設定の前から、書き込みは 512 px で動いていました。測定サイズ (measure_size) を使っていました。この設定はその制御に名前を付けたものです。"
+      },
+      "probe_rows": {
+        "name": "render probe rows",
+        "tooltip": "Collect write measurements during rendering. On by default. Image learning and writes without a complete render measurement use their own noise samples."
+      },
+      "probe_call": {
+        "name": "render probe call",
+        "tooltip": "Separate runs each probe after the image call. Larger batches can change image-row rounding even on the CPU, so separate is the only supported value. The image call keeps its original rows. Probe measurements do not update image records or step caches."
+      },
+      "probe_budget": {
+        "name": "probe row budget",
+        "tooltip": "Maximum perturbed rows per render, counting caption and empty-caption rows. The default 2 samples one caption for one antithetic pair per render. The write seed selects caption or empty caption with equal probability. Budgets of 4 or more retain both captions. Complete pairs are retained; fewer than two rows skips probes. Acceptance retains both captions for the prompt and collapse guard. Clean reference and acceptance rows are additional. Larger budgets allow more draws when the session is idle. Pairs run over consecutive eligible sampling steps, with two caption rows per probe call. A short schedule falls back to ordinary write samples."
+      },
+      "probe_draws": {
+        "name": "render probe draws",
+        "tooltip": "Maximum noise draws collected in a render. 0 uses the forward draws setting; -1 keeps the current value. Complete positive and negative pairs are kept. Fewer draws reduce the render work."
+      },
       "measure_samples": {
         "name": "samples per write measurement",
         "tooltip": "Samples per write measurement: the same noise and timesteps for every trial. More samples measure more steadily and cost more time. 1 = one sample at the middle timestep."
@@ -658,7 +710,7 @@
       },
       "depth": {
         "name": "深さ",
-        "tooltip": "繰り返し回数。-1 はモッドの推奨値を使います。"
+        "tooltip": "繰り返し回数。-1 はモッドの推奨値を使います（インポートした LoRA: 4）。"
       },
       "iteration": {
         "name": "反復方式",
@@ -1286,7 +1338,7 @@
   },
   "KiLoRADepthMap": {
     "display_name": "KiLoRA 深さマップ",
-    "description": "マスク（SAM2 などのセグメンター）または画像（その明るさ：ControlNet プリプロセッサの深度・線画・ポーズマップ）から、画像の領域ごとの深さを作ります。start まではすべての領域が一つの深さで動くので、構図はいつも通りにできます。その後は各領域が自分の深さで動きます。KiLoRA Apply または KiLoRA LoRA Loader につなぎます。",
+    "description": "マスク（SAM2 などのセグメンター）または画像（その明るさ：ControlNet プリプロセッサの深度・線画・ポーズマップ）から、画像の領域ごとの深さを作ります。start まではすべての領域が一つの深さで動くので、構図はいつも通りにできます。その後は各領域が自分の深さで動きます。KiLoRA Apply または KiLoRA LoRA Loader につなぎます。 マスクも画像もないとき、source auto はサンプリング中にマップを測ります。細部と、LoRA が画像を最も変える場所に深さを多く配り、平均の深さは同じです。",
     "inputs": {
       "min_depth": {
         "name": "min_depth",
@@ -1316,6 +1368,10 @@
         "name": "base",
         "tooltip": "start までの全領域の深さと、テキストトークンの深さ。-1：マップの平均の深さ（四捨五入）。"
       },
+      "source": {
+        "name": "source",
+        "tooltip": "マップの出どころ。mask または image：つないだ入力（マスクが優先）。auto：start のステップで、画像の細部、KiLoRA の変化、ルートの不一致から測ります。マスクも画像もつながっていないときは auto を使います。"
+      },
       "mask": {
         "name": "マスク",
         "tooltip": "マスク。たとえば SAM2 の出力。1 で max_depth になります。画像もつながっているときはマスクを使います。"
@@ -1323,6 +1379,26 @@
       "image": {
         "name": "image",
         "tooltip": "画像。その明るさがマップになります。たとえば深度・線画・ポーズのプリプロセッサの出力。"
+      },
+      "mean_depth": {
+        "name": "mean_depth",
+        "tooltip": "auto：画像全体の平均の深さ。-1 は KiLoRA Apply の深さを使うので、コストはその一様な深さと同じです。小さい値ほど速くなります。"
+      },
+      "detail_weight": {
+        "name": "detail_weight",
+        "tooltip": "auto：画像の細部の重み（クリーン画像の推定の細かい構造）。"
+      },
+      "change_weight": {
+        "name": "change_weight",
+        "tooltip": "auto：KiLoRA の変化の重み（LoRA が画像を最も変える場所）。"
+      },
+      "disagreement_weight": {
+        "name": "disagreement_weight",
+        "tooltip": "auto：ルートの不一致の重み（LoRA が競合する場所）。0 で無効。"
+      },
+      "smooth": {
+        "name": "smooth",
+        "tooltip": "auto：深度を決める前に、合成したマップをなめらかにするガウス幅（トークン単位）。絵画風の画像のマップはノイズが多く、2 で領域になります。0 で無効。"
       }
     },
     "outputs": {
@@ -1371,6 +1447,14 @@
       "compose": {
         "name": "compose",
         "tooltip": "separate: each layer runs as its own model call. single: all layers run in one model call per guidance branch, and each image area reads its own layer text. Select single on every layer. The crop input is not used with single."
+      },
+      "region_penalty": {
+        "name": "region penalty",
+        "tooltip": "compose single のとき: 初期ステップで、異なるレイヤーの画像領域が互いを読まないようにする強さ。0 でオフになります。最初のレイヤーの値が使われ、すべてのレイヤーで同じ値を設定する必要があります。"
+      },
+      "mount_scope": {
+        "name": "mount scope",
+        "tooltip": "compose single のとき: all はレイヤーのモッドをレイヤーの画像領域とそのレイヤー自身のテキストに適用します。cross_kv は自身のテキストの cross-attention のキーと値にだけ適用するため、それらの重みを持たない LoRA は効果がありません。すべてのレイヤーで同じ値を設定する必要があります。"
       }
     },
     "outputs": {
@@ -1827,6 +1911,42 @@
       "folder": {
         "name": "フォルダー",
         "tooltip": "同名の.txtキャプションを任意で含む画像フォルダー。フォルダーか画像のどちらかを指定します。"
+      },
+      "contrast_components": {
+        "name": "コントラスト成分",
+        "tooltip": "各画像の平均コントラストの主方向を最大4つ、共通の平均に加えます。検証用の画像を除いた後、使用する画像数から1を引いた数が上限です。既定値は4です。0では、平均のみを使う従来の重みを書き込みます。フィッティングには引き続きランク設定を使用します。このマスクなしの画像からの解法にのみ適用されます。"
+      },
+      "masks": {
+        "name": "マスク",
+        "tooltip": "画像の順序で、各画像に1枚のマスクを指定します。マスク領域のみを学習します。画像全体を使う場合は空にしてください。"
+      },
+      "mask_contrast": {
+        "name": "マスク比較",
+        "tooltip": "マスク使用時、tokens はマスク内の各トークンを、mean はマスク領域の平均を比較します。マスクがない場合は無視されます。"
+      },
+      "two_stage": {
+        "name": "2段階",
+        "tooltip": "最初にスタイルを求め、次にそのスタイルを生徒モデルで有効にしてキャラクターを求めます。マスクはキャラクターを、反転マスクはスタイルを選択します。マスクがない場合は両段階で画像全体を使います。スタイルは creative、キャラクターは ip として別々のファイルに保存します。"
+      },
+      "mask_start": {
+        "name": "マスク開始位置",
+        "tooltip": "マスク使用時、全スケジュールのこの割合から位置合わせ済みの生徒の軌跡を開始します。既定値は0.4。マスクなしでは無視されます。"
+      },
+      "mask_samples": {
+        "name": "マスクのサンプル位置",
+        "tooltip": "マスク使用時の全スケジュールに対する割合を空白またはカンマで区切ります。マスク開始位置以上、1.0以下。例：0.5 0.75 1.0。空欄では従来の3位置を維持します。マスクなしでは無視されます。"
+      },
+      "refit_rounds": {
+        "name": "再適合の回数",
+        "tooltip": "前回の解を有効にして生徒の軌跡を再サンプリングし、閉形式で追加計算します。0は従来の計算、最大8回。最後の結果のみ検証して保存します。"
+      },
+      "guard_rule": {
+        "name": "検証ルール",
+        "tooltip": "lossはライブ編集のドリフト上限内で、基準より低い最小の検証損失を選びます。driftは同じ上限内で、損失が基準の1.25倍以下となる最大スケールを選びます。既定値はloss。"
+      },
+      "trajectory_check": {
+        "name": "軌跡チェック",
+        "tooltip": "解の最初のシード、サイズ、cfgを使い、無関係な2つのプロンプトを8ステップでサンプリングします。潜在表現の空間標準偏差が基準の0.5倍未満、または相対L2距離が1.0を超えるスケールを拒否し、許容される小さいスケールを順に試します。VAEデコードは行いません。既定はオフです。"
       }
     },
     "outputs": {

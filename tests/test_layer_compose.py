@@ -182,6 +182,14 @@ def test_a_full_layer_mask_counts_as_global():
         ),
         (lambda c: c[0].pop(0), "no global prompt"),
         (lambda c: c[1].append(cond(4, -2.0)), "several plain negatives"),
+        (
+            lambda c: c[0][1].update(kilora_region_penalty=2.0),
+            "the layers set different region penalties or mount scopes",
+        ),
+        (
+            lambda c: c[0][0].update(kilora_mount_scope="cross_kv"),
+            "the layers set different region penalties or mount scopes",
+        ),
     ],
 )
 def test_fallback_causes(change, cause):
@@ -292,3 +300,40 @@ def test_an_alpha_mask_marks_the_model_options():
     assert out.model_options["kilora_alpha_mask"] is True
     groups, info = compose(two_layers(), options=out.model_options, family="anima")
     assert (groups, info) == (None, "KiLoRA Apply has an alpha mask")
+
+
+def test_the_layouts_carry_the_region_penalty_and_the_mount_scope():
+    conds = two_layers()
+    for c in conds[0]:
+        c.update(kilora_region_penalty=0.5, kilora_mount_scope="all")
+    _, (pos, neg) = compose(conds, family="anima")
+    assert (pos.self_penalty, pos.mount_scope) == (0.5, "all")
+    assert (neg.self_penalty, neg.mount_scope) == (0.5, "all")
+
+
+def test_layers_without_the_inputs_leave_the_layout_values_unset():
+    conds = two_layers()
+    for c in conds[0]:
+        c.update(kilora_region_penalty=None, kilora_mount_scope=None)
+    _, (pos, neg) = compose(conds, family="anima")
+    assert pos.self_penalty is None and pos.mount_scope is None
+    assert neg.self_penalty is None and neg.mount_scope is None
+    _, (plain, _) = compose(two_layers(), family="anima")
+    assert plain.self_penalty is None and plain.mount_scope is None
+
+
+def test_an_unset_layer_value_compares_as_the_constant(monkeypatch):
+    conds = two_layers()
+    conds[0][1].update(kilora_region_penalty=lc.SELF_PENALTY, kilora_mount_scope=lc.MOUNT_SCOPE)
+    groups, (pos, _) = compose(conds, family="anima")
+    assert groups is not None
+    assert (pos.self_penalty, pos.mount_scope) == (lc.SELF_PENALTY, lc.MOUNT_SCOPE)
+    monkeypatch.setattr(lc, "MOUNT_SCOPE", "all")
+    groups, info = compose(two_layers_with_scope("cross_kv"), family="anima")
+    assert (groups, info) == (None, lc.DIFFERENT_SETTINGS)
+
+
+def two_layers_with_scope(scope):
+    conds = two_layers()
+    conds[0][1].update(kilora_mount_scope=scope)
+    return conds

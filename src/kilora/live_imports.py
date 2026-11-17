@@ -2,11 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import contextlib
+import copy
 import dataclasses
 import hashlib
 import json
+import logging
 import math
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -14,7 +18,8 @@ import numpy as np
 import torch
 
 from . import derived_cache
-from .adapter import imported_settings
+from .adapter import apply_imported_share_defaults, imported_settings, imported_share_fields
+from .branches import BranchStore, EditBranch
 from .errors import KiLoRAError
 from .host_copy import nonzero_flags
 from .import_controller import (
@@ -45,14 +50,233 @@ from .import_terms import (
     term_pair,
 )
 from .layout import Layout
-from .live import SESSIONS, LiveSession, LiveSpec, Pairing
+from .live import SESSIONS, Commit, LiveSession, LiveSpec, Pairing
 from .modfile import Mod, load_mod, save_mod
+
+SINGULAR_KEEP = 1e-6
+RESPONSE_FLOOR = 1e-8
+_ALIGN_LOCK = threading.RLock()
+
+
+def _svd_descending(matrix):
+
+    height, width = matrix.shape
+    if height == 0 or width == 0:
+        return (
+            matrix.new_zeros((height, 0)),
+            matrix.new_zeros((0,)),
+            matrix.new_zeros((0, width)),
+        )
+    if height < width:
+        u, sv, vh = _svd_descending(matrix.T)
+        return vh.T, sv, u.T
+    gram = matrix.T @ matrix
+    gram = (gram + gram.T) * 0.5
+    evals, vectors = torch.linalg.eigh(gram)
+    sv = evals.clamp_min(0).sqrt().flip(0)
+    vectors = vectors.flip(1)
+    images = matrix @ vectors
+    u = torch.zeros_like(images)
+    positive = sv > 0
+    u[:, positive] = images[:, positive] / sv[positive]
+    return u, sv, vectors.T
+
+
+@torch.no_grad()
+def align_rows(up, down, tol=SINGULAR_KEEP):
+
+    rows = int(up.shape[0])
+    out = torch.zeros_like(up)
+    inn = torch.zeros_like(down)
+    if rows == 0 or not bool(up.count_nonzero()) or not bool(down.count_nonzero()):
+        return out, inn, 0
+    u = up.detach().to(torch.float64)
+    d = down.detach().to(torch.float64)
+    try:
+        left_q, left_r = torch.linalg.qr(u.T, mode="reduced")
+        right_q, right_r = torch.linalg.qr(d.T, mode="reduced")
+        u_small, sv, vh = _svd_descending(left_r @ right_r.T)
+    except torch.linalg.LinAlgError:
+        return up.clone(), down.clone(), rows
+    if sv.numel() == 0 or not bool(torch.isfinite(sv[0])):
+        return up.clone(), down.clone(), rows
+    if not bool(sv[0] > 0):
+        return out, inn, 0
+    keep = int((sv > float(sv[0]) * tol).sum())
+    if keep <= 0:
+        return out, inn, 0
+    left = left_q @ u_small[:, :keep]
+    right = right_q @ vh[:keep].T
+    peaks = left.abs().argmax(0)
+    index = torch.arange(keep, device=left.device)
+    sign = torch.where(
+        left[peaks, index] < 0,
+        -torch.ones(keep, dtype=left.dtype, device=left.device),
+        torch.ones(keep, dtype=left.dtype, device=left.device),
+    )
+    right = right * sign
+    down_rows = right.T.to(dtype=down.dtype)
+    product = u.T @ d
+    gram = down_rows.double() @ down_rows.double().T
+    try:
+        up_rows = torch.linalg.solve(gram, down_rows.double() @ product.T).to(dtype=up.dtype)
+    except torch.linalg.LinAlgError:
+        up_rows = (product @ down_rows.double().T).T.to(dtype=up.dtype)
+    if not torch.isfinite(up_rows).all() or not torch.isfinite(down_rows).all():
+        return up.clone(), down.clone(), rows
+    out[:keep] = up_rows
+    inn[:keep] = down_rows
+    return out, inn, keep
+
+
+@torch.no_grad()
+def aligned_expert(ex, origin=None):
+
+    down, up = ex.down.detach(), ex.up.detach()
+    width = int(down.shape[2])
+    count = int(down.shape[0])
+    ranks = tuple(ex.ranks) if ex.ranks is not None else (width,) * count
+    skip = set(ex.exact) | set(ex.exact_unavailable)
+    new_down, new_up = down.clone(), up.clone()
+    kept = []
+    for expert in range(count):
+        rank = min(int(ranks[expert]) if expert < len(ranks) else width, width)
+        if rank <= 0 or expert in skip:
+            kept.append(max(rank, 0))
+            continue
+        block_up, block_down, rows = align_rows(up[expert, 0, :rank], down[expert, 0, :rank])
+        new_up[expert, 0, :rank] = block_up
+        new_down[expert, 0, :rank] = block_down
+        kept.append(rows)
+    aligned = dataclasses.replace(
+        ex,
+        down=new_down,
+        up=new_up,
+        ranks=tuple(kept),
+        routing_down=down,
+        routing_up=up,
+        routing_source=origin,
+    )
+    aligned._source_down = down
+    aligned._source_up = up
+    aligned._source_ranks = ranks
+    return aligned
+
+
+def _leading_core(saved, dest):
+    out = dest.clone()
+    rows = min(int(saved.shape[0]), int(dest.shape[0]))
+    cols = min(int(saved.shape[1]), int(dest.shape[1]))
+    out[:rows, :cols] = saved[:rows, :cols].to(dtype=dest.dtype, device=dest.device)
+    return out
+
+
+def _fit_saved_core(ex, part, saved, dest):
+
+    if (
+        ex is None
+        or not part.startswith("core_")
+        or saved.ndim != 2
+        or dest.ndim != 2
+        or saved.shape[0] != saved.shape[1]
+        or dest.shape[0] != dest.shape[1]
+        or not torch.isfinite(saved).all()
+    ):
+        return None
+    suffix = part.removeprefix("core_")
+    if not suffix.isdigit():
+        return None
+    expert = int(suffix)
+    source_up = getattr(ex, "_source_up", None)
+    source_down = getattr(ex, "_source_down", None)
+    if (
+        source_up is None
+        or source_down is None
+        or expert >= source_up.shape[0]
+        or expert >= ex.up.shape[0]
+    ):
+        return _leading_core(saved, dest)
+    n = min(int(saved.shape[0]), int(source_up.shape[2]), int(source_down.shape[2]))
+    k = int(dest.shape[0])
+    if n <= 0 or k <= 0:
+        return _leading_core(saved, dest)
+    uo = source_up[expert, 0, :n].detach().double()
+    do = source_down[expert, 0, :n].detach().double()
+    un = ex.up[expert, 0, :k].detach().double()
+    dn = ex.down[expert, 0, :k].detach().double()
+    product = uo.T @ saved[:n, :n].detach().double() @ do
+    gram_u = un @ un.T
+    gram_d = dn @ dn.T
+    try:
+        right = un @ product @ dn.T
+        middle = torch.linalg.solve(gram_u, right)
+        fitted = torch.linalg.solve(gram_d, middle.T).T
+    except torch.linalg.LinAlgError:
+        return _leading_core(saved, dest)
+    if not torch.isfinite(fitted).all():
+        return _leading_core(saved, dest)
+    return fitted.to(dtype=dest.dtype)
+
+
+def _part_neutral(part: str, value: torch.Tensor) -> bool:
+    if part.startswith("strength_"):
+        flat = value.reshape(-1)
+        return flat.numel() == 1 and float(flat[0].item()) == 1.0
+    if part.startswith("core_"):
+        rank = value.shape[0]
+        return value.ndim == 2 and torch.equal(
+            value, torch.eye(rank, dtype=value.dtype, device=value.device)
+        )
+    if part == "terms_c":
+        return not value.any().item()
+    return part in TERM_FIXED
+
+
+def edit_summary(state) -> tuple[int, str]:
+    changed: list[tuple[str, str, torch.Tensor]] = []
+    mounts = 0
+    for target in sorted(state):
+        hit = False
+        for part in sorted(state[target]):
+            value = state[target][part]
+            if _part_neutral(part, value):
+                continue
+            hit = True
+            changed.append((target, part, value))
+        if hit:
+            mounts += 1
+    if not mounts:
+        return 0, ""
+    digest = hashlib.sha256()
+    for target, part, value in changed:
+        host = value.detach().cpu().contiguous()
+        if host.dtype == torch.bfloat16:
+            host = host.float()
+        digest.update(target.encode())
+        digest.update(b"\0")
+        digest.update(part.encode())
+        digest.update(b"\0")
+        digest.update(str(host.dtype).encode())
+        digest.update(b"\0")
+        digest.update(np.ascontiguousarray(host.numpy()).tobytes())
+    return mounts, digest.hexdigest()[:12]
 
 
 class ImportedLiveSession(LiveSession):
     MEASURE_SAMPLES = 4
 
-    def __init__(self, adapter_set, sources, family, shapes, saves_dir, key, sections=()):
+    def __init__(
+        self,
+        adapter_set,
+        sources,
+        family,
+        shapes,
+        saves_dir,
+        key,
+        sections=(),
+        content_keys=None,
+        lycoris_apply=None,
+    ):
         experts = {
             target: dataclasses.replace(
                 ex,
@@ -65,6 +289,10 @@ class ImportedLiveSession(LiveSession):
         for ex in experts.values():
             derived_cache.stamp(ex, ex.routing_source)
         self._source = dataclasses.replace(adapter_set, experts=experts)
+        self._plain = dict(experts)
+        self._plain_set = self._source
+        self._aligned_keys = {}
+        self._align_cache = {}
         targets = tuple(experts)
         first = next(iter(experts.values()))
         layout = Layout(
@@ -83,6 +311,8 @@ class ImportedLiveSession(LiveSession):
         )
         self.sources = [dict(source) for source in sources]
         self.family = family
+        self.content_keys = content_keys or os.environ.get("KILORA_CONTENT_KEYS", "per_expert")
+        self.lycoris_apply = lycoris_apply or os.environ.get("KILORA_LYCORIS_APPLY") or "truncated"
         self.shapes = json.loads(json.dumps(shapes))
         self.clean = {t: {"down": ex.down, "up": ex.up} for t, ex in experts.items()}
         self._sections = list(sections)
@@ -107,6 +337,38 @@ class ImportedLiveSession(LiveSession):
         self.controller = "r1"
         self.measure = "compressed"
         self.measure_combos = MEASURE_COMBOS
+        from .live_experts import LIVE_EXPERT_SETTINGS
+
+        for name, value in LIVE_EXPERT_SETTINGS.items():
+            setattr(self, name, value)
+        self.route_history = []
+        self.attach_editor_state(ImportHistory((), self.state, self._reset_state()), "import-r1")
+
+    @property
+    def state(self):
+        history = getattr(self, "editor_state", None)
+        if isinstance(history, ImportHistory):
+            self._import_state = history.forest.state.edits
+        return self._import_state
+
+    @state.setter
+    def state(self, value):
+        self._import_state = value
+        history = getattr(self, "editor_state", None)
+        if isinstance(history, ImportHistory):
+            history.forest.state.edits = value
+
+    def pin(self):
+        ImportEditor(self)
+        return super().pin()
+
+    def commit(self, editor_before=None, previous_before="current"):
+        if self.pending is None:
+            return super().commit(editor_before, previous_before)
+        if editor_before is None:
+            editor_before = self.editor_snapshot()
+        self.editor_state.commit_count += 1
+        return super().commit(editor_before, previous_before)
 
     def _section_expert(self, section):
         matches = [
@@ -139,6 +401,94 @@ class ImportedLiveSession(LiveSession):
         for target, expert in self._section_pairs:
             state.setdefault(target, {}).setdefault(f"strength_{expert}", torch.ones(1))
         return state
+
+    def _align_origin(self, target):
+
+        plain = self._plain[target]
+        origin = derived_cache.source(plain) or plain.routing_source or None
+        return (target, origin if origin is not None else id(plain)), origin
+
+    @torch.no_grad()
+    def align_for_moves(self):
+
+        plain = getattr(self, "_plain", None)
+        if not plain:
+            return False
+        with _ALIGN_LOCK:
+            return self._align_locked(plain)
+
+    def _align_locked(self, plain):
+        experts = dict(self._source.experts)
+        keys = {}
+        states = {}
+        for name in ("state", "pending", "_pinned_state"):
+            value = getattr(self, name, None)
+            if isinstance(value, dict):
+                states[name] = dict(value)
+        for target in plain:
+            key, origin = self._align_origin(target)
+            if self._aligned_keys.get(target) == key:
+                continue
+            aligned = self._align_cache.get(key)
+            if aligned is None:
+                aligned = self._align_cache[key] = aligned_expert(plain[target], origin)
+            experts[target] = aligned
+            keys[target] = key
+            for value in states.values():
+                if target in value:
+                    value[target] = self._aligned_parts(target, aligned, value[target])
+        if not keys:
+            return False
+        for name in ("_core_frames", "_grams"):
+            cache = self.__dict__.get(name)
+            if cache:
+                for entry in [k for k in cache if k[0] in keys]:
+                    del cache[entry]
+        self._source = dataclasses.replace(self._source, experts=experts)
+        history = getattr(self, "editor_state", None)
+        if isinstance(history, ImportHistory):
+            for branch in history.forest.branches.values():
+                for target in keys:
+                    if target in branch.state.edits:
+                        branch.state.edits[target] = self._aligned_parts(
+                            target, experts[target], branch.state.edits[target]
+                        )
+            for target in keys:
+                if target in history.clean:
+                    history.clean[target] = self._aligned_parts(
+                        target, experts[target], history.clean[target]
+                    )
+        for name, value in states.items():
+            setattr(self, name, value)
+        self._aligned_keys.update(keys)
+        self.__dict__.pop("_cross_frames", None)
+        self.__dict__.pop("_block_frames", None)
+        return True
+
+    def _aligned_parts(self, target, aligned, parts):
+        out = dict(parts)
+        skip = set(aligned.exact) | set(aligned.exact_unavailable)
+        for expert, kept in enumerate(aligned.ranks):
+            if expert in skip:
+                continue
+            core_key, strength_key = f"core_{expert}", f"strength_{expert}"
+            if kept <= 0:
+                out.pop(core_key, None)
+                if (target, expert) not in self._section_pairs:
+                    out.pop(strength_key, None)
+                continue
+            core = parts.get(core_key)
+            if core is None:
+                continue
+            dest = torch.eye(kept)
+            if _part_neutral(core_key, core):
+                out[core_key] = dest
+                continue
+            fitted = _fit_saved_core(aligned, core_key, core, dest)
+            if fitted is None or not torch.isfinite(fitted).all():
+                fitted = _leading_core(core.float(), dest)
+            out[core_key] = fitted.float()
+        return out
 
     def _neutral(self, state=None):
         neutral = self._reset_state()
@@ -219,7 +569,7 @@ class ImportedLiveSession(LiveSession):
     @torch.no_grad()
     def sets(self, use_pending=True):
         if self.edits == "off":
-            return [self._source]
+            return [getattr(self, "_plain_set", self._source)]
         state = (
             self._pinned_state
             if self.pinned is not None
@@ -239,6 +589,14 @@ class ImportedLiveSession(LiveSession):
                 if strength is None:
                     continue
                 if expert in exact:
+                    if core is not None and not _part_neutral(f"core_{expert}", core):
+                        rank = core.shape[0]
+                        changed = True
+                        up[expert, 0, :rank] = strength.to(up) * (
+                            core.to(up).T @ ex.up[expert, 0, :rank]
+                        )
+                        del exact[expert]
+                        continue
                     if float(strength.item()) != 1.0:
                         components = exact[expert]
                         exact[expert] = (
@@ -261,9 +619,15 @@ class ImportedLiveSession(LiveSession):
                         core.to(up).T @ ex.up[expert, 0, :rank]
                     )
             experts[target] = (
-                dataclasses.replace(ex, up=up, exact=exact, routing_down=ex.down, routing_up=ex.up)
+                dataclasses.replace(
+                    ex,
+                    up=up,
+                    exact=exact,
+                    routing_down=ex.down if ex.routing_down is None else ex.routing_down,
+                    routing_up=ex.up if ex.routing_up is None else ex.routing_up,
+                )
                 if changed
-                else ex
+                else getattr(self, "_plain", {}).get(target, ex)
             )
         result = [dataclasses.replace(self._source, experts=experts)]
         terms = self._terms_set(state)
@@ -277,8 +641,42 @@ class ImportedLiveSession(LiveSession):
         controller=None,
         measure=None,
         measure_combos=None,
+        live_expert_mass=None,
+        live_expert_top=None,
+        live_expert_history=None,
+        live_expert_copies=None,
+        write_measure=None,
+        forward_draws=None,
+        forward_sigma=None,
+        forward_chunk=None,
+        write_resolution=None,
+        probe_rows=None,
+        probe_call=None,
+        probe_draws=None,
+        probe_budget=None,
         **kwargs,
     ):
+        from .live_experts import check_setting
+
+        experts = {
+            name: check_setting(name, value)
+            for name, value in (
+                ("live_expert_mass", live_expert_mass),
+                ("live_expert_top", live_expert_top),
+                ("live_expert_history", live_expert_history),
+                ("live_expert_copies", live_expert_copies),
+                ("write_measure", write_measure),
+                ("forward_draws", forward_draws),
+                ("forward_sigma", forward_sigma),
+                ("forward_chunk", forward_chunk),
+                ("write_resolution", write_resolution),
+                ("probe_rows", probe_rows),
+                ("probe_call", probe_call),
+                ("probe_draws", probe_draws),
+                ("probe_budget", probe_budget),
+            )
+            if value is not None
+        }
         if controller is not None and controller not in ("r1", "rprop"):
             raise KiLoRAError("controller must be r1 or rprop")
         if measure is not None and measure not in ("compressed", "full"):
@@ -306,25 +704,69 @@ class ImportedLiveSession(LiveSession):
             self.measure = measure
         if measure_combos is not None:
             self.measure_combos = measure_combos
+        for name, value in experts.items():
+            setattr(self, name, value)
+        if "live_expert_history" in experts:
+            self.route_history = list(self.route_history)[-experts["live_expert_history"] :]
         return result
+
+    def editor_snapshot(self):
+        tensors = super().editor_snapshot()
+        if tensors is not None:
+            tensors["branch/aligned"] = torch.tensor(bool(self._aligned_keys), dtype=torch.bool)
+        return tensors
+
+    def _prepare_editor_load(self, tensors):
+        if tensors is not None and bool(tensors.get("branch/aligned", False)):
+            self.align_for_moves()
+
+    def _restore_pin(self, tensors):
+        super()._restore_pin(tensors)
+        ids = getattr(self.editor_state, "_loaded_ids", {})
+        if self.pinned is not None and ids:
+            self.pinned["branch"] = ids.get(self.pinned["branch"], self.pinned["branch"])
+            self.pinned_write_branch = ids.get(self.pinned_write_branch, self.pinned_write_branch)
 
     def _load_editor_state(self, tensors, kind, state=None):
         if tensors is not None and kind == "import-r1":
             tensors = {
-                key if key.startswith("prior/") else f"prior/history/{key}": value
+                key
+                if key.startswith(("prior/", "branch/", "pin/"))
+                else f"prior/history/{key}": value
                 for key, value in tensors.items()
             }
         return super()._load_editor_state(tensors, kind, state)
 
     def moves(self):
+        self.align_for_moves()
         return moves(self, core_dims=self.core_dims)
 
+    def _expert_options(self):
+        from .live_experts import LIVE_EXPERT_SETTINGS
+
+        return {name: getattr(self, name, value) for name, value in LIVE_EXPERT_SETTINGS.items()}
+
+    def _export_editor_tensors(self):
+        tensors = {
+            "kilora/import-editor/" + key: value
+            for key, value in (self._saved_editor_snapshot() or {}).items()
+        }
+        tensors["kilora/import-editor/prior/commit-records"] = torch.tensor(
+            list(json.dumps([dataclasses.asdict(c) for c in self.commits]).encode()),
+            dtype=torch.uint8,
+        )
+        return tensors
+
     def save_edits(self, path):
+        from .live_experts import history_tensors
+
         tensors = {
             f"kilora/edit/{target}/{part}": value
             for target, parts in self.state.items()
             for part, value in parts.items()
         }
+        tensors.update(history_tensors(self))
+        tensors.update(self._export_editor_tensors())
         return save_mod(
             path,
             [],
@@ -337,6 +779,9 @@ class ImportedLiveSession(LiveSession):
             edits={
                 "sources": self.sources,
                 "shapes": self.shapes,
+                "forest": True,
+                "aligned": list(self._aligned_keys),
+                "options": self._expert_options(),
                 "dimensions": {
                     target: {part: list(value.shape) for part, value in parts.items()}
                     for target, parts in self.state.items()
@@ -364,12 +809,40 @@ class ImportedLiveSession(LiveSession):
         ):
             raise KiLoRAError("export_rank must be a positive integer")
         if format == "kmod":
+            from .live_experts import history_tensors
+
             tensors = {
                 f"kilora/edit/{target}/{part}": value
                 for target, parts in self.state.items()
                 for part, value in parts.items()
             }
+            tensors.update(history_tensors(self))
+            tensors.update(self._export_editor_tensors())
+            embedded = {}
+            if include_sources:
+                from .modfile import _pack_sets
+                from .sections import encode_sections
+
+                source_tensors, source_adapter = _pack_sets(
+                    [self._plain_set], self.mod.settings, torch.float32
+                )
+                section_tensors, source_sections = encode_sections(self._sections)
+                source_tensors.update(section_tensors)
+                tensors.update({"kilora/import-source/" + k: v for k, v in source_tensors.items()})
+                embedded = {
+                    "source_adapter": source_adapter,
+                    "source_sections": source_sections,
+                    "source_experts": {
+                        target: {
+                            "ranks": list(ex.ranks) if ex.ranks is not None else None,
+                            "exact_unavailable": list(ex.exact_unavailable),
+                        }
+                        for target, ex in self._plain_set.experts.items()
+                    },
+                }
             sets = [dataclasses.replace(s, frozen=True) for s in self.sets(use_pending=False)]
+            score = self.mod.settings.import_score
+            mounts, mark = edit_summary(self.state)
             return save_mod(
                 path,
                 sets if include_sources else [],
@@ -383,16 +856,28 @@ class ImportedLiveSession(LiveSession):
                 edits={
                     "sources": self.sources,
                     "shapes": self.shapes,
+                    "forest": True,
+                    "aligned": list(self._aligned_keys),
+                    **embedded,
                     "options": {
                         "edits": self.edits,
                         "core_dims": self.core_dims,
                         "measure_samples": self.measure_samples,
+                        **self._expert_options(),
                     },
                     "dimensions": {
                         t: {p: list(v.shape) for p, v in parts.items()}
                         for t, parts in self.state.items()
                     },
+                    "mounts": mounts,
+                    "mark": mark,
                 },
+                **imported_share_fields(
+                    content_keys=self.content_keys,
+                    lycoris_apply=self.lycoris_apply,
+                    import_score=score,
+                    derived_mode=self.mod.settings.derived_mode,
+                ),
             )
 
         from .comfyui.takeover import _write
@@ -446,20 +931,37 @@ class ImportedLiveSession(LiveSession):
         return note
 
     def load_edits(self, path):
+        queue = getattr(self, "write_queue", None)
+        guard = queue.exclusive() if queue is not None else contextlib.nullcontext()
+        with guard:
+            kept = queue.keep_pending(self.editor_state, "load") if queue is not None else None
+            try:
+                return self._load_edits(path, preserve=queue is not None and queue.pending() > 0)
+            except Exception:
+                for branch, _ in kept or []:
+                    queue.cancel_keep(self.editor_state, branch)
+                raise
+
+    def _load_edits(self, path, *, preserve=False):
         from safetensors import safe_open
 
         mod = load_mod(path)
         if mod.manifest.get("id") != self.mod_id:
             raise KiLoRAError("edit set belongs to a different import")
+        if (mod.manifest.get("edits") or {}).get("aligned"):
+            self.align_for_moves()
         expected = self._reset_state()
         with safe_open(str(path), framework="pt", device="cpu") as file:
+            saved_names = file.keys()
+            edit_names = {name for name in saved_names if name.startswith("kilora/edit/")}
+            if self._saved_on_kept_rows(file, edit_names, expected) and self.align_for_moves():
+                expected = self._reset_state()
+            edit_names -= self._dropped_names()
             names = {
                 f"kilora/edit/{target}/{part}"
                 for target, parts in expected.items()
                 for part in parts
             }
-            saved_names = file.keys()
-            edit_names = {name for name in saved_names if name.startswith("kilora/edit/")}
             for name in sorted(edit_names - names):
                 target, _, part = name.removeprefix("kilora/edit/").rpartition("/")
                 if part not in TERM_PARTS or target not in expected:
@@ -481,14 +983,104 @@ class ImportedLiveSession(LiveSession):
                         continue
                     saved = file.get_tensor(f"kilora/edit/{target}/{part}")
                     if saved.shape != value.shape or not torch.isfinite(saved).all():
-                        raise KiLoRAError("invalid edit tensor")
+                        fitted = _fit_saved_core(
+                            self._source.experts.get(target), part, saved, value
+                        )
+                        if (
+                            fitted is None
+                            or fitted.shape != value.shape
+                            or not torch.isfinite(fitted).all()
+                        ):
+                            raise KiLoRAError("invalid edit tensor")
+                        saved = fitted
                     parts[part] = saved.float()
+            from .live_experts import history_from_tensors
+
+            editor = {
+                name.removeprefix("kilora/import-editor/"): file.get_tensor(name)
+                for name in saved_names
+                if name.startswith("kilora/import-editor/")
+            }
+            routes = history_from_tensors(
+                {
+                    name: file.get_tensor(name)
+                    for name in saved_names
+                    if name.startswith("kilora/routes/")
+                }
+            )
+        before = self.editor_snapshot()
+        branch = self.editor_state.forest.current
+        if editor:
+            restored = ImportHistory(())
+            restored.load_tensors(editor)
+            if set(restored.forest.state.edits) != set(expected):
+                raise KiLoRAError("saved imported branches do not match the imported layers")
+        old = self.state
+        if editor:
+            if preserve:
+                self.editor_state.load_forest(editor, allow_replace=False)
+            else:
+                self.editor_state.load_tensors(editor)
+        elif preserve:
+            self.editor_state.checkout(self.editor_state.fork())
+            self.editor_state.forest.branches[
+                self.editor_state.forest.current
+            ].state = ImportBranchState((), expected)
+        else:
+            self.editor_state.start_from(expected)
         self.undo_log.push(
-            self.state, expected, self.commits, self.editor_snapshot(), self.previous_snapshot()
+            old,
+            expected,
+            self.commits,
+            before,
+            self.previous_snapshot(),
+            branch=branch,
+            whole_editor=True,
+            branch_after=self.editor_state.forest.current,
         )
+        self._restore_pin(editor)
+        saved_options = (mod.manifest.get("edits") or {}).get("options") or {}
+        if saved_options.get("edits") in ("on", "off"):
+            self.edits = saved_options["edits"]
+        if "prior/commit-records" in editor:
+            self.commits = [
+                Commit(**item)
+                for item in json.loads(bytes(editor["prior/commit-records"].tolist()))
+            ]
+        self.route_history = routes[-int(getattr(self, "live_expert_history", 16)) :]
         self.state = expected
+        from .write_estimates import reset_write_estimates
+
+        reset_write_estimates(self)
         self.pending = None
         self.revision += 1
+
+    def _saved_on_kept_rows(self, file, edit_names, expected):
+        for target, parts in expected.items():
+            for part, value in parts.items():
+                name = f"kilora/edit/{target}/{part}"
+                if name not in edit_names:
+                    return True
+                if part.startswith("core_") and tuple(file.get_slice(name).get_shape()) != tuple(
+                    value.shape
+                ):
+                    return True
+        return False
+
+    def _dropped_names(self):
+        dropped = set()
+        for target in getattr(self, "_aligned_keys", {}):
+            ex = self._source.experts[target]
+            plain = self._plain[target]
+            skip = set(ex.exact) | set(ex.exact_unavailable)
+            for expert, kept in enumerate(ex.ranks or ()):
+                before = plain.ranks[expert] if plain.ranks is not None else ex.down.shape[2]
+                if kept > 0 or not before or expert in skip:
+                    continue
+                dropped.add(f"kilora/edit/{target}/core_{expert}")
+                if (target, expert) not in self._section_pairs:
+                    dropped.add(f"kilora/edit/{target}/strength_{expert}")
+        return dropped
 
     def _check_terms(self, target, parts):
         ex = self._source.experts.get(target)
@@ -518,7 +1110,16 @@ class ImportedLiveSession(LiveSession):
 
 
 def imported_session_for(
-    adapter_set, sources, family, shapes, saves_dir=None, *, sections=(), create=True
+    adapter_set,
+    sources,
+    family,
+    shapes,
+    saves_dir=None,
+    *,
+    sections=(),
+    create=True,
+    content_keys=None,
+    lycoris_apply=None,
 ):
     sources = [dict(source) for source in sources]
     identity = sorted((str(s["sha256"]), float(s["strength"]), str(s["axis"])) for s in sources)
@@ -543,9 +1144,181 @@ def imported_session_for(
     key = "imp-" + hashlib.sha256(payload.encode()).hexdigest()[:60]
     if key not in SESSIONS and create:
         SESSIONS[key] = ImportedLiveSession(
-            adapter_set, sources, family, shapes, saves_dir, key, sections
+            adapter_set,
+            sources,
+            family,
+            shapes,
+            saves_dir,
+            key,
+            sections,
+            content_keys,
+            lycoris_apply,
         )
     return SESSIONS.get(key)
+
+
+def _load_expert_options(session, options):
+    from .live_experts import LIVE_EXPERT_SETTINGS, check_setting
+
+    for name in LIVE_EXPERT_SETTINGS:
+        if name in options:
+            try:
+                setattr(session, name, check_setting(name, options[name]))
+            except KiLoRAError:
+                continue
+
+
+def _saved_edit_mounts(path) -> int:
+    from safetensors import safe_open
+
+    state: dict[str, dict[str, torch.Tensor]] = {}
+    with safe_open(str(path), framework="pt") as file:
+        for name in file.keys():
+            if name.startswith("kilora/edit/"):
+                target, _, part = name.removeprefix("kilora/edit/").rpartition("/")
+                state.setdefault(target, {})[part] = file.get_tensor(name)
+    return edit_summary(state)[0]
+
+
+def session_for_shared_edits(path, model, build=None):
+
+    from .modfile import read_manifest
+    from .multi_import import LoRASource, import_loras
+    from .presets import PRESETS
+
+    manifest = read_manifest(path)
+    edits = manifest.get("edits")
+    if not isinstance(edits, dict):
+        return None
+    options = edits.get("options")
+    options = options if isinstance(options, dict) else {}
+    if options.get("edits") == "off" and not edits.get("forest"):
+        return None
+    mounts = edits.get("mounts")
+    older = "mounts" not in edits
+    if older:
+        mounts = _saved_edit_mounts(path)
+    has_forest = bool(edits.get("forest"))
+    if not has_forest and (isinstance(mounts, bool) or not isinstance(mounts, int) or mounts <= 0):
+        return None
+    adapter = manifest.get("adapter")
+    adapter = adapter if isinstance(adapter, dict) else {}
+    if adapter.get("sets") and not older and not has_forest:
+        return None
+    sources = edits.get("sources")
+    if not isinstance(sources, list) or not sources:
+        raise KiLoRAError("shared edits need the source LoRA files, and the file lists none")
+    if isinstance(edits.get("source_adapter"), dict):
+        from safetensors import safe_open
+
+        from .modfile import _unpack_sets
+        from .sections import decode_sections
+
+        load_mod(path)
+        with safe_open(str(path), framework="pt", device="cpu") as file:
+            names = list(file.keys())
+            tensors = {
+                key.removeprefix("kilora/import-source/"): file.get_tensor(key)
+                for key in names
+                if key.startswith("kilora/import-source/")
+            }
+        sets, _settings = _unpack_sets(edits["source_adapter"], tensors)
+        if len(sets) != 1:
+            raise KiLoRAError("saved imported sources need one routed set")
+        source_meta = edits.get("source_experts", {})
+        sets[0] = dataclasses.replace(
+            sets[0],
+            experts={
+                target: dataclasses.replace(
+                    ex,
+                    ranks=tuple(source_meta[target]["ranks"])
+                    if source_meta.get(target, {}).get("ranks") is not None
+                    else None,
+                    exact_unavailable=tuple(
+                        source_meta.get(target, {}).get("exact_unavailable", ())
+                    ),
+                )
+                for target, ex in sets[0].experts.items()
+            },
+        )
+        sections = decode_sections(edits.get("source_sections", []), tensors)
+        plan = apply_imported_share_defaults(manifest)
+        session = ImportedLiveSession(
+            sets[0],
+            sources,
+            (manifest.get("base_model") or {}).get("family", "unknown"),
+            edits.get("shapes", {}),
+            None,
+            manifest["id"],
+            sections=sections,
+            content_keys=plan.get("content_keys") or "per_expert",
+            lycoris_apply=plan.get("lycoris_apply") or "truncated",
+        )
+        core_dims = options.get("core_dims")
+        if isinstance(core_dims, int) and not isinstance(core_dims, bool) and core_dims >= 0:
+            session.core_dims = core_dims
+        _load_expert_options(session, options)
+        session.load_edits(path)
+        return session
+    missing = []
+    prepared = []
+    for index, source in enumerate(sources):
+        source_path = source.get("path") if isinstance(source, dict) else None
+        if not isinstance(source_path, str) or not os.path.isfile(source_path):
+            missing.append(source_path if isinstance(source_path, str) else f"source {index}")
+            continue
+        weight = source.get("strength", 1.0)
+        try:
+            weight = float(weight)
+        except (TypeError, ValueError):
+            weight = 1.0
+        prepared.append(LoRASource(path=source_path, weight=weight))
+    if missing:
+        listed = ", ".join(missing)
+        raise KiLoRAError(f"shared edits need the source LoRA files; missing: {listed}")
+    session = build(sources) if build is not None else None
+    if session is not None and session.mod_id == manifest["id"]:
+        core_dims = options.get("core_dims")
+        if isinstance(core_dims, int) and not isinstance(core_dims, bool) and core_dims >= 0:
+            session.core_dims = core_dims
+        _load_expert_options(session, options)
+        session.load_edits(path)
+        return session
+    family = (manifest.get("base_model") or {}).get("family")
+    if not isinstance(family, str):
+        family = "unknown"
+    import_family = family if family in PRESETS else None
+    plan = apply_imported_share_defaults(manifest)
+    content_keys = plan.get("content_keys") or "per_expert"
+    lycoris_apply = plan.get("lycoris_apply") or "truncated"
+    result = import_loras(
+        prepared,
+        model,
+        family=import_family,
+        content_keys=content_keys,
+        lycoris_apply=lycoris_apply,
+    )
+    if result.adapter_set is None:
+        raise KiLoRAError("shared edits need a routed set from the source LoRA files")
+    shapes = edits.get("shapes")
+    shapes = shapes if isinstance(shapes, dict) else {}
+    session = ImportedLiveSession(
+        result.adapter_set,
+        sources,
+        family,
+        shapes,
+        None,
+        manifest["id"],
+        sections=result.sections,
+        content_keys=content_keys,
+        lycoris_apply=lycoris_apply,
+    )
+    core_dims = options.get("core_dims")
+    if isinstance(core_dims, int) and not isinstance(core_dims, bool) and core_dims >= 0:
+        session.core_dims = core_dims
+    _load_expert_options(session, options)
+    session.load_edits(path)
+    return session
 
 
 @dataclasses.dataclass(frozen=True)
@@ -758,6 +1531,7 @@ def import_source_frames(session, weights=None):
 
 
 def import_frames(session):
+
     from .recording import CrossFrame
 
     out = {}
@@ -765,23 +1539,24 @@ def import_frames(session):
         for target, items in import_source_frames(session).items():
             ex = session._source.experts[target]
             parts = session.state.get(target, {})
-            ups, downs = [], []
             ranks = ex.ranks or tuple(ex.down.shape[2] for _ in range(ex.down.shape[0]))
+            pieces = []
             for expert, rank in enumerate(ranks):
                 strength = parts.get(f"strength_{expert}")
                 if not rank or strength is None:
                     continue
-                core = parts.get(f"core_{expert}")
-                b = ex.up[expert, 0, :rank].detach().double().T
-                mix = strength.double().reshape(()) * (
-                    core.double() if core is not None else torch.eye(rank, dtype=torch.float64)
+                pieces.append(
+                    (
+                        ex.up[expert, 0, :rank],
+                        ex.down[expert, 0, :rank],
+                        int(rank),
+                        strength,
+                        parts.get(f"core_{expert}"),
+                    )
                 )
-                ups.append(b @ mix.to(b.device))
-                downs.append(ex.down[expert, 0, :rank].detach().double())
-            up = torch.cat(ups, 1) if ups else None
-            down = torch.cat(downs, 0) if downs else None
+            pieces = tuple(pieces)
             out[target] = [
-                CrossFrame(p_in, p_out, "input", None, up, down, base)
+                CrossFrame(p_in, p_out, "input", None, None, None, base, pieces)
                 for _, p_in, p_out, base in items
             ]
     return out
@@ -794,9 +1569,9 @@ def import_block_recorder(session):
     if frames is None:
         outputs = {}
         for target, items in import_source_frames(session).items():
-            rows = [p_out for _, _, p_out, _ in items]
+            rows = tuple(p_out for _, _, p_out, _ in items)
             if rows:
-                outputs[target] = torch.cat(rows, 0)
+                outputs[target] = rows
         frames = BlockFrames(outputs)
         session.__dict__["_block_frames"] = frames
     return BlockStreamRecorder(frames) if frames.outputs else None
@@ -806,13 +1581,22 @@ def moves(session, core_dims=2):
 
     if isinstance(core_dims, bool) or not isinstance(core_dims, int) or core_dims < 0:
         raise ValueError("core_dims must be a non-negative integer")
+    align = getattr(session, "align_for_moves", None)
+    if align is not None:
+        align()
     result = []
     with torch.no_grad():
         for target, ex in session._source.experts.items():
+            width = int(ex.down.shape[2])
+            ranks = tuple(width for _ in range(ex.down.shape[0])) if ex.ranks is None else ex.ranks
+            parts = session.state.get(target, {})
             for expert in range(ex.down.shape[0]):
-                core = session.state[target].get(f"core_{expert}")
+                kept = int(ranks[expert]) if expert < len(ranks) else width
+                if kept <= 0:
+                    continue
+                core = parts.get(f"core_{expert}")
                 if core is None:
-                    if f"strength_{expert}" in session.state[target]:
+                    if f"strength_{expert}" in parts:
                         result.append(
                             Move(
                                 f"{target}:{expert}:strength",
@@ -823,7 +1607,9 @@ def moves(session, core_dims=2):
                             )
                         )
                     continue
-                rank = core.shape[0]
+                rank = min(int(core.shape[0]), kept)
+                if rank <= 0:
+                    continue
                 left, right, usable = _core_frame(session, target, ex, expert, rank)
                 count = min(core_dims, usable)
                 for i in range(count):
@@ -917,8 +1703,10 @@ def between(state, new, t):
 NOT_WRITTEN = "not written: the step did not lower the measured loss"
 
 
-class ImportHistory:
-    def __init__(self, directions):
+class ImportBranchState:
+    def __init__(self, directions, edits=None):
+        self.edits = copy.deepcopy(edits or {})
+        self.commit_count = 0
         self.history = {move.id: torch.full((IMPORT_HISTORY,), float("nan")) for move in directions}
         self.rules = {}
         self.event = 0
@@ -929,16 +1717,33 @@ class ImportHistory:
         from .recording import BlockMaps
 
         self.block_maps = BlockMaps()
+        from .path_graph import PathGraphCache
+
+        self.path_graph = PathGraphCache()
+        self.path_node_versions = {}
+        self.path_node_values = {}
+        self.path_term_serial = 0
+
+    @property
+    def events(self):
+        return self.commit_count
 
     def reset(self):
         for row in self.history.values():
             row.fill_(float("nan"))
         self.rules = {}
         self.event = 0
+        self.commit_count = 0
         self.max_dims = 0
         self.compressed = None
         self.measure_events = 0
         self.gains = torch.zeros(0, dtype=torch.float64)
+        from .path_graph import PathGraphCache
+
+        self.path_graph = PathGraphCache()
+        self.path_node_versions = {}
+        self.path_node_values = {}
+        self.path_term_serial = 0
 
     def add_gain(self, gain):
         gains = torch.cat((self.gains, torch.tensor([float(gain)], dtype=torch.float64)))
@@ -949,6 +1754,7 @@ class ImportHistory:
     def state_tensors(self):
         result = {f"prior/history/{key}": value.clone() for key, value in self.history.items()}
         result["prior/event"] = torch.tensor(self.event, dtype=torch.int64)
+        result["prior/commits"] = torch.tensor(self.commit_count, dtype=torch.int64)
         result["prior/max_dims"] = torch.tensor(self.max_dims, dtype=torch.int64)
         if self.gains.numel():
             result["prior/gains"] = self.gains.clone()
@@ -975,6 +1781,7 @@ class ImportHistory:
             if key.startswith("prior/history/")
         }
         self.event = int(tensors.get("prior/event", torch.tensor(0)))
+        self.commit_count = int(tensors.get("prior/commits", torch.tensor(0)))
         self.max_dims = int(tensors.get("prior/max_dims", torch.tensor(0)))
         gains = tensors.get("prior/gains")
         self.gains = (
@@ -1002,6 +1809,184 @@ class ImportHistory:
                     for name in ("slopes", "cov", "noise")
                 },
             }
+
+
+class ImportHistory:
+    _local = {"forest", "clean", "regions", "_branch_regions", "_loaded_ids"}
+
+    def __init__(self, directions, edits=None, clean=None):
+        from .regions import RegionBook
+
+        self.forest = BranchStore(ImportBranchState(directions, edits))
+        self.clean = copy.deepcopy(clean if clean is not None else edits or {})
+        self.regions = RegionBook()
+        self._branch_regions = {}
+        self._loaded_ids = {}
+
+    def __getattr__(self, name):
+        forest = self.__dict__.get("forest")
+        if forest is None:
+            raise AttributeError(name)
+        return getattr(forest.state, name)
+
+    def __setattr__(self, name, value):
+        if name in self._local or "forest" not in self.__dict__:
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self.forest.state, name, value)
+
+    def expand_live(self, state):
+        return copy.deepcopy(self.forest.state.edits)
+
+    def fork(self, parent=None, **draw):
+        parent = self.forest.current if parent is None else parent
+        branch = self.forest.fork(parent, **draw)
+        source = self.regions if parent == self.forest.current else self._branch_regions[parent]
+        self._branch_regions[branch] = copy.deepcopy(source)
+        return branch
+
+    def checkout(self, branch_id):
+        self._branch_regions[self.forest.current] = self.regions
+        self.forest.checkout(branch_id)
+        self.regions = self._branch_regions[branch_id]
+
+    def promote(self, branch_id):
+        self.checkout(branch_id)
+        self.forest.promote(branch_id)
+
+    def delete(self, branch_id):
+        self.forest.delete(branch_id)
+        self._branch_regions.pop(branch_id, None)
+
+    def reset(self):
+        self.forest.state.reset()
+        self.forest.state.edits = copy.deepcopy(self.clean)
+        self.forest.branches[self.forest.current].paths = []
+
+    def start_from(self, state):
+        self.forest = BranchStore(ImportBranchState((), state))
+        self._branch_regions = {}
+
+    def state_tensors(self):
+        out = self.forest.state.state_tensors()
+        metadata = {
+            "head": self.forest.head,
+            "current": self.forest.current,
+            "serial": self.forest.serial,
+            "branches": self.forest.list(),
+            "edit_targets": {
+                key: list(branch.state.edits) for key, branch in self.forest.branches.items()
+            },
+            "clean_targets": list(self.clean),
+        }
+        out["branch/metadata"] = torch.tensor(
+            list(json.dumps(metadata).encode()), dtype=torch.uint8
+        )
+        for index, branch in enumerate(self.forest.branches.values()):
+            prefix = f"branch/{index}/"
+            out.update({prefix + k: v for k, v in branch.state.state_tensors().items()})
+            for target, parts in branch.state.edits.items():
+                for part, value in parts.items():
+                    out[f"{prefix}edit/{target}/{part}"] = value.clone()
+        for target, parts in self.clean.items():
+            for part, value in parts.items():
+                out[f"branch/clean/{target}/{part}"] = value.clone()
+        return out
+
+    def load_tensors(self, tensors):
+        from .regions import RegionBook
+
+        if "branch/metadata" not in tensors:
+            self.forest.state.load_tensors(tensors)
+            return
+        metadata = json.loads(bytes(tensors["branch/metadata"].tolist()))
+        forest = BranchStore(ImportBranchState(()))
+        forest.branches = {}
+        for index, item in enumerate(metadata["branches"]):
+            prefix = f"branch/{index}/"
+            parts = {k[len(prefix) :]: v for k, v in tensors.items() if k.startswith(prefix)}
+            edits = {target: {} for target in metadata.get("edit_targets", {}).get(item["id"], ())}
+            for key, value in parts.items():
+                if key.startswith("edit/"):
+                    target, _, part = key[5:].rpartition("/")
+                    edits.setdefault(target, {})[part] = value.clone()
+            state = ImportBranchState((), edits)
+            state.load_tensors(parts)
+            branch = EditBranch(
+                item["id"],
+                item["parent"],
+                state,
+                item["seed"],
+                item["temperature"],
+                item["depth"],
+                item["paths"],
+                item.get("action"),
+                item.get("writes", []),
+            )
+            forest.branches[branch.id] = branch
+        forest.head, forest.current = metadata["head"], metadata["current"]
+        forest.serial = metadata["serial"]
+        if forest.head not in forest.branches or forest.current not in forest.branches:
+            raise KiLoRAError("invalid imported editor branches")
+        forest.state.load_tensors(tensors)
+        clean = {target: {} for target in metadata.get("clean_targets", ())}
+        for key, value in tensors.items():
+            if key.startswith("branch/clean/"):
+                target, _, part = key[len("branch/clean/") :].rpartition("/")
+                clean.setdefault(target, {})[part] = value.clone()
+        self.forest = forest
+        self._loaded_ids = {}
+        self.clean = clean
+        self.regions = RegionBook()
+        self._branch_regions = {key: RegionBook() for key in forest.branches}
+
+    def restore_branch(self, tensors):
+        old = ImportHistory(())
+        old.load_tensors(tensors)
+        branch = self.forest.branches[self.forest.current]
+        source = old.forest.branches.get(branch.id)
+        if source is None:
+            source = old.forest.branches.get(branch.parent, old.forest.branches[old.forest.current])
+        for name in ("path_graph", "path_node_versions", "path_node_values", "path_term_serial"):
+            setattr(source.state, name, getattr(branch.state, name))
+        branch.state = source.state
+        branch.paths = copy.deepcopy(source.paths) if branch.id == source.id else []
+
+    def load_forest(self, tensors, *, allow_replace=True):
+        if "branch/metadata" not in tensors:
+            raise KiLoRAError("the save has no imported editor forest")
+        saved = ImportHistory(())
+        saved.load_tensors(tensors)
+        if set(saved.clean) != set(self.clean) or any(
+            set(saved.clean[t]) != set(self.clean[t])
+            or any(not torch.equal(v, saved.clean[t][k]) for k, v in self.clean[t].items())
+            for t in self.clean
+        ):
+            raise KiLoRAError("the saved forest has a different editor base")
+        pristine = (
+            len(self.forest.branches) == 1
+            and not self.forest.state.events
+            and all(
+                set(parts) == set(self.clean[t])
+                and all(torch.equal(v, self.clean[t][k]) for k, v in parts.items())
+                for t, parts in self.forest.state.edits.items()
+            )
+        )
+        if allow_replace and pristine:
+            self.load_tensors(tensors)
+            return False
+        ids = {}
+        for key in saved.forest.branches:
+            self.forest.serial += 1
+            ids[key] = f"branch-{self.forest.serial}"
+        for key, branch in saved.forest.branches.items():
+            branch.id, branch.parent = ids[key], ids.get(branch.parent)
+            self.forest.branches[branch.id] = branch
+            self._branch_regions[branch.id] = saved._branch_regions[key]
+        self.checkout(ids[saved.forest.current])
+        self.forest.head = ids[saved.forest.head]
+        self._loaded_ids = ids
+        return False
 
 
 class ImportTrial:
@@ -1094,6 +2079,109 @@ class ImportTrial:
         ]
 
 
+class WriteRecord:
+    def __init__(self, editor, record):
+        self.inner = record
+        self.forwards = 0
+        self.record_routes = False
+        self._editor = editor
+        self.measure = None if record.measure is None else _CountedMeasure(self)
+        calls = getattr(record.measure, "calls", None)
+        self._calls0 = calls[0] if isinstance(calls, list) and calls else None
+        rows = getattr(record.measure, "rows_count", None)
+        self._rows0 = rows[0] if isinstance(rows, list) and rows else None
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    @property
+    def model_calls(self):
+        if self._calls0 is None:
+            return self.forwards
+        return int(self.inner.measure.calls[0]) - self._calls0
+
+    @property
+    def model_rows(self):
+        rows = getattr(self.inner.measure, "rows_count", None)
+        if not isinstance(rows, list) or not rows or self._rows0 is None:
+            return None
+        return int(rows[0]) - self._rows0
+
+    def profile_line(self):
+        line = getattr(getattr(self.inner.measure, "profile", None), "line", None)
+        text_ = line() if callable(line) else ""
+        return text_ if isinstance(text_, str) else ""
+
+
+class _CountedMeasure:
+    def __init__(self, owner):
+        self._owner = owner
+
+    def __getattr__(self, name):
+        return getattr(self._owner.inner.measure, name)
+
+    def __call__(self, trial):
+        owner = self._owner
+        owner.forwards += 1
+        if not owner.record_routes:
+            return owner.inner.measure(trial)
+        from .live_experts import RouteRecord, recording_routes
+
+        owner.record_routes = False
+        routes = RouteRecord()
+        with recording_routes(owner._editor.session, routes):
+            value = owner.inner.measure(trial)
+        owner._editor._late_routes(routes)
+        return value
+
+    @property
+    def batched(self):
+        run_ = getattr(self._owner.inner.measure, "batched", None)
+        if not callable(run_):
+            raise AttributeError("batched")
+
+        def run(trial):
+            self._owner.forwards += 1
+            return run_(trial)
+
+        return run
+
+    @property
+    def copies(self):
+        batched = getattr(self._owner.inner.measure, "copies", None)
+        if batched is None:
+            raise AttributeError("copies")
+
+        def run(trial, copies):
+            self._owner.forwards += 1
+            return batched(trial, copies)
+
+        return run
+
+
+def accept_measure(measure):
+    try:
+        held = getattr(measure, "held", None)
+    except AttributeError:
+        held = None
+    if not callable(held):
+        return batched_measure(measure)
+
+    def run(trial):
+        return held(trial)
+
+    run.held_out = True
+    return run
+
+
+def batched_measure(measure):
+    try:
+        batched = getattr(measure, "batched", None)
+    except AttributeError:
+        batched = None
+    return batched if callable(batched) else measure
+
+
 NOTE_LARGEST = 5
 NOTE_PARTS = {"core": "core", "strength": "strength", "term": "pack term"}
 
@@ -1106,6 +2194,10 @@ def note_full():
 
 
 class ImportEditor:
+    _forward = None
+    _forward_slopes = None
+    _late = False
+
     needs_path = False
     api_version = "1"
     supports = None
@@ -1118,8 +2210,28 @@ class ImportEditor:
         self._subspace, self._subspace_samples, self._decayed = None, None, None
         self._accepted, self._refused_note = None, ""
         self._note_moves, self._full_moves = {}, ""
+        session.align_for_moves()
         if session.editor_state is None:
-            session.attach_editor_state(ImportHistory(session.moves()), "import-r1")
+            session.attach_editor_state(
+                ImportHistory(session.moves(), session.state, session._reset_state()), "import-r1"
+            )
+        for move in session.moves():
+            session.editor_state.history.setdefault(
+                move.id, torch.full((IMPORT_HISTORY,), float("nan"))
+            )
+
+    def _expanded_state(self, state):
+        return self.session.editor_state.expand_live(state)
+
+    def checkout_branch(self, branch_id, *, promote=False):
+        if self.session.pending is not None:
+            raise KiLoRAError("finish the pending update before switching branches")
+        if promote:
+            self.session.unpin()
+            self.session.editor_state.promote(branch_id)
+        else:
+            self.session.editor_state.checkout(branch_id)
+        self.session.revision += 1
 
     def configure(self, options):
         self.options = dict(options)
@@ -1133,6 +2245,7 @@ class ImportEditor:
             return None
         from .recording import CrossStepRecorder
 
+        session.align_for_moves()
         frames = import_frames(session)
         if not frames:
             return None
@@ -1141,10 +2254,33 @@ class ImportEditor:
     def guard_trial(self, state, new):
         return ImportTrial(self.session, state, new)
 
+    def clear_write_note(self):
+        self.note = ""
+        self._before = self.session.state
+        self._refused_note = ""
+        self._no_moves_reason = ""
+        self._response_skips = 0
+        self._estimate_note = ""
+        self._note_moves, self._full_moves = {}, ""
+
     def write_note(self):
-        if self.session.state is not getattr(self, "_before", None):
+        before_commits = getattr(self, "_before_commits", None)
+        committed = (
+            self.session.editor_state.commit_count != before_commits
+            if before_commits is not None
+            else self.session.state is not getattr(self, "_before", None)
+        )
+        if committed:
             return self.note
-        return getattr(self, "_refused_note", "")
+        if getattr(self, "_no_moves_reason", ""):
+            from .live_experts import NO_MOVES_NOTE
+
+            return self.note.removeprefix(NO_MOVES_NOTE).strip()
+        return (
+            getattr(self, "_refused_note", "")
+            + self._skip_line()
+            + (" " + self._estimate_note if getattr(self, "_estimate_note", "") else "")
+        )
 
     def _trial_norm(self, trial):
         total = trial.exact_norm + sum(float(v.float().norm()) ** 2 for v in trial.du.values())
@@ -1165,11 +2301,18 @@ class ImportEditor:
                 total += (amount * size) ** 2
         return total**0.5
 
-    def _moves_note(self):
-        if note_full():
-            return self._full_moves
-        if not self._note_moves:
+    def _skip_line(self):
+        skips = int(getattr(self, "_response_skips", 0) or 0)
+        if skips <= 0:
             return ""
+        return f" Skipped {skips} moves below the response floor."
+
+    def _moves_note(self):
+        skips = self._skip_line()
+        if note_full():
+            return (self._full_moves or "") + skips
+        if not self._note_moves:
+            return skips
         counts = {}
         for move, step in self._note_moves.values():
             label = NOTE_PARTS.get(move.part, move.part)
@@ -1186,9 +2329,10 @@ class ImportEditor:
         )[:NOTE_LARGEST]
         if largest:
             text += " Largest: " + ", ".join(_note_entry(m, s) for m, s in largest) + "."
-        return text
+        return text + skips
 
     def guard_refused(self):
+        self.clear_write_note()
         if self.session.controller != "rprop":
             return
         store = self.session.editor_state
@@ -1198,6 +2342,27 @@ class ImportEditor:
             ).clone()
             row[1] *= SHRINK
             store.rules[key] = row
+
+    def _unit_response(self, state, move):
+        target, expert = move.target, move.expert
+        parts = state.get(target) or {}
+        if f"core_{expert}" not in parts and f"strength_{expert}" not in parts:
+            return 0.0
+        if move.part != "core" or parts.get(f"core_{expert}") is None:
+            pair = self._pair_norm(state, target, expert)
+            return 0.0 if pair is None else float(pair[1])
+        core = parts[f"core_{expert}"]
+        ex = self.session._source.experts.get(target)
+        if ex is None:
+            return 0.0
+        probe = {target: {key: value.clone() for key, value in parts.items()}}
+        move.apply(probe, 1.0)
+        ga, gb, _ = _grams(self.session, target, ex, expert, int(core.shape[0]))
+        base = parts[f"strength_{expert}"].double() * core.double()
+        edited = (
+            probe[target][f"strength_{expert}"].double() * probe[target][f"core_{expert}"].double()
+        )
+        return _gram_norm((edited - base).to(ga.device), gb, ga)
 
     def _pair_norm(self, state, target, expert):
         ex = self.session._source.experts.get(target)
@@ -1273,9 +2438,20 @@ class ImportEditor:
         grad = subspace_gradient(psi, meas)
         if not bool(torch.isfinite(grad).all()):
             return False
-        self._subspace = dict(zip(ids, grad.tolist(), strict=True))
+        self._subspace = self._mean_direction_slopes(
+            state, dict(zip(ids, grad.tolist(), strict=True))
+        )
         self._subspace_samples = (ids, psi, meas)
         return True
+
+    def _mean_direction_slopes(self, state, slopes):
+        from .write_estimates import mean_write_values
+
+        means, note = mean_write_values(
+            self.session, state, slopes, kind="import-directions", valid=set(slopes)
+        )
+        self._estimate_note = getattr(self, "_estimate_note", "") + " " + note
+        return {key: float(value) for key, value in means.items()}
 
     @torch.no_grad()
     def _trust_radius(self, state, new, rows, all_moves, pair_of):
@@ -1396,16 +2572,25 @@ class ImportEditor:
         all_moves.update({m.id: m for m in term_moves(state)})
         all_moves.update({m.id: m for m in directions})
         touched = {m.id for m in directions}
-        for key, row in rows.items():
-            move = all_moves.get(key)
-            if move is not None and key not in touched and event - int(row[3]) >= DECAY_AFTER:
-                change = float(row[4]) * (DECAY - 1)
-                move.apply(new, change)
-                row[4] += change
+
+        def decay():
+            for key, row in rows.items():
+                move = all_moves.get(key)
+                if (
+                    move is not None
+                    and key not in touched
+                    and event - int(row[3]) >= DECAY_AFTER
+                    and self._in_target(move.target, f"core_{move.expert}")
+                ):
+                    change = float(row[4]) * (DECAY - 1)
+                    move.apply(new, change)
+                    row[4] += change
+
         estimated = None
         subspace = getattr(self.session, "measure", "full") == "compressed"
-        if subspace:
-            self._decayed = clone(new)
+        if self._forward_slopes is not None:
+            estimated = self._forward_slopes
+        elif subspace:
             measured = [
                 m
                 for m in directions
@@ -1417,12 +2602,20 @@ class ImportEditor:
             if not ok:
                 return None
             estimated = self._subspace
+        if estimated is not None:
+            directions, _ = self._late_filter(directions, [0.0] * len(directions))
+            decay()
+            if subspace:
+                self._decayed = clone(new)
         for move in directions:
+            if estimated is None and self._late_out(move):
+                continue
             pair = pair_of(move.target, move.expert)
-            if pair is None or pair[1] <= 0:
+            if pair is None or pair[1] < RESPONSE_FLOOR:
+                self._response_skips += 1
                 continue
             if estimated is not None:
-                slope = estimated[move.id]
+                slope = estimated.get(move.id, 0.0)
             else:
                 clock = time.perf_counter()
                 plus, minus = clone(state), clone(state)
@@ -1433,6 +2626,8 @@ class ImportEditor:
                     - record.measure(ImportTrial(self.session, state, minus))
                 ) / (2 * IMPORT_EPS)
                 measure_s += time.perf_counter() - clock
+                if math.isfinite(slope):
+                    slope = self._mean_direction_slopes(state, {move.id: slope})[move.id]
             if not torch.isfinite(torch.tensor(slope)):
                 return None
             core = state[move.target].get(f"core_{move.expert}")
@@ -1452,7 +2647,8 @@ class ImportEditor:
 
                 d = (effective(effect_state) - effective(state)).to(ga.device) / IMPORT_EPS
                 effect = _gram_norm(d, gb, ga)
-            if effect <= 0:
+            if effect < RESPONSE_FLOOR:
+                self._response_skips += 1
                 continue
             initial = (
                 IMPORT_WRITE_FRAC
@@ -1471,6 +2667,8 @@ class ImportEditor:
             rows[move.id] = torch.tensor(
                 [sign, delta, float(row[2]), event, float(row[4]) + step], dtype=torch.float64
             )
+        if estimated is None:
+            decay()
         if not self._refused_moves:
             return None
         trust_start = time.perf_counter()
@@ -1507,11 +2705,174 @@ class ImportEditor:
         store.block_maps.decay = float(getattr(self.session, "hier_decay", MAP_DECAY))
         record_hierarchy(store.block_maps, stats, getattr(record, "extra", None))
 
+    def begin_write(self):
+
+        self.session.align_for_moves()
+        self._stage_writes = True
+        self._staged_merge = None
+
+    def finish_write(self, session, records):
+        from .path_merge import commit_import_merge
+
+        self._stage_writes = False
+        staged = getattr(self, "_staged_merge", None)
+        self._staged_merge = None
+        if not staged:
+            return ""
+        note = commit_import_merge(self, session, records, staged)
+        if note:
+            self.note += note
+        return note
+
     def next_state(self, state, record):
+        self.clear_write_note()
+        retained = getattr(record, "extra", {}).get("render_probe")
+        self._estimate_note = ""
+        if retained is not None and getattr(retained[0], "acceptance_only", False):
+            self.note = "Probe acceptance trial completed; no new estimate on this render."
+            self._estimate_note = self.note
+            self._no_moves_reason = "acceptance trial only"
+            self._before = state
+            return None
+        accepted = getattr(record, "extra", {}).get("accepted_probe")
+        if accepted is not None:
+            from .comfyui.probe_rows import same_probe_state
+
+            if not accepted.ready or not same_probe_state(state, accepted.tested_base):
+                accepted.ready = False
+                return None
+            history = accepted.history_at(self.session.editor_snapshot() or {})
+            self.session.editor_state.load_tensors(history)
+            if getattr(self.session, "measure", "full") == "compressed":
+                self.session.editor_state.add_gain(accepted.before_loss - accepted.after_loss)
+            self.note = (
+                f"Render probe accepted loss {accepted.before_loss:.6g} -> "
+                f"{accepted.after_loss:.6g}, scale {accepted.scale:g}. " + accepted.estimate_note
+            )
+            report = record.extra.get("probe_report")
+            if report:
+                self.note += (
+                    f" Probe sigma {report.get('sigma', 0):g}, "
+                    f"{report.get('rows', 0)} rows, "
+                    f"peak memory {report['peak_bytes'] / 2**30:.2f} GiB, "
+                    f"clean reference maximum difference {report['reference_difference']:.6g}."
+                )
+            return accepted.tested_state
+        extra = getattr(record, "extra", None) or {}
+        draw = extra.get("draw")
+        if draw is None and float(extra.get("entry_temperature", 0) or 0) > 0:
+            draw = {
+                "seed": extra.get("seed"),
+                "temperature": extra["entry_temperature"],
+                "depth": extra.get("depth"),
+            }
+        if draw and float(draw.get("temperature", 0) or 0) > 0:
+            history = self.session.editor_state
+            branch = history.fork(
+                seed=draw.get("seed"), temperature=draw["temperature"], depth=draw.get("depth")
+            )
+            history.checkout(branch)
+            state = self._expanded_state(state)
+        from .compute import recording_read_keep_raw
+        from .path_merge import (
+            KeepMeans,
+            MergeProfile,
+            fold_import_paths,
+            graph_snapshot,
+            mean_keeps,
+            restore_graph,
+            wants_profile,
+        )
+
+        experts = self.session._source.num_experts
+        raw = KeepMeans(experts)
+        walks = set()
+        names = {self.session.mod_id, self.session._source.name}
+        live_id = self.session._source.extra.get("live_id")
+        if live_id:
+            names.add(live_id)
+
+        def observe(name, step, set_key, values):
+            hook, sep, _index = name.rpartition("#")
+            if set_key in names:
+                walks.add(hook.rpartition("#walk")[2] if "#walk" in hook else "0")
+            if (
+                not sep
+                or values.ndim < 2
+                or hook not in self.session.state
+                or set_key not in names
+                or values.shape[-2] != experts
+            ):
+                return
+            raw.add((hook, int(step) - 1), values)
+
+        forward = self._forward_measure(record)
+        self._keep_observer = observe if forward else None
+        try:
+            with contextlib.nullcontext() if forward else recording_read_keep_raw(observe):
+                new = self._next_unmerged(state, record)
+        finally:
+            self._keep_observer = None
+        if new is None or not self.options.get("path_merge", True) or not raw:
+            return new
+        if not getattr(self, "_stage_writes", False):
+            return new
+        history = self.session.editor_state
+        snapshot = graph_snapshot(history)
+        target = getattr(self, "_target", None)
+        profile = MergeProfile() if wants_profile() else None
+        if profile is not None:
+            profile.paths = len(walks)
+        active = None
+        if target is not None:
+            from .live_experts import active_rows
+
+            routes = self._routes
+
+            def active(hook, expert, rank):
+                read, output = active_rows(self.session, routes, hook, expert, rank)
+                return output.float()[:, None] * read.float()
+
+        merged = fold_import_paths(
+            self.session,
+            self.options,
+            history,
+            state,
+            new,
+            mean_keeps(raw, experts),
+            target=target,
+            profile=profile,
+            active=active,
+        )
+        if profile is not None:
+            self.note += profile.line()
+        if merged is not None and target is not None:
+            from .live_experts import restrict_state
+
+            merged = restrict_state(self.session, new, merged, target, self._routes)
+            if all(
+                torch.equal(merged[t][k], new[t][k]) for t in new for k in new[t] if k in merged[t]
+            ):
+                merged = None
+        if merged is None:
+            restore_graph(history, snapshot)
+            return new
+        self._staged_merge = (
+            {t: {k: v.detach().clone() for k, v in parts.items()} for t, parts in new.items()},
+            merged,
+            snapshot,
+        )
+        return new
+
+    def _next_unmerged(self, state, record):
         self.note = ""
         self._note_moves, self._full_moves = {}, ""
+        self._response_skips = 0
+        self._no_moves_reason = ""
         self._before = state
+        self._before_commits = self.session.editor_state.commit_count
         self._refused_note, self._accepted = "", None
+        self._estimate_note = ""
         self._record_hierarchy(record)
         self.provisional = False
         from .prediction_write import session_learn
@@ -1522,7 +2883,26 @@ class ImportEditor:
             return self._prediction_write(state, record)
         if record.measure is None or self.session.edits == "off":
             return None
-        directions = self.session.moves()
+        from .live_experts import WriteClock
+
+        clock = WriteClock()
+        record = WriteRecord(self, record)
+        self._forward, self._forward_slopes, self._late = None, None, False
+        self._measure = record.inner.measure
+        if self._forward_mode(record):
+            routes = self._forward_clean(state, record)
+            if routes is False:
+                return None
+            target = self._record_target(state, record, measure=False, routes=routes)
+        else:
+            target = self._record_target(state, record, measure=False)
+            self._late = target is None
+            record.record_routes = self._late
+        if target is not None and not target:
+            return self._no_moves(clock, record)
+        directions = self._target_moves(self.session.moves(), target)
+        if target is not None and not directions:
+            return self._no_moves(clock, record)
         self._estimated, self._dim_steps = None, {}
         self._subspace, self._subspace_samples, self._decayed = None, None, None
         self._rprop_time = None
@@ -1533,6 +2913,19 @@ class ImportEditor:
             found = self.pack_moves()
             active = self._pack_gate(state, found[0], directions)
             rules_before = {k: v.clone() for k, v in self.session.editor_state.rules.items()}
+        if self._forward is not None:
+            estimate = self._forward
+            retained = getattr(estimate, "render_ready", False)
+            if not retained:
+                estimate.set_target(target, self._routes)
+            if not retained and not estimate.run_draws(record.measure):
+                self._forward = None
+                return None
+            from .write_estimates import accumulate_write_estimate
+
+            self._estimate_note = accumulate_write_estimate(self.session, estimate)
+            self._forward_slopes = estimate.slopes([*directions, *active])
+            self._estimated = dict(self._forward_slopes)
         if self.session.controller == "rprop":
             new = self._rprop(state, record, directions, active)
         else:
@@ -1545,8 +2938,193 @@ class ImportEditor:
             if new is None:
                 return None
         self.note = self._moves_note() + self.note + self._accept_line() + self._timing_line()
-        self.note += self._prediction_line(record)
+        self.note += self._prediction_line(record.inner) + self._policy_line()
+        self.note += self._measure_line()
+        if self._forward is None:
+            self.note += " " + getattr(self, "_estimate_note", "")
+        self.note += clock.line(
+            len(directions) + len(active), record.model_calls, record.model_rows
+        )
+        self.note += record.profile_line()
         return new
+
+    def _no_moves(self, clock, record=None):
+        from .live_experts import NO_MOVES_NOTE, NO_TRAVERSED
+
+        self._no_moves_reason = NO_TRAVERSED
+        calls = None if record is None else record.model_calls
+        rows = None if record is None else record.model_rows
+        self.note = NO_MOVES_NOTE + clock.line(0, calls, rows)
+        if record is not None:
+            self.note += record.profile_line()
+        return None
+
+    def _forward_measure(self, record):
+        from .forward_estimate import supports
+        from .live_experts import setting
+        from .prediction_write import session_learn
+
+        if session_learn(self.session) == "prediction" or record is None:
+            return False
+        if getattr(record, "measure", None) is None:
+            return False
+        return setting(self.session, "write_measure") == "forward" and supports(record.measure)
+
+    def _forward_mode(self, record):
+        from .forward_estimate import supports
+        from .live_experts import setting
+
+        if setting(self.session, "write_measure") != "forward":
+            return False
+        return supports(record.inner.measure)
+
+    def _forward_clean(self, state, record):
+
+        import math
+
+        from .forward_estimate import ForwardEstimate, write_seed
+        from .live_experts import RouteRecord, recording_fused_routes, setting
+
+        retained = getattr(record.inner, "extra", {}).get("render_probe")
+        if retained is not None:
+            estimate, routes, _outputs = retained
+            same = state.keys() == estimate.state.keys() and all(
+                state[t].keys() == estimate.state[t].keys()
+                and all(
+                    torch.equal(value.detach().cpu(), estimate.state[t][key])
+                    for key, value in parts.items()
+                )
+                for t, parts in state.items()
+            )
+            if same and math.isfinite(estimate.clean_loss):
+                self._forward = estimate
+                return routes
+        estimate = ForwardEstimate(
+            self.session,
+            state,
+            draws=setting(self.session, "forward_draws"),
+            sigma=setting(self.session, "forward_sigma"),
+            chunk=setting(self.session, "forward_chunk"),
+            seed=write_seed(self.session),
+        )
+        routes = RouteRecord()
+        observe = getattr(self, "_keep_observer", None)
+        keeps = contextlib.nullcontext()
+        if observe is not None:
+            from .compute import recording_read_keep_raw
+
+            keeps = recording_read_keep_raw(observe)
+        with recording_fused_routes(self.session, routes), keeps:
+            loss = estimate.run_clean(record.measure)
+        if routes.mass:
+            estimate.add_keeps(routes)
+        if not math.isfinite(loss):
+            return False
+        self._forward = estimate
+        given = getattr(record.inner, "route_record", None)
+        if isinstance(given, RouteRecord) and not given.empty:
+            return given
+        return None if routes.empty else routes
+
+    def _measure_line(self):
+        estimate = getattr(self, "_forward", None)
+        if estimate is None:
+            return ""
+        if estimate.draw_calls or estimate.clean_calls:
+            line = (
+                f" Forward estimate: {estimate.draws} draws, {estimate.clean_calls} clean"
+                f" and {estimate.draw_calls} draw model calls,"
+                f" noise {estimate.sigma:g} of the output RMS"
+            )
+        else:
+            line = (
+                f" Forward estimate: {estimate.draws} draws, {len(estimate.batches())} batched"
+                f" passes, noise {estimate.sigma:g} of the output RMS"
+            )
+        if getattr(estimate, "render_ready", False):
+            line += ", retained from render probes"
+            peak = getattr(estimate, "render_peak_bytes", 0)
+            line += f", probe peak memory {peak / 2**30:.2f} GiB"
+            difference = getattr(estimate, "render_reference_difference", 0)
+            line += f", clean reference maximum difference {difference:.6g}"
+        if estimate.splits:
+            line += f", {estimate.chunk} draws per model call after {estimate.splits} halvings"
+        chunking = getattr(getattr(self, "_measure", None), "chunking", None)
+        if isinstance(chunking, dict) and chunking.get("used"):
+            line += f", {chunking['used']} samples per model call"
+            if chunking.get("split"):
+                line += f" (halved {chunking['split']} times for memory)"
+            if chunking.get("separate"):
+                line += ", one condition per call"
+        memory = getattr(getattr(self, "_measure", None), "memory", None)
+        if isinstance(memory, dict) and memory.get("peak"):
+            line += f", write peak memory {memory['peak'] / 2**30:.2f} GiB"
+        from .measure_size import resolution_clause
+
+        return (
+            line
+            + resolution_clause(getattr(self, "_measure", None))
+            + "."
+            + (" " + self._estimate_note if getattr(self, "_estimate_note", "") else "")
+        )
+
+    def _late_routes(self, routes):
+        if routes is None or routes.empty:
+            return
+        self._record_target(self._before, None, routes=routes)
+
+    def _late_out(self, move):
+        if not getattr(self, "_late", False) or getattr(self, "_target", None) is None:
+            return False
+        if move.expert < 0:
+            return False
+        return move.expert not in set(self._target.get(move.target, ()))
+
+    def _late_filter(self, directions, values):
+        if not getattr(self, "_late", False) or getattr(self, "_target", None) is None:
+            return directions, values
+        from .live_experts import target_moves
+
+        by_id = dict(zip((m.id for m in directions), values, strict=True))
+        kept = target_moves(self.session, directions, self._target, self._routes)
+        return kept, [by_id[m.id] for m in kept]
+
+    def _record_target(self, state, record, measure=True, routes=None):
+        from .live_experts import expert_policy, measure_routes, record_history, write_target
+
+        self._routes, self._target, self._policy = None, None, {}
+        if routes is None and record is not None:
+            routes = measure_routes(self.session, record, state, measure=measure)
+        if routes is None or routes.empty:
+            return None
+        target = write_target(self.session, routes, state)
+        self._policy = expert_policy(self.session, target, routes)
+        record_history(self.session, routes)
+        self._routes, self._target = routes, target
+        return target
+
+    def _in_target(self, target, part):
+        chosen = getattr(self, "_target", None)
+        if chosen is None:
+            return True
+        prefix, sep, number = part.rpartition("_")
+        if not sep or prefix not in ("core", "strength") or not number.isdigit():
+            return True
+        return int(number) in set(chosen.get(target, ()))
+
+    def _target_moves(self, directions, target):
+        if target is None:
+            return directions
+        from .live_experts import target_moves
+
+        return target_moves(self.session, directions, target, self._routes)
+
+    def _policy_line(self):
+        policy = getattr(self, "_policy", None) or {}
+        shared = sorted(key for key, value in policy.items() if value == "copy")
+        if not shared:
+            return ""
+        return f" Shared experts: {len(shared)} (edited in place)."
 
     def _prediction_moves(self, state):
         found = list(self.session.moves()) + term_moves(state)
@@ -1564,16 +3142,25 @@ class ImportEditor:
         return axes
 
     @torch.no_grad()
-    def prediction_setup(self, state):
+    def prediction_setup(self, state, target=None):
         from . import prediction_write as pw
 
         sources = import_source_frames(self.session)
+        if target is not None:
+            sources = {
+                layer: [frame for frame in frames if frame[0] in set(target.get(layer, ()))]
+                for layer, frames in sources.items()
+            }
+            sources = {layer: frames for layer, frames in sources.items() if frames}
         if not sources:
             return None
         experts = self.session._source.experts
+        moves_ = self._prediction_moves(state)
+        if target is not None:
+            moves_ = self._target_moves(moves_, target)
         directions = [
             m
-            for m in self._prediction_moves(state)
+            for m in moves_
             if m.target in sources
             and (isinstance(m, TermMove) or m.expert not in experts[m.target].exact)
         ]
@@ -1632,7 +3219,13 @@ class ImportEditor:
         stats = getattr(record, "stats", None)
         if stats is None or self.session.speed <= 0:
             return None
-        setup = self.prediction_setup(state)
+        from .live_experts import WriteClock
+
+        clock = WriteClock()
+        target = self._record_target(state, record, measure=False)
+        if target is not None and not target:
+            return self._no_moves(clock)
+        setup = self.prediction_setup(state, target)
         if setup is None:
             return None
         by_target, responses, p_out, priors = setup
@@ -1664,6 +3257,7 @@ class ImportEditor:
         new, written, norm = applied
         self._note_moves = written
         self.note = self._moves_note() + result.note(norm) + self._prediction_line(record)
+        self.note += self._policy_line() + clock.line(sum(len(m) for m in by_target.values()))
         self.provisional = True
         return new
 
@@ -1708,19 +3302,33 @@ class ImportEditor:
 
     @torch.no_grad()
     def _accept(self, state, record, new, rules_before):
-        before = float(record.measure(ImportTrial(self.session, state, state)))
-        after = float(record.measure(ImportTrial(self.session, state, new)))
+        from .forward_estimate import profile_phase
+
+        estimate = getattr(self, "_forward", None)
+        if getattr(estimate, "render_ready", False):
+            return new
+        measure, before = accept_measure(record.measure), None
+        if getattr(measure, "held_out", False):
+            before = getattr(estimate, "accept_before", None)
+        with profile_phase(record.measure, "accept"):
+            if before is None or not math.isfinite(before):
+                before = float(measure(ImportTrial(self.session, state, state)))
+            after = float(measure(ImportTrial(self.session, state, new)))
         halved = False
         if not after < before:
+            self._write_decision("retried at a scale of 0.5", before, after)
             new = between(state, new, 0.5)
             halved = True
-            after = float(record.measure(ImportTrial(self.session, state, new)))
+            with profile_phase(record.measure, "accept"):
+                after = float(measure(ImportTrial(self.session, state, new)))
             if not after < before:
+                self._write_decision("refused", before, after)
                 self._refused_note = (
                     f" {NOT_WRITTEN} (loss {before:.6g} before, {after:.6g} after the halved step)."
                 )
                 return None
             self._halve_steps(rules_before)
+        self._write_decision("accepted", before, after)
         decayed = state if self._decayed is None else self._decayed
         if halved:
             decayed = between(state, decayed, 0.5)
@@ -1730,9 +3338,17 @@ class ImportEditor:
             "halved": halved,
             "decay": self._change_norm(state, decayed),
             "moves": self._change_norm(decayed, new),
+            "state": new,
         }
         self.session.editor_state.add_gain(before - after)
         return new
+
+    def _write_decision(self, decision, before, after):
+        line = f" Write candidate {decision}: loss {before:.9g} -> {after:.9g}."
+        self._estimate_note = getattr(self, "_estimate_note", "") + line
+        logging.getLogger(__name__).info(
+            "%s %s", line.strip(), getattr(self._forward, "mean_response_note", "")
+        )
 
     def _halve_steps(self, rules_before):
         store = self.session.editor_state
@@ -1753,9 +3369,11 @@ class ImportEditor:
         if not a:
             return ""
         halved = ", after halving the step" if a["halved"] else ", step not halved"
+        relative = (a["before"] - a["after"]) / a["before"] if a["before"] else 0.0
         return (
             f" Accept check: measured loss {a['before']:.6g} before, {a['after']:.6g}"
-            f" after{halved}. Change: decay {a['decay']:.4g}, moves {a['moves']:.4g}."
+            f" after{halved} (relative decrease {relative:.3g})."
+            f" Change: decay {a['decay']:.4g}, moves {a['moves']:.4g}."
         )
 
     def _r1(self, state, record, directions, extra=()):
@@ -1784,11 +3402,17 @@ class ImportEditor:
         slopes = []
         history = self.session.editor_state.history
         subspace = getattr(self.session, "measure", "full") == "compressed"
-        if subspace:
+        forward = self._forward_slopes
+        if forward is not None:
+            slopes = [-float(forward.get(move.id, 0.0)) for move in directions]
+        elif subspace:
             if not self._measure_subspace(state, record, [*directions, *extra]):
                 return None
             slopes = [-float(self._subspace[move.id]) for move in directions]
-        for move in () if subspace else directions:
+        for move in () if subspace or forward is not None else directions:
+            if self._late_out(move):
+                slopes.append(0.0)
+                continue
             plus, minus = clone(), clone()
             move.apply(plus, IMPORT_EPS)
             move.apply(minus, -IMPORT_EPS)
@@ -1802,16 +3426,40 @@ class ImportEditor:
             previous = history.get(move.id, torch.full((IMPORT_HISTORY,), float("nan")))
             row = torch.cat((previous[1:], torch.tensor([slope])))
             history[move.id] = row
-            slopes.append(-float(torch.nanmean(row)))
+            slopes.append(-float(slope))
         if shares:
             average_share = torch.stack(shares).mean(0)
             slopes = [
                 slope * (float(average_share[move.expert]) if move.expert >= 0 else 1.0)
                 for move, slope in zip(directions, slopes, strict=True)
             ]
-        weights = torch.tensor(slopes)
-        norm = float(weights.norm())
-        if not norm:
+        directions, slopes = self._late_filter(directions, slopes)
+        if forward is None and not subspace:
+            averaged = self._mean_direction_slopes(
+                state, {move.id: value for move, value in zip(directions, slopes, strict=True)}
+            )
+            slopes = [averaged[move.id] for move in directions]
+        kept_moves, kept_slopes = [], []
+        for move, slope in zip(directions, slopes, strict=True):
+            if self._unit_response(state, move) < RESPONSE_FLOOR:
+                self._response_skips += 1
+                continue
+            kept_moves.append(move)
+            kept_slopes.append(slope)
+        directions = kept_moves
+        weights = torch.tensor(kept_slopes)
+        norm = float(weights.norm()) if weights.numel() else 0.0
+        retained = getattr(self._forward, "render_ready", False)
+        if self._forward is not None:
+            response_note = f" Write estimated response {norm:.9g}, floor {RESPONSE_FLOOR:g}."
+            self._estimate_note = getattr(self, "_estimate_note", "") + response_note
+            logging.getLogger(__name__).info(response_note.strip())
+        if not norm or (retained and norm < RESPONSE_FLOOR):
+            self._no_moves_reason = (
+                "estimated response below the response floor; accumulating render probes"
+                if retained
+                else "zero estimated response"
+            )
             return None
         host_norms = getattr(self.session, "host_norms", {}) or {}
         scale = (
@@ -1844,7 +3492,7 @@ class ImportEditor:
         neutral = self.session._neutral(state)
         for target in new:
             for part in new[target]:
-                if part in TERM_FIXED:
+                if part in TERM_FIXED or not self._in_target(target, part):
                     continue
                 new[target][part] = neutral[target][part] + (
                     state[target][part] - neutral[target][part]

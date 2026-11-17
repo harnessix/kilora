@@ -26,7 +26,7 @@ def test_merge_pairs_save_load_and_undo(setup, monkeypatch):
     for _ in range(2):
         assert "source=merge" in commit_write(session, editor, _record(session, target))
     branch = session.editor_state.forest.branches["main"]
-    assert [pair[0] for pair in branch.merge_pairs] == [2, 4]
+    assert [pair[0] for pair in branch.merge_pairs] == [1, 2]
     name = session.save_point("pairs")
     saved = read_save(session.saves_dir / session.mod_id / f"{name}.ksave")
     session.editor_state.load_tensors(saved.editor_state)

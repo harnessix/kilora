@@ -85,6 +85,7 @@ def test_import_dispatch_uses_the_bounded_chain(target, monkeypatch):
     from kilora import compute
 
     monkeypatch.setenv("KILORA_IMPORT_FIXED_READ", "0")
+    monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
     model, down, _, plan = make_plan(target=target)
     x = torch.randn(2, 4, down.shape[1], generator=torch.Generator().manual_seed(6))
     base = model.get_submodule(target)(x)

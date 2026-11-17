@@ -42,8 +42,11 @@ def test_object_info_is_json_and_consistent(folders):
         if "output_tooltips" in info:
             assert len(info["output_tooltips"]) == len(info["output"]), key
         assert callable(getattr(cls(), cls.FUNCTION)), key
-        for group in info["input"].values():
+        for name, group in info["input"].items():
             for spec in group.values():
+                if name == "hidden":
+                    assert isinstance(spec, str), key
+                    continue
                 assert isinstance(spec, tuple) and len(spec) in (1, 2), key
 
 

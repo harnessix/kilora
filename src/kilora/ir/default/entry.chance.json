@@ -1,0 +1,319 @@
+{
+  "name": "entry.chance",
+  "part": "entry",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "hooks": [],
+  "inputs": {
+    "reads": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts",
+        "per"
+      ],
+      "dtype": "float32"
+    },
+    "energy": {
+      "axes": [
+        "batch",
+        "tokens"
+      ],
+      "dtype": "float32"
+    },
+    "rows": {
+      "axes": [
+        "experts"
+      ],
+      "dtype": "int64"
+    },
+    "key_width": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "tau": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "epsilon": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "temperature_in": {
+      "axes": [],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "logits": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "temperature": {
+      "axes": [],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "mul",
+      "args": [
+        "reads",
+        "reads"
+      ],
+      "result": "squared",
+      "attributes": {}
+    },
+    {
+      "id": 1,
+      "op": "sum",
+      "args": [
+        "squared"
+      ],
+      "result": "projected",
+      "attributes": {
+        "axis": "per",
+        "keep": false
+      }
+    },
+    {
+      "id": 2,
+      "op": "add",
+      "args": [
+        "energy",
+        "epsilon"
+      ],
+      "result": "denominator",
+      "attributes": {}
+    },
+    {
+      "id": 3,
+      "op": "div",
+      "args": [
+        "projected",
+        "denominator"
+      ],
+      "result": "share",
+      "attributes": {}
+    },
+    {
+      "id": 4,
+      "op": "cast",
+      "args": [
+        "rows"
+      ],
+      "result": "rank",
+      "attributes": {
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": 5,
+      "op": "div",
+      "args": [
+        "rank",
+        "key_width"
+      ],
+      "result": "mean",
+      "attributes": {}
+    },
+    {
+      "id": 6,
+      "op": "sub",
+      "args": [
+        "share",
+        "mean"
+      ],
+      "result": "centered",
+      "attributes": {}
+    },
+    {
+      "id": 7,
+      "op": "sub",
+      "args": [
+        "key_width",
+        "rank"
+      ],
+      "result": "remaining",
+      "attributes": {}
+    },
+    {
+      "id": 8,
+      "op": "mul",
+      "args": [
+        "rank",
+        "remaining"
+      ],
+      "result": "spread",
+      "attributes": {}
+    },
+    {
+      "id": 9,
+      "op": "scale",
+      "args": [
+        "spread"
+      ],
+      "result": "twice_spread",
+      "attributes": {
+        "value": 2.0,
+        "by_strength": false
+      }
+    },
+    {
+      "id": 10,
+      "op": "mul",
+      "args": [
+        "key_width",
+        "key_width"
+      ],
+      "result": "width_squared",
+      "attributes": {}
+    },
+    {
+      "id": 11,
+      "op": "scale",
+      "args": [
+        "temperature_in"
+      ],
+      "result": "two",
+      "attributes": {
+        "value": 2.0,
+        "by_strength": false
+      }
+    },
+    {
+      "id": 12,
+      "op": "scale",
+      "args": [
+        "temperature_in"
+      ],
+      "result": "one",
+      "attributes": {
+        "value": 1.0,
+        "by_strength": false
+      }
+    },
+    {
+      "id": 13,
+      "op": "scale",
+      "args": [
+        "temperature_in"
+      ],
+      "result": "zero",
+      "attributes": {
+        "value": 0.0,
+        "by_strength": false
+      }
+    },
+    {
+      "id": 14,
+      "op": "add",
+      "args": [
+        "key_width",
+        "two"
+      ],
+      "result": "width_plus_two",
+      "attributes": {}
+    },
+    {
+      "id": 15,
+      "op": "mul",
+      "args": [
+        "width_squared",
+        "width_plus_two"
+      ],
+      "result": "variance_denominator",
+      "attributes": {}
+    },
+    {
+      "id": 16,
+      "op": "div",
+      "args": [
+        "twice_spread",
+        "variance_denominator"
+      ],
+      "result": "variance",
+      "attributes": {}
+    },
+    {
+      "id": 17,
+      "op": "gt",
+      "args": [
+        "variance",
+        "zero"
+      ],
+      "result": "valid",
+      "attributes": {}
+    },
+    {
+      "id": 18,
+      "op": "where",
+      "args": [
+        "valid",
+        "variance",
+        "one"
+      ],
+      "result": "safe_variance",
+      "attributes": {}
+    },
+    {
+      "id": 19,
+      "op": "sqrt",
+      "args": [
+        "safe_variance"
+      ],
+      "result": "sigma",
+      "attributes": {}
+    },
+    {
+      "id": 20,
+      "op": "div",
+      "args": [
+        "centered",
+        "sigma"
+      ],
+      "result": "standardized",
+      "attributes": {}
+    },
+    {
+      "id": 21,
+      "op": "where",
+      "args": [
+        "valid",
+        "standardized",
+        "zero"
+      ],
+      "result": "score",
+      "attributes": {}
+    },
+    {
+      "id": 22,
+      "op": "mul",
+      "args": [
+        "tau",
+        "score"
+      ],
+      "result": "logits",
+      "attributes": {}
+    },
+    {
+      "id": 23,
+      "op": "scale",
+      "args": [
+        "temperature_in"
+      ],
+      "result": "temperature",
+      "attributes": {
+        "value": 1.0,
+        "by_strength": false
+      }
+    }
+  ],
+  "identity": "bfa1f1e32222ab8fe671fbf4757b0e16342a307ef6278fcdfe55e0df3794650b"
+}

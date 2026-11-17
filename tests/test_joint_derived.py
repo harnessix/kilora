@@ -296,6 +296,11 @@ def test_equal_scores_give_equal_file_shares(monkeypatch):
         up=first.up.repeat(4, 1),
         keys_in=torch.zeros(4, 1, 2),
     )
+
+    def equal_logits(layer, value):
+        return value.new_zeros(*value.shape[:-1], layer.down.shape[0] // layer.per_expert)
+
+    monkeypatch.setattr(compute, "derived_logits", equal_logits)
     with torch.no_grad():
         monkeypatch.setenv("KILORA_FILE_BALANCE", "0")
         off = compute._mixed_route(x, [first, mod], None, None, True, 0.0, [None, None], True, x=x)
@@ -306,6 +311,18 @@ def test_equal_scores_give_equal_file_shares(monkeypatch):
     assert torch.equal(on[0], torch.full_like(on[0], 0.5))
     assert torch.equal(on[1], torch.full_like(on[1], 0.125))
     assert torch.equal(on[1].sum(-1), torch.full_like(on[1][..., 0], 0.5))
+
+    def unequal_logits(layer, value):
+        return equal_logits(layer, value) + (0.25 if layer.form == "input" else 0.0)
+
+    monkeypatch.setattr(compute, "derived_logits", unequal_logits)
+    with torch.no_grad():
+        shifted = compute._mixed_route(
+            x, [first, mod], None, None, True, 0.0, [None, None], True, x=x
+        )
+    assert not torch.equal(shifted[0], on[0])
+    torch.testing.assert_close(shifted[0], torch.full_like(shifted[0], 0.7))
+    torch.testing.assert_close(shifted[1], torch.full_like(shifted[1], 0.075))
 
 
 @pytest.mark.parametrize("depth", [1, 3, 2.5])

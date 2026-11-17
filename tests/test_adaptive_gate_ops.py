@@ -85,6 +85,7 @@ def test_sampled_masks_match_original(monkeypatch):
 
     def run(keep):
         monkeypatch.setattr(compute, "adaptive_keep", keep)
+        monkeypatch.setattr(compute, "fused_gate_enabled", lambda z: keep is adaptive_keep)
         hist = {}
         with torch.no_grad(), compute.dropout_key(7, 3):
             return [
@@ -115,8 +116,10 @@ def test_layer_against_original_and_eager(monkeypatch, masks, depth):
             return compute.run_layer(x, y, [s], depth, target=TARGET)
 
     monkeypatch.setattr(compute, "adaptive_keep", _reference)
+    monkeypatch.setattr(compute, "fused_gate_enabled", lambda z: False)
     old = run(False)
     monkeypatch.setattr(compute, "adaptive_keep", adaptive_keep)
+    monkeypatch.setattr(compute, "fused_gate_enabled", adaptive_gate.fused_gate_enabled)
     eager = run(False)
     fused = run(True)
     torch.testing.assert_close(eager, old, rtol=1e-4, atol=1e-5)

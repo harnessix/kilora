@@ -5,6 +5,11 @@ import torch
 from kilora.comfyui.live_write import PathHandle, image_loss
 
 
+def _weight(measure):
+    sigmas = measure.sigmas[: measure.sample_count]
+    return sum(1.0 / s**2 for s in sigmas) / len(sigmas)
+
+
 def test_loss_is_the_mean_of_both_conditionings():
     x0 = torch.randn(2, 5, 4, generator=torch.Generator().manual_seed(0))
     seen = []
@@ -23,14 +28,15 @@ def test_loss_is_the_mean_of_both_conditionings():
         empty_conditioning={"c_crossattn": torch.full((2, 3), -1.0)},
         apply_model=apply_model,
     )
-    value = image_loss(handle, x0, event=3)(None)
+    measure = image_loss(handle, x0, event=3)
+    value = measure(None)
     full = float((2.0 - x0).pow(2).mean())
     empty = float((-1.0 - x0).pow(2).mean())
-    assert abs(value - (full + empty) / 2) < 1e-6
-    ((x, t),) = seen
-    xa, xb = x.chunk(2)
-    ta, tb = t.chunk(2)
-    assert torch.equal(xa, xb) and torch.equal(ta, tb)
+    assert abs(value - (full + empty) / 2 * _weight(measure)) < 1e-5 * value
+    for x, t in seen:
+        xa, xb = x.chunk(2)
+        ta, tb = t.chunk(2)
+        assert torch.equal(xa, xb) and torch.equal(ta, tb)
 
 
 def test_loss_is_taken_in_the_models_latent_space():
@@ -45,8 +51,10 @@ def test_loss_is_taken_in_the_models_latent_space():
         apply_model=lambda x_t, t, c_crossattn: torch.zeros_like(x_t),
         process_in=lambda x: 2.0 * x + 1.0,
     )
-    value = image_loss(handle, x0, event=0)(None)
-    assert abs(value - float((2.0 * x0 + 1.0).pow(2).mean())) < 1e-6
+    measure = image_loss(handle, x0, event=0)
+    value = measure(None)
+    expected = float((2.0 * x0 + 1.0).pow(2).mean()) * _weight(measure)
+    assert abs(value - expected) < 1e-5 * expected
 
 
 def _row_model(calls):

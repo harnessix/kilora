@@ -1,0 +1,380 @@
+{
+  "name": "entry.chance_from_input",
+  "part": "entry",
+  "op_set": "kilora.ops",
+  "op_set_version": 1,
+  "hooks": [],
+  "inputs": {
+    "rows": {
+      "axes": [
+        "experts"
+      ],
+      "dtype": "int64"
+    },
+    "key_width": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "tau": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "epsilon": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "temperature_in": {
+      "axes": [],
+      "dtype": "float32"
+    },
+    "x": {
+      "axes": [
+        "batch",
+        "tokens",
+        "key"
+      ],
+      "dtype": "float32"
+    },
+    "keys": {
+      "axes": [
+        "experts",
+        "per",
+        "key"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "logits": {
+      "axes": [
+        "batch",
+        "tokens",
+        "experts"
+      ],
+      "dtype": "float32"
+    },
+    "temperature": {
+      "axes": [],
+      "dtype": "float32"
+    }
+  },
+  "bindings": {},
+  "instructions": [
+    {
+      "id": 0,
+      "op": "flatten",
+      "args": [
+        "keys"
+      ],
+      "result": "flat_keys",
+      "attributes": {
+        "axis1": "experts",
+        "axis2": "per",
+        "new_axis": "cols"
+      }
+    },
+    {
+      "id": 1,
+      "op": "matmul",
+      "args": [
+        "x",
+        "flat_keys"
+      ],
+      "result": "flat_reads",
+      "attributes": {
+        "transpose_b": true
+      }
+    },
+    {
+      "id": 2,
+      "op": "unflatten",
+      "args": [
+        "flat_reads"
+      ],
+      "result": "reads",
+      "attributes": {
+        "axis": "cols",
+        "axis1": "experts",
+        "axis2": "per",
+        "size_of": "keys"
+      }
+    },
+    {
+      "id": 3,
+      "op": "vector_norm",
+      "args": [
+        "x"
+      ],
+      "result": "input_norm",
+      "attributes": {
+        "axis": "key",
+        "keep": false
+      }
+    },
+    {
+      "id": 4,
+      "op": "mul",
+      "args": [
+        "input_norm",
+        "input_norm"
+      ],
+      "result": "energy",
+      "attributes": {}
+    },
+    {
+      "id": 5,
+      "op": "mul",
+      "args": [
+        "reads",
+        "reads"
+      ],
+      "result": "squared",
+      "attributes": {}
+    },
+    {
+      "id": 6,
+      "op": "sum",
+      "args": [
+        "squared"
+      ],
+      "result": "projected",
+      "attributes": {
+        "axis": "per",
+        "keep": false
+      }
+    },
+    {
+      "id": 7,
+      "op": "add",
+      "args": [
+        "energy",
+        "epsilon"
+      ],
+      "result": "denominator",
+      "attributes": {}
+    },
+    {
+      "id": 8,
+      "op": "div",
+      "args": [
+        "projected",
+        "denominator"
+      ],
+      "result": "share",
+      "attributes": {}
+    },
+    {
+      "id": 9,
+      "op": "cast",
+      "args": [
+        "rows"
+      ],
+      "result": "rank",
+      "attributes": {
+        "dtype": "float32"
+      }
+    },
+    {
+      "id": 10,
+      "op": "div",
+      "args": [
+        "rank",
+        "key_width"
+      ],
+      "result": "mean",
+      "attributes": {}
+    },
+    {
+      "id": 11,
+      "op": "sub",
+      "args": [
+        "share",
+        "mean"
+      ],
+      "result": "centered",
+      "attributes": {}
+    },
+    {
+      "id": 12,
+      "op": "sub",
+      "args": [
+        "key_width",
+        "rank"
+      ],
+      "result": "remaining",
+      "attributes": {}
+    },
+    {
+      "id": 13,
+      "op": "mul",
+      "args": [
+        "rank",
+        "remaining"
+      ],
+      "result": "spread",
+      "attributes": {}
+    },
+    {
+      "id": 14,
+      "op": "scale",
+      "args": [
+        "spread"
+      ],
+      "result": "twice_spread",
+      "attributes": {
+        "value": 2.0,
+        "by_strength": false
+      }
+    },
+    {
+      "id": 15,
+      "op": "mul",
+      "args": [
+        "key_width",
+        "key_width"
+      ],
+      "result": "width_squared",
+      "attributes": {}
+    },
+    {
+      "id": 16,
+      "op": "scale",
+      "args": [
+        "temperature_in"
+      ],
+      "result": "two",
+      "attributes": {
+        "value": 2.0,
+        "by_strength": false
+      }
+    },
+    {
+      "id": 17,
+      "op": "scale",
+      "args": [
+        "temperature_in"
+      ],
+      "result": "one",
+      "attributes": {
+        "value": 1.0,
+        "by_strength": false
+      }
+    },
+    {
+      "id": 18,
+      "op": "scale",
+      "args": [
+        "temperature_in"
+      ],
+      "result": "zero",
+      "attributes": {
+        "value": 0.0,
+        "by_strength": false
+      }
+    },
+    {
+      "id": 19,
+      "op": "add",
+      "args": [
+        "key_width",
+        "two"
+      ],
+      "result": "width_plus_two",
+      "attributes": {}
+    },
+    {
+      "id": 20,
+      "op": "mul",
+      "args": [
+        "width_squared",
+        "width_plus_two"
+      ],
+      "result": "variance_denominator",
+      "attributes": {}
+    },
+    {
+      "id": 21,
+      "op": "div",
+      "args": [
+        "twice_spread",
+        "variance_denominator"
+      ],
+      "result": "variance",
+      "attributes": {}
+    },
+    {
+      "id": 22,
+      "op": "gt",
+      "args": [
+        "variance",
+        "zero"
+      ],
+      "result": "valid",
+      "attributes": {}
+    },
+    {
+      "id": 23,
+      "op": "where",
+      "args": [
+        "valid",
+        "variance",
+        "one"
+      ],
+      "result": "safe_variance",
+      "attributes": {}
+    },
+    {
+      "id": 24,
+      "op": "sqrt",
+      "args": [
+        "safe_variance"
+      ],
+      "result": "sigma",
+      "attributes": {}
+    },
+    {
+      "id": 25,
+      "op": "div",
+      "args": [
+        "centered",
+        "sigma"
+      ],
+      "result": "standardized",
+      "attributes": {}
+    },
+    {
+      "id": 26,
+      "op": "where",
+      "args": [
+        "valid",
+        "standardized",
+        "zero"
+      ],
+      "result": "score",
+      "attributes": {}
+    },
+    {
+      "id": 27,
+      "op": "mul",
+      "args": [
+        "tau",
+        "score"
+      ],
+      "result": "logits",
+      "attributes": {}
+    },
+    {
+      "id": 28,
+      "op": "scale",
+      "args": [
+        "temperature_in"
+      ],
+      "result": "temperature",
+      "attributes": {
+        "value": 1.0,
+        "by_strength": false
+      }
+    }
+  ],
+  "identity": "e21ec2e960579804d70f7b0ca3e171fcad83a68e8377054423fdd4683e80f4f5"
+}

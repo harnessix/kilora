@@ -101,3 +101,69 @@ def test_undo_waits_for_a_running_write():
     t.join()
     assert s.commits == [] and len(log) == 3
     q.close()
+
+
+def test_startup_busy_covers_pending_running_paused_and_cleanup():
+    from kilora.live_queue import writes_busy, yield_point
+
+    entered = threading.Event()
+    proceed = threading.Event()
+    released = threading.Event()
+    cleanup = threading.Event()
+    observations = []
+    q = WriteQueue()
+
+    class Job:
+        def __call__(self):
+            observations.append(writes_busy())
+            entered.set()
+            assert proceed.wait(10)
+            yield_point()
+            observations.append(writes_busy())
+            return "written"
+
+        def release(self):
+            observations.append(writes_busy())
+            released.set()
+            assert cleanup.wait(10)
+
+    try:
+        q.begin_generation()
+        q.submit(Job())
+        assert writes_busy() and not entered.is_set()
+        q.end_generation()
+        assert entered.wait(10) and writes_busy()
+        q.begin_generation()
+        proceed.set()
+        assert not released.wait(0.1) and writes_busy()
+        q.end_generation()
+        assert released.wait(10) and writes_busy()
+        cleanup.set()
+        assert q.wait_idle(10)
+        assert observations == [True, True, True]
+        assert not writes_busy()
+    finally:
+        proceed.set()
+        cleanup.set()
+        q.end_generation()
+        q.close()
+
+
+def test_startup_busy_ignores_cancelled_queue_and_survives_nested_write_failure():
+    from kilora.live_queue import write_activity, writes_busy
+
+    q = WriteQueue()
+    try:
+        q.begin_generation()
+        q.submit(lambda: "unused")
+        assert writes_busy()
+        q.close()
+        assert not writes_busy()
+        with write_activity():
+            with pytest.raises(ValueError), write_activity():
+                assert writes_busy()
+                raise ValueError("write failed")
+            assert writes_busy()
+        assert not writes_busy()
+    finally:
+        q.close()

@@ -239,7 +239,7 @@
       },
       "depth": {
         "name": "깊이",
-        "tooltip": "반복 횟수. -1은 모드가 권장하는 깊이를 씁니다."
+        "tooltip": "반복 횟수. -1은 모드가 권장하는 깊이를 씁니다(가져온 LoRA: 4)."
       }
     }
   },
@@ -257,7 +257,7 @@
       },
       "depth": {
         "name": "깊이",
-        "tooltip": "반복 횟수. -1은 모드가 권장하는 깊이를 씁니다."
+        "tooltip": "반복 횟수. -1은 모드가 권장하는 깊이를 씁니다(가져온 LoRA: 4)."
       },
       "iteration": {
         "name": "반복 방식",
@@ -285,7 +285,7 @@
       },
       "path_width": {
         "name": "경로 폭",
-        "tooltip": "경로 반복 전용. 걸음의 수: 첫 단계의 상위 전문가에서 시작하고, 각 걸음은 자신의 쿼리에서 이어집니다. 폭이 크면 첫 단계가 틀려도 올바른 전문가를 찾습니다. 0은 모드의 값을 사용합니다(기본 1: 걸음 하나)."
+        "tooltip": "경로 반복 전용. 걸음의 수: 첫 단계의 상위 전문가에서 시작하고, 각 걸음은 자신의 쿼리에서 이어집니다. 폭이 크면 첫 단계가 틀려도 올바른 전문가를 찾습니다. 0은 모드의 값을 사용합니다(가져온 LoRA: 걸음 3개, 다른 모드: 1)."
       },
       "path_select": {
         "name": "경로 선택",
@@ -488,6 +488,58 @@
         "name": "편집",
         "tooltip": "편집은 각 LoRA의 계층별 코어 행렬과 강도, 팩 항을 변경합니다. 원본 파일에는 쓰지 않습니다. off는 가져온 LoRA를 정확히 복원합니다. unchanged는 현재 선택을 유지합니다."
       },
+      "live_expert_mass": {
+        "name": "통과한 질량",
+        "tooltip": "라이브 쓰기는 기록된 경로에서 전문가의 경로 질량이 해당 레이어 질량의 이 비율보다 클 때만 그 전문가를 편집합니다. -1: 변경 없음. 기본값은 0.05입니다."
+      },
+      "live_expert_top": {
+        "name": "레이어당 통과한 전문가",
+        "tooltip": "한 번의 라이브 쓰기가 경로 질량 순으로 편집하는 레이어당 최대 전문가 수. 0: 변경 없음. 기본값은 4입니다."
+      },
+      "live_expert_history": {
+        "name": "경로 기록",
+        "tooltip": "공유 전문가를 찾기 위해 세션이 경로 질량을 보관하는 기록된 프롬프트의 수. 0: 변경 없음. 기본값은 16입니다."
+      },
+      "live_expert_copies": {
+        "name": "전문가당 복사본",
+        "tooltip": "라이브 쓰기가 추가하는 공유 전문가 하나의 최대 복사본 수. -1: 변경 없음. 기본값은 2입니다."
+      },
+      "write_measure": {
+        "name": "쓰기 측정",
+        "tooltip": "라이브 쓰기가 방향을 찾는 방식. forward: 깨끗한 순전파 한 번과 대상 전문가의 출력에 작은 노이즈를 넣은 순전파 묶음(기본값). candidates: 각 후보 이동을 짝지은 순전파로 측정합니다. unchanged는 현재 선택을 유지합니다."
+      },
+      "forward_draws": {
+        "name": "노이즈 추출 횟수",
+        "tooltip": "forward 추정의 노이즈 추출 횟수. 추출이 많을수록 방향이 안정적이지만 시간이 더 걸립니다. 0: 변경 없음. 기본값은 4입니다."
+      },
+      "forward_sigma": {
+        "name": "노이즈 크기",
+        "tooltip": "forward 추정의 노이즈 크기로, 각 전문가 출력 RMS에 대한 비율입니다. -1: 변경 없음. 기본값은 0.05입니다."
+      },
+      "forward_chunk": {
+        "name": "순전파당 추출 횟수",
+        "tooltip": "배치 순전파 한 번에 들어가는 노이즈 추출 횟수. 숫자가 작을수록 GPU 메모리를 적게 씁니다. 0: 변경 없음. 기본값은 4입니다."
+      },
+      "write_resolution": {
+        "name": "쓰기 해상도",
+        "tooltip": "쓰기 샘플의 긴 변(픽셀). 쓰기는 이미지의 축소 사본에서 학습합니다: 256~4096, 16 단위로 반올림. 작을수록 쓰기가 빨라집니다. 0: 렌더 해상도. -1: 변경 없음. 기본값 512. 이 설정 전에도 쓰기는 512 px로 실행되었습니다. 측정 크기(measure_size)를 사용했습니다. 이 설정은 그 제어에 이름을 붙인 것입니다."
+      },
+      "probe_rows": {
+        "name": "render probe rows",
+        "tooltip": "Collect write measurements during rendering. On by default. Image learning and writes without a complete render measurement use their own noise samples."
+      },
+      "probe_call": {
+        "name": "render probe call",
+        "tooltip": "Separate runs each probe after the image call. Larger batches can change image-row rounding even on the CPU, so separate is the only supported value. The image call keeps its original rows. Probe measurements do not update image records or step caches."
+      },
+      "probe_budget": {
+        "name": "probe row budget",
+        "tooltip": "Maximum perturbed rows per render, counting caption and empty-caption rows. The default 2 samples one caption for one antithetic pair per render. The write seed selects caption or empty caption with equal probability. Budgets of 4 or more retain both captions. Complete pairs are retained; fewer than two rows skips probes. Acceptance retains both captions for the prompt and collapse guard. Clean reference and acceptance rows are additional. Larger budgets allow more draws when the session is idle. Pairs run over consecutive eligible sampling steps, with two caption rows per probe call. A short schedule falls back to ordinary write samples."
+      },
+      "probe_draws": {
+        "name": "render probe draws",
+        "tooltip": "Maximum noise draws collected in a render. 0 uses the forward draws setting; -1 keeps the current value. Complete positive and negative pairs are kept. Fewer draws reduce the render work."
+      },
       "measure_samples": {
         "name": "samples per write measurement",
         "tooltip": "Samples per write measurement: the same noise and timesteps for every trial. More samples measure more steadily and cost more time. 1 = one sample at the middle timestep."
@@ -658,7 +710,7 @@
       },
       "depth": {
         "name": "깊이",
-        "tooltip": "반복 횟수. -1은 모드가 권장하는 깊이를 씁니다."
+        "tooltip": "반복 횟수. -1은 모드가 권장하는 깊이를 씁니다(가져온 LoRA: 4)."
       },
       "iteration": {
         "name": "반복 방식",
@@ -1286,7 +1338,7 @@
   },
   "KiLoRADepthMap": {
     "display_name": "KiLoRA 깊이 맵",
-    "description": "마스크(SAM2 등 분할 도구) 또는 이미지(그 밝기: ControlNet 전처리기의 깊이, 라인아트, 포즈 맵)로 이미지 영역마다 깊이를 정합니다. start까지는 모든 영역이 하나의 깊이로 실행되어 구도가 평소처럼 잡힙니다. 그 뒤에는 각 영역이 자기 깊이로 실행됩니다. KiLoRA Apply 또는 KiLoRA LoRA Loader에 연결하세요.",
+    "description": "마스크(SAM2 등 분할 도구) 또는 이미지(그 밝기: ControlNet 전처리기의 깊이, 라인아트, 포즈 맵)로 이미지 영역마다 깊이를 정합니다. start까지는 모든 영역이 하나의 깊이로 실행되어 구도가 평소처럼 잡힙니다. 그 뒤에는 각 영역이 자기 깊이로 실행됩니다. KiLoRA Apply 또는 KiLoRA LoRA Loader에 연결하세요. 마스크나 이미지가 없으면 source auto가 샘플링 중에 맵을 측정합니다. 세부와 LoRA가 이미지를 가장 많이 바꾸는 곳에 깊이를 더 주고, 평균 깊이는 같습니다.",
     "inputs": {
       "min_depth": {
         "name": "min_depth",
@@ -1316,6 +1368,10 @@
         "name": "base",
         "tooltip": "start 전 모든 영역의 깊이와 텍스트 토큰의 깊이. -1: 맵의 평균 깊이(반올림)."
       },
+      "source": {
+        "name": "source",
+        "tooltip": "맵의 출처. mask 또는 image: 연결된 입력(마스크 우선). auto: start 단계에서 이미지 세부, KiLoRA 변화, 경로 불일치로 측정합니다. 연결된 마스크나 이미지가 없으면 auto를 씁니다."
+      },
       "mask": {
         "name": "마스크",
         "tooltip": "마스크. 예를 들어 SAM2의 출력. 1은 max_depth가 됩니다. 이미지도 연결되어 있으면 마스크를 씁니다."
@@ -1323,6 +1379,26 @@
       "image": {
         "name": "image",
         "tooltip": "이미지. 그 밝기가 맵이 됩니다. 예를 들어 깊이, 라인아트, 포즈 전처리기의 출력."
+      },
+      "mean_depth": {
+        "name": "mean_depth",
+        "tooltip": "auto: 이미지 전체의 평균 깊이. -1은 KiLoRA Apply의 깊이를 쓰므로 비용은 그 균일한 깊이와 같습니다. 값이 낮을수록 빠릅니다."
+      },
+      "detail_weight": {
+        "name": "detail_weight",
+        "tooltip": "auto: 이미지 세부의 가중치(깨끗한 이미지 추정의 미세 구조)."
+      },
+      "change_weight": {
+        "name": "change_weight",
+        "tooltip": "auto: KiLoRA 변화의 가중치(LoRA가 이미지를 가장 많이 바꾸는 곳)."
+      },
+      "disagreement_weight": {
+        "name": "disagreement_weight",
+        "tooltip": "auto: 경로 불일치의 가중치(LoRA가 경쟁하는 곳). 0이면 끕니다."
+      },
+      "smooth": {
+        "name": "smooth",
+        "tooltip": "auto: 깊이를 정하기 전에 합쳐진 맵을 부드럽게 하는 가우시안 폭(토큰 단위). 그림 같은 이미지의 맵은 노이즈가 많으며 2면 영역이 됩니다. 0이면 끕니다."
       }
     },
     "outputs": {
@@ -1371,6 +1447,14 @@
       "compose": {
         "name": "compose",
         "tooltip": "separate: each layer runs as its own model call. single: all layers run in one model call per guidance branch, and each image area reads its own layer text. Select single on every layer. The crop input is not used with single."
+      },
+      "region_penalty": {
+        "name": "region penalty",
+        "tooltip": "compose single 사용 시: 초기 단계에서 서로 다른 레이어의 이미지 영역이 서로를 읽지 않게 하는 강도입니다. 0이면 꺼집니다. 첫 번째 레이어의 값이 사용되며, 모든 레이어가 같은 값을 설정해야 합니다."
+      },
+      "mount_scope": {
+        "name": "mount scope",
+        "tooltip": "compose single 사용 시: all은 레이어의 모드를 레이어의 이미지 영역과 그 레이어 자신의 텍스트에 적용합니다. cross_kv는 자신의 텍스트의 cross-attention 키와 값에만 적용하므로, 해당 가중치가 없는 LoRA는 효과가 없습니다. 모든 레이어가 같은 값을 설정해야 합니다."
       }
     },
     "outputs": {
@@ -1827,6 +1911,42 @@
       "folder": {
         "name": "폴더",
         "tooltip": "같은 이름의 선택적 .txt 캡션이 있는 이미지 폴더입니다. 폴더 또는 이미지 중 하나를 사용합니다."
+      },
+      "contrast_components": {
+        "name": "대비 성분",
+        "tooltip": "각 이미지의 평균 대비에서 최대 4개의 주방향을 공통 평균에 더합니다. 검증용 이미지를 제외한 뒤, 피팅에 사용하는 이미지 수에서 1을 뺀 값으로 제한됩니다. 기본값은 4이며, 0이면 평균만 사용한 기존 가중치를 저장합니다. 피팅에는 계속 설정된 랭크를 사용합니다. 마스크 없이 이미지에서 푸는 이 작업에만 적용됩니다."
+      },
+      "masks": {
+        "name": "마스크",
+        "tooltip": "이미지 순서대로 이미지마다 마스크 하나를 지정합니다. 마스크 영역만 학습합니다. 전체 이미지를 사용하려면 비워 두세요."
+      },
+      "mask_contrast": {
+        "name": "마스크 비교",
+        "tooltip": "마스크가 있으면 tokens는 마스크의 각 토큰을 비교하고 mean은 마스크 영역의 평균을 비교합니다. 마스크가 없으면 무시합니다."
+      },
+      "two_stage": {
+        "name": "두 단계",
+        "tooltip": "먼저 스타일을 구한 다음, 학생 모델에 해당 스타일을 적용한 상태에서 캐릭터를 구합니다. 마스크는 캐릭터를 선택하고 반전 마스크는 스타일을 선택합니다. 마스크가 없으면 두 단계 모두 전체 이미지를 사용합니다. 스타일은 creative, 캐릭터는 ip로 별도 파일에 저장합니다."
+      },
+      "mask_start": {
+        "name": "마스크 시작 위치",
+        "tooltip": "마스크 사용 시 전체 일정의 이 비율에서 정렬된 학생 궤적을 시작합니다. 기본값 0.4. 마스크가 없으면 무시합니다."
+      },
+      "mask_samples": {
+        "name": "마스크 샘플 위치",
+        "tooltip": "마스크 사용 시 전체 일정의 비율을 공백이나 쉼표로 구분합니다. 마스크 시작 위치 이상, 1.0 이하이며 예: 0.5 0.75 1.0. 비워 두면 기존 세 위치를 유지합니다. 마스크가 없으면 무시합니다."
+      },
+      "refit_rounds": {
+        "name": "재적합 횟수",
+        "tooltip": "이전 해를 활성화해 학생 궤적을 다시 샘플링한 뒤 닫힌 형식으로 추가 계산합니다. 0은 기존 계산을 유지하며 최대 8회입니다. 마지막 결과만 검사하고 저장합니다."
+      },
+      "guard_rule": {
+        "name": "검증 규칙",
+        "tooltip": "loss는 실시간 편집의 드리프트 한도 내에서 기준보다 낮은 최소 검증 손실을 선택합니다. drift는 같은 한도 내에서 손실이 기준의 1.25배 이하인 최대 배율을 선택합니다. 기본값 loss."
+      },
+      "trajectory_check": {
+        "name": "궤적 검사",
+        "tooltip": "풀이의 첫 시드, 크기, cfg로 관련 없는 프롬프트 두 개를 8단계 샘플링합니다. 잠재값의 공간 표준편차가 기준의 0.5배 미만이거나 상대 L2 거리가 1.0을 초과하면 해당 배율을 거부하고 허용된 더 작은 배율을 시도합니다. VAE 디코딩은 하지 않습니다. 기본값은 꺼짐입니다."
       }
     },
     "outputs": {

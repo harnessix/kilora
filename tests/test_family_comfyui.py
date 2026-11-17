@@ -397,6 +397,7 @@ def test_flux_joint_share_samples_one_representative_layer(tmp_path, monkeypatch
     from kilora.call_values import current_mount_share
     from kilora.comfyui import patching
 
+    monkeypatch.setenv("KILORA_DERIVED_CARRY", "0")
     model = _model("flux")
     gen = torch.Generator().manual_seed(79)
     paths = []
@@ -422,6 +423,7 @@ def test_flux_joint_share_samples_one_representative_layer(tmp_path, monkeypatch
     all_gates = []
     with (
         torch.no_grad(),
+        compute.dropout_key(0, 2.0),
         compute.recording_set_shares(lambda target, gates, sets: all_gates.append(gates[0])),
     ):
         for _ in range(8):

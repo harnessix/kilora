@@ -224,3 +224,27 @@ def test_node_needs_an_image_source():
 
     with pytest.raises(ValueError, match="either images or folder"):
         KiLoRALiveLearnFromImages().learn(SimpleNamespace(), None, "style")
+
+
+def test_image_learning_solves_terms_without_a_per_write_direction_estimate(monkeypatch):
+    from kilora import prediction_write, write_estimates
+
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("image learning has no per-write gradient estimate")
+
+    monkeypatch.setattr(write_estimates, "accumulate_write_estimate", unexpected)
+    solves = []
+    solve = prediction_write.solve_map
+
+    def capture(terms, priors, weights):
+        solves.append(len(terms))
+        return solve(terms, priors, weights)
+
+    monkeypatch.setattr(prediction_write, "solve_map", capture)
+    session, recorder = Session(), Recorder(gain=2.0)
+    for _ in range(2):
+        report = _learn(session, recorder)
+        assert not report.committed
+    assert len(solves) == 2 and min(solves) > 0
+    assert not hasattr(session, "_write_estimates")
+    assert session.commits == []

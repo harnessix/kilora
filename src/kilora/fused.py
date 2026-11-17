@@ -12,11 +12,11 @@ import math
 import os
 import threading
 import time
-import zlib
 
 import torch
 import torch.nn.functional as F
 
+from . import call_profile as _call_profile
 from . import compute, linear_jump
 
 log = logging.getLogger("kilora")
@@ -38,10 +38,11 @@ _TOO_BIG: set = set()
 _TOKEN_BLOCK = 32
 _COLUMN_BLOCK = 64
 _TRACE: list = []
+_DIAGNOSTICS = contextvars.ContextVar("kilora_fused_diagnostics", default=True)
 _NOTE_LOCK = threading.Lock()
 
 
-COUNTS: dict[str, int] = {"fused": 0, "eager": 0}
+COUNTS: dict[str, int] = {"fused": 0, "eager": 0, "import_fused": 0, "import_eager": 0}
 LAST_REASON: list[str] = [""]
 REASONS: dict[str, int] = {}
 _CALL_REASON: contextvars.ContextVar[str] = contextvars.ContextVar(
@@ -50,8 +51,10 @@ _CALL_REASON: contextvars.ContextVar[str] = contextvars.ContextVar(
 
 
 def _note(reason: str) -> None:
-    LAST_REASON[0] = reason
     _CALL_REASON.set(reason)
+    if not _DIAGNOSTICS.get():
+        return
+    LAST_REASON[0] = reason
     with _NOTE_LOCK:
         if reason in _NOTED:
             return
@@ -148,6 +151,10 @@ def enabled() -> bool:
     return os.environ.get("KILORA_FUSED", "1").strip() != "0"
 
 
+def gathered_rows() -> bool:
+    return os.environ.get("KILORA_DEPTH_ROWS", "1").strip() != "0"
+
+
 def _interpret() -> bool:
     return os.environ.get("TRITON_INTERPRET", "0") == "1"
 
@@ -169,11 +176,117 @@ def _tiled_import(s) -> bool:
 def fused_ok(y0: torch.Tensor, sets, depth=None, td=None) -> bool:
     _CALL_REASON.set("IR fallback" if compute._IR_FALLBACK.get() else "")
     ok = not compute._IR_FALLBACK.get() and _fused_ok(y0, sets, depth, td)
-    COUNTS["fused" if ok else "eager"] += 1
-    if not ok:
-        reason = _CALL_REASON.get() or "off"
-        REASONS[reason] = REASONS.get(reason, 0) + 1
+    if _DIAGNOSTICS.get():
+        COUNTS["fused" if ok else "eager"] += 1
+        if not ok:
+            reason = _CALL_REASON.get() or "off"
+            REASONS[reason] = REASONS.get(reason, 0) + 1
     return ok
+
+
+def import_split_reason(sets, depth, td=None) -> str | None:
+    for s in sets:
+        if s.down is None or not compute.depth_split_on(s):
+            continue
+        if s.form != "input" and compute.import_score(s) != "derived":
+            return "a depth split on a trained set"
+        if depth <= 1:
+            if td is not None:
+                return "a depth split with a per-token depth at depth 1 or less"
+            continue
+        if not compute._import_depth_chain(s):
+            return "a depth split without the import depth chain"
+    return None
+
+
+def refuse_import(reason: str) -> None:
+    if not _DIAGNOSTICS.get():
+        return
+    _note(reason)
+    COUNTS["eager"] += 1
+    REASONS[reason] = REASONS.get(reason, 0) + 1
+
+
+def count_import(fused: bool) -> None:
+    if not _DIAGNOSTICS.get():
+        return
+    COUNTS["import_fused" if fused else "import_eager"] += 1
+
+
+IMPORT_REASONS: dict[str, int] = {}
+
+
+def import_eager(reason: str) -> None:
+    if not _DIAGNOSTICS.get():
+        return
+    _note(reason)
+    IMPORT_REASONS[reason] = IMPORT_REASONS.get(reason, 0) + 1
+
+
+def import_skip_reason(s, depth, td=None, region=None) -> str | None:
+
+    if not compute._import_depth_chain(s):
+        return "depth skips without the import depth chain"
+    if td is None and compute._depth_parts(depth)[2]:
+        return "depth skips with a fractional depth"
+    if s.exact:
+        return "depth skips with the exact correction"
+    if s.jump_fits:
+        return "depth skips with linear jump fits"
+    if region is not None:
+        return "depth skips with a region"
+    return None
+
+
+def walks_reason(y0: torch.Tensor, s) -> str | None:
+    if compute.import_score(s) != "derived" or s.form != "input":
+        return "stacked walks of a set that is not a derived import"
+    if s.exact:
+        return "stacked walks with the exact correction"
+    if s.jump_fits:
+        return "stacked walks with linear jump fits"
+    if compute.learned_kind(s) != "none":
+        return "stacked walks with a learned gate"
+    if s.gate_head_limit is not None:
+        return "stacked walks with a gate head limit"
+    if _TRACE or compute._route_freeze.RECORDS or linear_jump._RECORDS:
+        return "stacked walks while steps are recorded"
+    if compute._READ_KEEP_DETAIL_OBSERVERS or compute._READ_KEEP_RAW_OBSERVERS:
+        return "stacked walks while read keeps are observed"
+    if y0.dim() < 2:
+        return "stacked walks without a token dimension"
+    return None
+
+
+def record_fused(keyed) -> bool:
+    lora = [s for s in keyed if s.down is not None]
+    if len(lora) <= 1:
+        return True
+    if compute._derived_state_sets(lora):
+        return True
+    _note("route freeze record of several imported sets: no fused chain, the eager loop records")
+    return False
+
+
+def count_folded(fused: bool, reason: str | None = None) -> None:
+    if not _DIAGNOSTICS.get():
+        return
+    name = "folded_fused" if fused else "folded_eager"
+    COUNTS[name] = COUNTS.get(name, 0) + 1
+    if reason is not None:
+        _note(reason)
+        REASONS[reason] = REASONS.get(reason, 0) + 1
+
+
+def count_walks(fused: bool, reason: str | None = None) -> None:
+    if not _DIAGNOSTICS.get():
+        return
+    COUNTS["walks_fused" if fused else "walks_eager"] = (
+        COUNTS.get("walks_fused" if fused else "walks_eager", 0) + 1
+    )
+    if reason is not None:
+        _note(reason)
+        REASONS[reason] = REASONS.get(reason, 0) + 1
 
 
 def _fused_ok(y0: torch.Tensor, sets, depth=None, td=None) -> bool:
@@ -297,9 +410,7 @@ def _i32(x: int) -> int:
 
 
 def hash_base(target: str, k: int) -> int:
-    seed, step = compute._DROPOUT_KEY[-1]
-    mix = compute._mix32
-    return mix(seed ^ mix(step ^ mix(zlib.crc32(target.encode()) ^ mix(k))))
+    return compute.dropout_base(target, k)
 
 
 if HAVE_TRITON:
@@ -803,6 +914,7 @@ if HAVE_TRITON:
 
     _UPDATE_DYNAMIC = ["T", "C", "R", "E", "gate_base", "drop_base", "frac", "c0_stride"]
     _UPDATE_DYNAMIC += ["g_bstride", "g_rstride", "p_bstride", "p_tstride", "SP", "step"]
+    _UPDATE_DYNAMIC += ["walk_rows"]
 
     @triton.jit(do_not_specialize=_UPDATE_DYNAMIC)
     def _update_kernel(
@@ -880,201 +992,227 @@ if HAVE_TRITON:
         CP: tl.constexpr,
         SP,
         EP: tl.constexpr,
+        walk_rows=1,
+        WALKS: tl.constexpr = False,
+        perm_ptr=None,
+        count_ptr=None,
+        GATHER: tl.constexpr = False,
+        owner_ptr=None,
+        DEDUP: tl.constexpr = False,
     ):
         b = tl.program_id(0)
         cb = tl.program_id(2)
         tb = tl.program_id(1)
-        t = tb * BT + tl.arange(0, BT)
-        tm = t < T
+        if GATHER:
+            j = tb * BT + tl.arange(0, BT)
+            tm = j < tl.load(count_ptr + b)
+            t = tl.load(perm_ptr + b * T + j, mask=tm, other=0)
+        else:
+            t = tb * BT + tl.arange(0, BT)
+            tm = t < T
         row = (b * T + t).to(tl.int64)
-        e = tl.arange(0, EP)
-        em_ok = e < E
-        c = cb * CP + tl.arange(0, CP)
-        cm = tm[:, None] & (c[None, :] < C)
-        if SCALE_PTR:
-            scale = tl.load(scale_ptr)
-        else:
-            scale = scale_val
-        if TOKEN:
-            lg = tl.load(lg_ptr + row[:, None] * EP + e[None, :], mask=tm[:, None], other=0.0)
-            zt = tl.where(em_ok[None, :], lg, float("-inf"))
-            if TOP1:
-                pick = tl.argmax(zt, axis=1)
-                w = (e[None, :] == pick[:, None]).to(tl.float32)
+        if DEDUP:
+            tm = tm & (tl.load(owner_ptr + row, mask=tm, other=-1) == row)
+        if tl.sum(tm.to(tl.int32), 0) > 0:
+            hrow = row
+            if WALKS:
+                hrow = row % walk_rows
+            e = tl.arange(0, EP)
+            em_ok = e < E
+            c = cb * CP + tl.arange(0, CP)
+            cm = tm[:, None] & (c[None, :] < C)
+            if SCALE_PTR:
+                scale = tl.load(scale_ptr)
             else:
-                w = _sparsemax_rows(zt, em_ok)
-            if cb == 0:
-                tl.store(
-                    p_ptr + b * p_bstride + t[:, None] * p_tstride + e[None, :], w, mask=tm[:, None]
-                )
-        else:
-            acc = tl.zeros([EP], tl.float32)
-            wsum = 0.0
-            for t0 in range(0, T, BT):
-                tt = t0 + tl.arange(0, BT)
-                mm = tt < T
-                rr = (b * T + tt).to(tl.int64)
-                lg = tl.load(lg_ptr + rr[:, None] * EP + e[None, :], mask=mm[:, None], other=0.0)
-                if HAS_REGION:
-                    rw = tl.load(reg_ptr + rr, mask=mm, other=0.0)
-                    acc += tl.sum(lg * rw[:, None], axis=0)
-                    wsum += tl.sum(rw, axis=0)
+                scale = scale_val
+            if TOKEN:
+                lg = tl.load(lg_ptr + row[:, None] * EP + e[None, :], mask=tm[:, None], other=0.0)
+                zt = tl.where(em_ok[None, :], lg, float("-inf"))
+                if TOP1:
+                    pick = tl.argmax(zt, axis=1)
+                    w = (e[None, :] == pick[:, None]).to(tl.float32)
                 else:
-                    acc += tl.sum(lg, axis=0)
-            if HAS_REGION:
-                mean = tl.div_rn(acc, tl.maximum(wsum, 1.1754943508222875e-38))
-            else:
-                mean = tl.div_rn(acc, T.to(tl.float32))
-            zv = tl.where(em_ok, mean, float("-inf"))
-            if TOP1:
-                p = (e == tl.argmax(zv, axis=0)).to(tl.float32)
-            else:
-                p = tl.sum(_sparsemax_rows(zv[None, :], em_ok), axis=0)
-            if tb == 0 and cb == 0:
-                tl.store(p_ptr + b * p_bstride + e, p)
-            w = tl.zeros([BT, EP], tl.float32) + p[None, :]
-        if HAS_ENTRY:
-            w = tl.load(
-                entry_ptr + row[:, None] * E + e[None, :],
-                mask=tm[:, None] & em_ok[None, :],
-                other=0.0,
-            )
-            denom = tl.maximum(tl.sum(w, axis=1), 1e-30)
-            normalized = w / denom[:, None]
-            if cb == 0:
-                if TOKEN:
+                    w = _sparsemax_rows(zt, em_ok)
+                if cb == 0:
                     tl.store(
                         p_ptr + b * p_bstride + t[:, None] * p_tstride + e[None, :],
-                        normalized,
+                        w,
                         mask=tm[:, None],
                     )
-                elif tb == 0:
-                    tl.store(
-                        p_ptr + b * p_bstride + e,
-                        tl.sum(tl.where((t == 0)[:, None], normalized, 0.0), axis=0),
+            else:
+                acc = tl.zeros([EP], tl.float32)
+                wsum = 0.0
+                for t0 in range(0, T, BT):
+                    tt = t0 + tl.arange(0, BT)
+                    mm = tt < T
+                    rr = (b * T + tt).to(tl.int64)
+                    lg = tl.load(
+                        lg_ptr + rr[:, None] * EP + e[None, :], mask=mm[:, None], other=0.0
                     )
-        segt = tl.load(segt_ptr + e[:, None] * SP + c[None, :], mask=c[None, :] < SP, other=0.0)
-        wcol = tl.dot(w, segt, input_precision="ieee")
-        c0 = tl.load(c0_ptr + row[:, None] * c0_stride + c[None, :], mask=cm, other=0.0)
-        c0 = c0.to(tl.float32)
-        coef = c0
-        hold = tl.zeros([BT, CP], tl.float32)
-        if HOLD0:
-            hold = c0 * scale
-        if HAS_Z:
-            hold = tl.load(zm_ptr + row[:, None] * C + c[None, :], mask=cm, other=0.0)
-            za = hold
-            if HAS_A:
-                za = hold * tl.load(a_ptr + row, mask=tm, other=0.0)[:, None]
-            if READ_G:
-                gm = tl.load(g_ptr + b * g_bstride + c[:, None] * g_rstride + c[None, :])
-                coef = c0 + tl.dot(za, gm, input_precision="ieee")
-        z = coef * wcol * scale
-        if ACCUM:
-            z = tl.load(zin_ptr + row[:, None] * C + c[None, :], mask=cm, other=0.0) + z
-        tl.store(zout_ptr + row[:, None] * C + c[None, :], z, mask=cm)
-        if HAS_DEPTH:
-            d = tl.load(depth_ptr + row, mask=tm, other=0.0)
-            old = tl.zeros([BT, CP], tl.float32)
-            if HAS_OLD:
-                old = tl.load(zin_ptr + row[:, None] * C + c[None, :], mask=cm, other=0.0)
-            kept = tl.where(d[:, None] >= step, z, old)
-            tl.store(kept_ptr + row[:, None] * C + c[None, :], kept, mask=cm)
-            if BLEND_DEPTH:
-                weight = tl.minimum(tl.maximum(d - (step - 1), 0.0), 1.0)
-                prior = tl.zeros([BT, CP], tl.float32)
-                if step > 1:
-                    prior = tl.load(blend_ptr + row[:, None] * C + c[None, :], mask=cm, other=0.0)
-                current = z
-                if BLEND_REGION:
-                    current = current * tl.load(reg_ptr + row, mask=tm, other=0.0)[:, None]
-                blended = prior + weight[:, None] * (current - prior)
-                blended = tl.where(
-                    weight[:, None] >= 1.0,
-                    current,
-                    tl.where(weight[:, None] <= 0.0, prior, blended),
+                    if HAS_REGION:
+                        rw = tl.load(reg_ptr + rr, mask=mm, other=0.0)
+                        acc += tl.sum(lg * rw[:, None], axis=0)
+                        wsum += tl.sum(rw, axis=0)
+                    else:
+                        acc += tl.sum(lg, axis=0)
+                if HAS_REGION:
+                    mean = tl.div_rn(acc, tl.maximum(wsum, 1.1754943508222875e-38))
+                else:
+                    mean = tl.div_rn(acc, T.to(tl.float32))
+                zv = tl.where(em_ok, mean, float("-inf"))
+                if TOP1:
+                    p = (e == tl.argmax(zv, axis=0)).to(tl.float32)
+                else:
+                    p = tl.sum(_sparsemax_rows(zv[None, :], em_ok), axis=0)
+                if tb == 0 and cb == 0:
+                    tl.store(p_ptr + b * p_bstride + e, p)
+                w = tl.zeros([BT, EP], tl.float32) + p[None, :]
+            if HAS_ENTRY:
+                w = tl.load(
+                    entry_ptr + row[:, None] * E + e[None, :],
+                    mask=tm[:, None] & em_ok[None, :],
+                    other=0.0,
                 )
-                tl.store(blend_ptr + row[:, None] * C + c[None, :], blended, mask=cm)
-        a_new = tl.full([BT], 1.0, tl.float32)
-        if SEPARABLE:
-            gram = tl.load(gram_ptr + c[:, None] * CP + c[None, :])
-            nz = tl.sqrt_rn(tl.maximum(tl.sum(tl.dot(z, gram, input_precision="ieee") * z, 1), 0.0))
-            y0n = tl.load(y0n_ptr + row, mask=tm, other=1.0)
-            r0 = tl.div_rn(nz, y0n)
-            r1 = tl.zeros([BT], tl.float32)
-            if HAS_ZP:
-                zp = tl.load(zp_ptr + row[:, None] * C + c[None, :], mask=cm, other=0.0)
-                npv = tl.sum(tl.dot(zp, gram, input_precision="ieee") * zp, 1)
-                r1 = tl.div_rn(tl.sqrt_rn(tl.maximum(npv, 0.0)), y0n)
-            tp0 = tl.load(tp0_ptr + c[:, None] * EP + e[None, :])
-            tp1 = tl.load(tp1_ptr + c[:, None] * EP + e[None, :])
-            pj0 = tl.dot(z, tp0, input_precision="ieee")
-            pj1 = tl.dot(z, tp1, input_precision="ieee")
-            sacc = tl.zeros([BT, EP], tl.float32)
-            for h in tl.static_range(8):
-                hid = (
-                    r0[:, None] * tl.load(tw1_ptr + (0 * 8 + h) * EP + e)[None, :]
-                    + r1[:, None] * tl.load(tw1_ptr + (1 * 8 + h) * EP + e)[None, :]
-                    + pj0 * tl.load(tw1_ptr + (2 * 8 + h) * EP + e)[None, :]
-                    + pj1 * tl.load(tw1_ptr + (3 * 8 + h) * EP + e)[None, :]
-                    + tl.load(tb1_ptr + h * EP + e)[None, :]
-                )
-                sacc += tl.maximum(hid, 0.0) * tl.load(tw2_ptr + h * EP + e)[None, :]
-            qa_e = tl.sigmoid(sacc + tl.load(tb2_ptr + e)[None, :])
-            qa = tl.sum(w * qa_e, axis=1)
-            u = _uniform(row.to(tl.uint32), gate_base.to(tl.uint32))
-            if EXPECT:
-                a_new = qa
-            else:
-                a_new = (u < qa).to(tl.float32)
-        if HAS_REGION:
-            a_new = a_new * tl.load(reg_ptr + row, mask=tm, other=0.0)
-        if WRITE_A:
-            tl.store(aout_ptr + row, a_new, mask=tm)
-        if DO_DROP or CARRY_END:
-            sig = tl.load(
-                sig_ptr + row[:, None] * E + e[None, :],
-                mask=tm[:, None] & em_ok[None, :],
-                other=1.0,
-            )
-            sig = tl.where(em_ok[None, :], sig + sig_delta, 1.0)
-            sigc = tl.dot(sig, segt, input_precision="ieee")
-            keep = _keep_rate(tl.div_rn(tl.abs(z), tl.maximum(sigc, 1e-30)), USE_LIBDEVICE)
-            if CARRY_END:
-                zn = keep * z
-            else:
-                if HAS_COLKEY:
-                    ck = tl.load(colkey_ptr + c, mask=c < C, other=0).to(tl.uint32)
-                    idx = _mix(row.to(tl.uint32))[:, None] ^ ck[None, :]
-                else:
-                    idx = (row[:, None] * C + c[None, :]).to(tl.uint32)
-                u = _uniform(idx, drop_base.to(tl.uint32))
-                if EXPECT:
-                    m = keep
-                else:
-                    m = (u < keep).to(tl.float32)
-                if DROPPED:
-                    zn = hold + (1.0 - m) * (z - hold)
-                else:
-                    zn = m * z
+                denom = tl.maximum(tl.sum(w, axis=1), 1e-30)
+                normalized = w / denom[:, None]
+                if cb == 0:
+                    if TOKEN:
+                        tl.store(
+                            p_ptr + b * p_bstride + t[:, None] * p_tstride + e[None, :],
+                            normalized,
+                            mask=tm[:, None],
+                        )
+                    elif tb == 0:
+                        tl.store(
+                            p_ptr + b * p_bstride + e,
+                            tl.sum(tl.where((t == 0)[:, None], normalized, 0.0), axis=0),
+                        )
+            segt = tl.load(segt_ptr + e[:, None] * SP + c[None, :], mask=c[None, :] < SP, other=0.0)
+            wcol = tl.dot(w, segt, input_precision="ieee")
+            c0 = tl.load(c0_ptr + row[:, None] * c0_stride + c[None, :], mask=cm, other=0.0)
+            c0 = c0.to(tl.float32)
+            coef = c0
+            hold = tl.zeros([BT, CP], tl.float32)
+            if HOLD0:
+                hold = c0 * scale
+            if HAS_Z:
+                hold = tl.load(zm_ptr + row[:, None] * C + c[None, :], mask=cm, other=0.0)
+                za = hold
+                if HAS_A:
+                    za = hold * tl.load(a_ptr + row, mask=tm, other=0.0)[:, None]
+                if READ_G:
+                    gm = tl.load(g_ptr + b * g_bstride + c[:, None] * g_rstride + c[None, :])
+                    coef = c0 + tl.dot(za, gm, input_precision="ieee")
+            z = coef * wcol * scale
+            if ACCUM:
+                z = tl.load(zin_ptr + row[:, None] * C + c[None, :], mask=cm, other=0.0) + z
+            tl.store(zout_ptr + row[:, None] * C + c[None, :], z, mask=cm)
             if HAS_DEPTH:
-                prior_hold = tl.zeros([BT, CP], tl.float32)
-                if HAS_Z:
-                    prior_hold = hold
-                zn = tl.where(d[:, None] >= step, zn, prior_hold)
-            tl.store(zm_ptr + row[:, None] * C + c[None, :], zn, mask=cm)
-        if WRITE_OUT:
-            zz = z
-            if HAS_ZL:
-                zl = tl.load(zl_ptr + row[:, None] * C + c[None, :], mask=cm, other=0.0)
-                zz = zl + frac * (z - zl)
-            if HAS_REGION or SEPARABLE:
-                zz = zz * a_new[:, None]
-            tl.store(
-                out_ptr + row[:, None] * C + c[None, :],
-                _cast(zz, out_ptr.dtype.element_ty),
-                mask=cm,
-            )
+                d = tl.load(depth_ptr + row, mask=tm, other=0.0)
+                old = tl.zeros([BT, CP], tl.float32)
+                if HAS_OLD:
+                    old = tl.load(zin_ptr + row[:, None] * C + c[None, :], mask=cm, other=0.0)
+                kept = tl.where(d[:, None] >= step, z, old)
+                tl.store(kept_ptr + row[:, None] * C + c[None, :], kept, mask=cm)
+                if BLEND_DEPTH:
+                    weight = tl.minimum(tl.maximum(d - (step - 1), 0.0), 1.0)
+                    prior = tl.zeros([BT, CP], tl.float32)
+                    if step > 1:
+                        prior = tl.load(
+                            blend_ptr + row[:, None] * C + c[None, :], mask=cm, other=0.0
+                        )
+                    current = z
+                    if BLEND_REGION:
+                        current = current * tl.load(reg_ptr + row, mask=tm, other=0.0)[:, None]
+                    blended = prior + weight[:, None] * (current - prior)
+                    blended = tl.where(
+                        weight[:, None] >= 1.0,
+                        current,
+                        tl.where(weight[:, None] <= 0.0, prior, blended),
+                    )
+                    tl.store(blend_ptr + row[:, None] * C + c[None, :], blended, mask=cm)
+            a_new = tl.full([BT], 1.0, tl.float32)
+            if SEPARABLE:
+                gram = tl.load(gram_ptr + c[:, None] * CP + c[None, :])
+                nz = tl.sqrt_rn(
+                    tl.maximum(tl.sum(tl.dot(z, gram, input_precision="ieee") * z, 1), 0.0)
+                )
+                y0n = tl.load(y0n_ptr + row, mask=tm, other=1.0)
+                r0 = tl.div_rn(nz, y0n)
+                r1 = tl.zeros([BT], tl.float32)
+                if HAS_ZP:
+                    zp = tl.load(zp_ptr + row[:, None] * C + c[None, :], mask=cm, other=0.0)
+                    npv = tl.sum(tl.dot(zp, gram, input_precision="ieee") * zp, 1)
+                    r1 = tl.div_rn(tl.sqrt_rn(tl.maximum(npv, 0.0)), y0n)
+                tp0 = tl.load(tp0_ptr + c[:, None] * EP + e[None, :])
+                tp1 = tl.load(tp1_ptr + c[:, None] * EP + e[None, :])
+                pj0 = tl.dot(z, tp0, input_precision="ieee")
+                pj1 = tl.dot(z, tp1, input_precision="ieee")
+                sacc = tl.zeros([BT, EP], tl.float32)
+                for h in tl.static_range(8):
+                    hid = (
+                        r0[:, None] * tl.load(tw1_ptr + (0 * 8 + h) * EP + e)[None, :]
+                        + r1[:, None] * tl.load(tw1_ptr + (1 * 8 + h) * EP + e)[None, :]
+                        + pj0 * tl.load(tw1_ptr + (2 * 8 + h) * EP + e)[None, :]
+                        + pj1 * tl.load(tw1_ptr + (3 * 8 + h) * EP + e)[None, :]
+                        + tl.load(tb1_ptr + h * EP + e)[None, :]
+                    )
+                    sacc += tl.maximum(hid, 0.0) * tl.load(tw2_ptr + h * EP + e)[None, :]
+                qa_e = tl.sigmoid(sacc + tl.load(tb2_ptr + e)[None, :])
+                qa = tl.sum(w * qa_e, axis=1)
+                u = _uniform(hrow.to(tl.uint32), gate_base.to(tl.uint32))
+                if EXPECT:
+                    a_new = qa
+                else:
+                    a_new = (u < qa).to(tl.float32)
+            if HAS_REGION:
+                a_new = a_new * tl.load(reg_ptr + row, mask=tm, other=0.0)
+            if WRITE_A:
+                tl.store(aout_ptr + row, a_new, mask=tm)
+            if DO_DROP or CARRY_END:
+                sig = tl.load(
+                    sig_ptr + row[:, None] * E + e[None, :],
+                    mask=tm[:, None] & em_ok[None, :],
+                    other=1.0,
+                )
+                sig = tl.where(em_ok[None, :], sig + sig_delta, 1.0)
+                sigc = tl.dot(sig, segt, input_precision="ieee")
+                keep = _keep_rate(tl.div_rn(tl.abs(z), tl.maximum(sigc, 1e-30)), USE_LIBDEVICE)
+                if CARRY_END:
+                    zn = keep * z
+                else:
+                    if HAS_COLKEY:
+                        ck = tl.load(colkey_ptr + c, mask=c < C, other=0).to(tl.uint32)
+                        idx = _mix(hrow.to(tl.uint32))[:, None] ^ ck[None, :]
+                    else:
+                        idx = (hrow[:, None] * C + c[None, :]).to(tl.uint32)
+                    u = _uniform(idx, drop_base.to(tl.uint32))
+                    if EXPECT:
+                        m = keep
+                    else:
+                        m = (u < keep).to(tl.float32)
+                    if DROPPED:
+                        zn = hold + (1.0 - m) * (z - hold)
+                    else:
+                        zn = m * z
+                if HAS_DEPTH:
+                    prior_hold = tl.zeros([BT, CP], tl.float32)
+                    if HAS_Z:
+                        prior_hold = hold
+                    zn = tl.where(d[:, None] >= step, zn, prior_hold)
+                tl.store(zm_ptr + row[:, None] * C + c[None, :], zn, mask=cm)
+            if WRITE_OUT:
+                zz = z
+                if HAS_ZL:
+                    zl = tl.load(zl_ptr + row[:, None] * C + c[None, :], mask=cm, other=0.0)
+                    zz = zl + frac * (z - zl)
+                if HAS_REGION or SEPARABLE:
+                    zz = zz * a_new[:, None]
+                tl.store(
+                    out_ptr + row[:, None] * C + c[None, :],
+                    _cast(zz, out_ptr.dtype.element_ty),
+                    mask=cm,
+                )
 
     @triton.jit(do_not_specialize=["N", "C", "step"])
     def _import_bound_kernel(
@@ -1097,15 +1235,33 @@ if HAVE_TRITON:
         CP: tl.constexpr,
         SPLIT: tl.constexpr = True,
         KEEP_ZERO: tl.constexpr = False,
+        rows_ptr=None,
+        metric_ptr=None,
+        GATHER: tl.constexpr = False,
+        PROJECT: tl.constexpr = False,
     ):
-        row = tl.program_id(0) * BT + tl.arange(0, BT)
+        e = tl.program_id(0) * BT + tl.arange(0, BT)
+        live = e < N
+        if GATHER:
+            row = tl.load(rows_ptr + e, mask=live, other=0)
+        else:
+            row = e
         col = tl.arange(0, CP)
-        ok = (row[:, None] < N) & (col[None, :] < C)
+        ok = live[:, None] & (col[None, :] < C)
         offsets = row[:, None] * C + col[None, :]
         z = tl.load(z_ptr + offsets, mask=ok, other=0.0)
-        projected = tl.load(projected_ptr + offsets, mask=ok, other=0.0)
+        if PROJECT:
+            i = tl.arange(0, CP)
+            metric = tl.load(
+                metric_ptr + i[:, None] * C + col[None, :],
+                mask=(i[:, None] < C) & (col[None, :] < C),
+                other=0.0,
+            )
+            projected = tl.dot(z, metric, input_precision="ieee")
+        else:
+            projected = tl.load(projected_ptr + offsets, mask=ok, other=0.0)
         if HAS_OLD:
-            limit = BUDGET * tl.load(ref_ptr + row, mask=row < N, other=0.0)
+            limit = BUDGET * tl.load(ref_ptr + row, mask=live, other=0.0)
         if HAS_OLD and SPLIT:
             old = tl.load(old_ptr + offsets, mask=ok, other=0.0)
             old_projected = tl.load(old_projected_ptr + offsets, mask=ok, other=0.0)
@@ -1117,7 +1273,7 @@ if HAVE_TRITON:
             orthogonal = part - coefficient[:, None] * old
             orthogonal_projected = part_projected - coefficient[:, None] * old_projected
             oo = tl.maximum(tl.sum(orthogonal * orthogonal_projected, 1), 0.0)
-            limit = BUDGET * tl.load(ref_ptr + row, mask=row < N, other=0.0)
+            limit = BUDGET * tl.load(ref_ptr + row, mask=live, other=0.0)
             radial = RADIAL * coefficient
             negative = radial < 0
             back = -1.0 / tl.where(negative, radial, -1.0)
@@ -1144,10 +1300,10 @@ if HAVE_TRITON:
             z *= ratio[:, None]
             projected *= ratio[:, None]
         else:
-            tl.store(ref_ptr + row, size, mask=row < N)
+            tl.store(ref_ptr + row, size, mask=live)
         tl.store(z_ptr + offsets, z, mask=ok)
         if HAS_DEPTH:
-            d = tl.load(depth_ptr + row, mask=row < N, other=0.0)
+            d = tl.load(depth_ptr + row, mask=live, other=0.0)
             if HAS_OLD:
                 old_projected = tl.load(old_projected_ptr + offsets, mask=ok, other=0.0)
                 projected = tl.where(d[:, None] >= step, projected, old_projected)
@@ -1155,7 +1311,7 @@ if HAVE_TRITON:
                 projected = tl.where(d[:, None] >= step, projected, 0.0)
         tl.store(next_projected_ptr + offsets, projected, mask=ok)
 
-    @triton.jit(do_not_specialize=["N", "C", "R", "E", "step", "drop_base"])
+    @triton.jit(do_not_specialize=["N", "C", "R", "E", "step", "drop_base", "walk_rows"])
     def _import_carry_kernel(
         z_ptr,
         old_ptr,
@@ -1188,14 +1344,34 @@ if HAVE_TRITON:
         USE_LIBDEVICE: tl.constexpr,
         DELTA: tl.constexpr,
         BLOCK: tl.constexpr,
+        walk_rows=1,
+        WALKS: tl.constexpr = False,
+        rows_ptr=None,
+        entry_ptr=None,
+        coef_ptr=None,
+        GATHER: tl.constexpr = False,
+        WRITE_COEF: tl.constexpr = False,
     ):
         i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
         ok = i < N * C
-        row, col = i // C, i % C
+        e, col = i // C, i % C
+        if GATHER:
+            row = tl.load(rows_ptr + e, mask=ok, other=0)
+            i = row * C + col
+        else:
+            row = e
+        hrow = row
+        hi = i
+        if WALKS:
+            hrow = row % walk_rows
+            hi = hrow * C + col
         z = tl.load(z_ptr + i, mask=ok, other=0.0)
         if HAS_RATIO:
             z *= tl.load(ratio_ptr + row, mask=ok, other=1.0)
         tl.store(z_ptr + i, z, mask=ok)
+        if WRITE_COEF:
+            entry = tl.load(entry_ptr + e, mask=ok, other=-1)
+            tl.store(coef_ptr + entry * C + col, z, mask=ok & (entry >= 0))
         active = tl.full((BLOCK,), True, tl.int1)
         if HAS_DEPTH:
             d = tl.load(depth_ptr + row, mask=ok, other=0.0)
@@ -1220,9 +1396,9 @@ if HAVE_TRITON:
             else:
                 if HAS_COLKEY:
                     ck = tl.load(colkey_ptr + col, mask=ok, other=0).to(tl.uint32)
-                    idx = _mix(row.to(tl.uint32)) ^ ck
+                    idx = _mix(hrow.to(tl.uint32)) ^ ck
                 else:
-                    idx = i.to(tl.uint32)
+                    idx = hi.to(tl.uint32)
                 m = (_uniform(idx, drop_base.to(tl.uint32)) < keep).to(tl.float32)
             if FORCED_KEEP:
                 m = tl.load(forced_ptr + i, mask=ok, other=1.0)
@@ -1238,7 +1414,7 @@ if HAVE_TRITON:
             prior = hold if HAS_OLD else tl.full((BLOCK,), 0.0, tl.float32)
             tl.store(hold_ptr + i, tl.where(active, carried, prior), mask=ok)
 
-    @triton.jit(do_not_specialize=["T", "C", "OUT", "y_stride", "base"])
+    @triton.jit(do_not_specialize=["T", "C", "OUT", "y_stride", "base", "walk_rows"])
     def _adaptive_token_kernel(
         z_ptr,
         before_ptr,
@@ -1274,6 +1450,8 @@ if HAVE_TRITON:
         FOLDED: tl.constexpr = False,
         FOLD_COUNT: tl.constexpr = 1,
         PATH_FOLD: tl.constexpr = False,
+        walk_rows=1,
+        WALKS: tl.constexpr = False,
     ):
         b = tl.program_id(0)
         t = tl.program_id(1) * BT + tl.arange(0, BT)
@@ -1335,7 +1513,10 @@ if HAVE_TRITON:
         q = _keep_rate(tl.div_rn(step, kappa * reference + 1e-6), USE_LIBDEVICE)
         if FIRST_STEP and not BASE_REFERENCE:
             q = tl.full([BT], 1.0, tl.float32)
-        a = q if EXPECT else (_uniform(row.to(tl.uint32), base.to(tl.uint32)) < q).to(tl.float32)
+        hrow = row
+        if WALKS:
+            hrow = row % walk_rows
+        a = q if EXPECT else (_uniform(hrow.to(tl.uint32), base.to(tl.uint32)) < q).to(tl.float32)
         tl.store(qa_ptr + row, q * reg, mask=t < T)
         if RECORD_QA:
             tl.store(raw_qa_ptr + row, q, mask=t < T)
@@ -1347,7 +1528,7 @@ if HAVE_TRITON:
                 mask=mask,
             )
 
-    @triton.jit(do_not_specialize=["T", "C", "OUT", "y_stride", "base"])
+    @triton.jit(do_not_specialize=["T", "C", "OUT", "y_stride", "base", "walk_rows"])
     def _adaptive_channel_kernel(
         z_ptr,
         before_ptr,
@@ -1381,6 +1562,8 @@ if HAVE_TRITON:
         FOLDED: tl.constexpr = False,
         FOLD_COUNT: tl.constexpr = 1,
         PATH_FOLD: tl.constexpr = False,
+        walk_rows=1,
+        WALKS: tl.constexpr = False,
     ):
         b = tl.program_id(0)
         o = tl.program_id(1) * BO + tl.arange(0, BO)
@@ -1447,7 +1630,12 @@ if HAVE_TRITON:
             q *= tl.minimum(tl.maximum(0.5 + 0.5 * cos, 0.0), 1.0)
         if FIRST_STEP and not BASE_REFERENCE:
             q = tl.full([BO], 1.0, tl.float32)
-        u = _uniform((T * tl.num_programs(0) + b * OUT + o).to(tl.uint32), base.to(tl.uint32))
+        if WALKS:
+            u = _uniform(
+                (T * walk_rows + (b % walk_rows) * OUT + o).to(tl.uint32), base.to(tl.uint32)
+            )
+        else:
+            u = _uniform((T * tl.num_programs(0) + b * OUT + o).to(tl.uint32), base.to(tl.uint32))
         bg = q if EXPECT else (u < q).to(tl.float32)
         tl.store(qb_ptr + b * OUT + o, q, mask=o < OUT)
         tl.store(b_ptr + b * OUT + o, bg, mask=o < OUT)
@@ -1463,6 +1651,136 @@ if HAVE_TRITON:
                 tl.store(
                     out_ptr + row[:, None] * OUT + o[None, :], y.to(tl.float32) + prod, mask=mask
                 )
+
+    @triton.jit(do_not_specialize=["OUT", "TOTAL", "COMPUTED"])
+    def _depth_rows_output_kernel(
+        y0_ptr,
+        delta_ptr,
+        gate_ptr,
+        rows_ptr,
+        groups_ptr,
+        weight_ptr,
+        out_ptr,
+        OUT,
+        TOTAL,
+        COMPUTED,
+        HAS_GATE: tl.constexpr,
+        INTERPRET: tl.constexpr,
+        BLOCK: tl.constexpr,
+    ):
+        i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+        mask = i < TOTAL
+        e = i // OUT
+        col = i % OUT
+        row = tl.load(rows_ptr + e, mask=mask, other=0)
+        code = tl.load(weight_ptr + e, mask=mask, other=-2.0)
+        dtype = out_ptr.dtype.element_ty
+        y = tl.load(y0_ptr + row * OUT + col, mask=mask, other=0).to(tl.float32)
+        has_delta = mask & (e < COMPUTED)
+        x = tl.load(delta_ptr + e * OUT + col, mask=has_delta, other=0).to(tl.float32)
+        if HAS_GATE:
+            group = tl.load(groups_ptr + e, mask=has_delta, other=0)
+            g = tl.load(gate_ptr + group * OUT + col, mask=has_delta, other=0).to(tl.float32)
+            g = _output_cast(g, dtype, INTERPRET).to(tl.float32)
+            product = _output_cast(x * g, dtype, INTERPRET).to(tl.float32)
+            high = _output_cast(y + product, dtype, INTERPRET).to(tl.float32)
+        else:
+            high = _output_cast(y + x, dtype, INTERPRET).to(tl.float32)
+        from_y0 = code >= 10.0
+        w = tl.where(from_y0, code - 10.0, code)
+        blending = mask & (w > 0.0) & (w < 1.0)
+        stored = tl.load(out_ptr + row * OUT + col, mask=blending & (code < 10.0), other=0)
+        low = tl.where(from_y0, y, stored.to(tl.float32))
+        wd = _output_cast(w, dtype, INTERPRET).to(tl.float32)
+        diff = _output_cast(high - low, dtype, INTERPRET).to(tl.float32)
+        step = _output_cast(wd * diff, dtype, INTERPRET).to(tl.float32)
+        mid = low + step
+        value = tl.where(code == -2.0, y, tl.where(w >= 1.0, high, mid))
+        value = tl.where(code == -1.0, high, value)
+        tl.store(out_ptr + row * OUT + col, _output_cast(value, dtype, INTERPRET), mask=mask)
+
+    @triton.jit(do_not_specialize=["N", "C", "OUT"])
+    def _depth_entries_output_kernel(
+        y0_ptr,
+        coef_ptr,
+        token_ptr,
+        up_ptr,
+        gate_ptr,
+        high_ptr,
+        low_ptr,
+        high_group_ptr,
+        low_group_ptr,
+        code_ptr,
+        out_ptr,
+        N,
+        C,
+        OUT,
+        HAS_GATE: tl.constexpr,
+        INTERPRET: tl.constexpr,
+        BT: tl.constexpr,
+        CP: tl.constexpr,
+        BO: tl.constexpr,
+    ):
+        r = tl.program_id(0) * BT + tl.arange(0, BT)
+        o = tl.program_id(1) * BO + tl.arange(0, BO)
+        c = tl.arange(0, CP)
+        rm = r < N
+        om = o < OUT
+        cm = c < C
+        mask = rm[:, None] & om[None, :]
+        dtype = out_ptr.dtype.element_ty
+        code = tl.load(code_ptr + r, mask=rm, other=-2.0)
+        hi = tl.load(high_ptr + r, mask=rm, other=-1)
+        lo = tl.load(low_ptr + r, mask=rm, other=-1)
+        hm = rm & (hi >= 0)
+        lm = rm & (lo >= 0)
+        up = tl.load(
+            up_ptr + c[:, None] * OUT + o[None, :], mask=cm[:, None] & om[None, :], other=0.0
+        ).to(tl.float32)
+        zh = tl.load(
+            coef_ptr + hi[:, None] * C + c[None, :], mask=hm[:, None] & cm[None, :], other=0.0
+        )
+        zh = zh * tl.load(token_ptr + hi, mask=hm, other=0.0)[:, None]
+        zh = _output_cast(zh, dtype, INTERPRET).to(tl.float32)
+        x = _output_cast(tl.dot(zh, up, input_precision="ieee"), dtype, INTERPRET).to(tl.float32)
+        zl = tl.load(
+            coef_ptr + lo[:, None] * C + c[None, :], mask=lm[:, None] & cm[None, :], other=0.0
+        )
+        zl = zl * tl.load(token_ptr + lo, mask=lm, other=0.0)[:, None]
+        zl = _output_cast(zl, dtype, INTERPRET).to(tl.float32)
+        xl = _output_cast(tl.dot(zl, up, input_precision="ieee"), dtype, INTERPRET).to(tl.float32)
+        y = tl.load(y0_ptr + r[:, None] * OUT + o[None, :], mask=mask, other=0).to(tl.float32)
+        if HAS_GATE:
+            gh = tl.load(high_group_ptr + r, mask=hm, other=0)
+            gl = tl.load(low_group_ptr + r, mask=lm, other=0)
+            g = tl.load(
+                gate_ptr + gh[:, None] * OUT + o[None, :], mask=hm[:, None] & om[None, :], other=0
+            ).to(tl.float32)
+            g = _output_cast(g, dtype, INTERPRET).to(tl.float32)
+            product = _output_cast(x * g, dtype, INTERPRET).to(tl.float32)
+            high = _output_cast(y + product, dtype, INTERPRET).to(tl.float32)
+            g = tl.load(
+                gate_ptr + gl[:, None] * OUT + o[None, :], mask=lm[:, None] & om[None, :], other=0
+            ).to(tl.float32)
+            g = _output_cast(g, dtype, INTERPRET).to(tl.float32)
+            product = _output_cast(xl * g, dtype, INTERPRET).to(tl.float32)
+            stored = _output_cast(y + product, dtype, INTERPRET).to(tl.float32)
+        else:
+            high = _output_cast(y + x, dtype, INTERPRET).to(tl.float32)
+            stored = _output_cast(y + xl, dtype, INTERPRET).to(tl.float32)
+        from_y0 = (code >= 10.0)[:, None]
+        w = tl.where(code >= 10.0, code - 10.0, code)[:, None]
+        low = tl.where(from_y0, y, stored)
+        wd = _output_cast(w, dtype, INTERPRET).to(tl.float32)
+        diff = _output_cast(high - low, dtype, INTERPRET).to(tl.float32)
+        step = _output_cast(wd * diff, dtype, INTERPRET).to(tl.float32)
+        mid = low + step
+        value = tl.where((code == -2.0)[:, None], y, tl.where(w >= 1.0, high, mid))
+        tl.store(
+            out_ptr + r[:, None] * OUT + o[None, :],
+            _output_cast(value, dtype, INTERPRET),
+            mask=mask,
+        )
 
     @triton.jit(do_not_specialize=["OUT", "TOTAL", "STEP"])
     def _depth_blend_kernel(
@@ -1614,6 +1932,9 @@ def uniforms(n: int, target: str, k: int, device, start: int = 0) -> torch.Tenso
     return out
 
 
+uniforms.same_as_dropout = True
+
+
 def _pad(t: torch.Tensor, shape) -> torch.Tensor:
     out = torch.zeros(shape, dtype=torch.float32, device=t.device)
     out[tuple(slice(0, n) for n in t.shape)] = t.float()
@@ -1721,7 +2042,9 @@ def _prepared(s: compute.LayerSet, dt: torch.dtype) -> _Prepared:
             p.state_seg = _pad(p.seg, (p.state_kp, p.EP))
             p.state_tau = torch.as_tensor(s.tau, dtype=torch.float32, device=dev).reshape(())
             p.state_scale = torch.as_tensor(s.scale, dtype=torch.float32, device=dev).reshape(())
-        if s.form == "state":
+        if not (p.separable or compute.uses_adaptive(s)):
+            p.dr_t = torch.empty(0, device=dev)
+        elif s.form == "state":
             p.dr_t = _pad(s.down.float().t(), (width, p.CP))
         else:
             down_t = torch.zeros(width, cols, device=dev)
@@ -2053,9 +2376,19 @@ def _run_derived_state(y0, lora, depth, target, regions, x, positions, shared=Fa
     for k in range(1, steps + 1):
         z = None if k == 1 else torch.cat(carried, -1).reshape(n, -1)
         reads, logits = [], []
+        rounded_state = None
+        if dt != torch.float32 and any(s.form == "state" for s in lora):
+            rounded_state = y0
+            for value, up in zip(carried, ups, strict=True):
+                if value is not None:
+                    rounded_state = rounded_state + value.to(dt) @ up
         for i, (s, r) in enumerate(zip(lora, regs, strict=True)):
             read = coefs[i]
-            if z is not None and (s.form == "state" or chains[i]) and p.read_maps[i] is not None:
+            if rounded_state is not None and s.form == "state":
+                read = compute._state_read(s, rounded_state, dt).float()
+                if r is not None:
+                    read = read * r.float()
+            elif z is not None and (s.form == "state" or chains[i]) and p.read_maps[i] is not None:
                 added = (z.to(dt).float() if s.form == "state" else z) @ p.read_maps[i]
                 added = added.reshape(*lead, p.cols[i])
                 if s.expert_mask is not None:
@@ -2065,7 +2398,9 @@ def _run_derived_state(y0, lora, depth, target, regions, x, positions, shared=Fa
                 read = read + added
             reads.append(read)
             score = fixed_logits[i]
-            if s.form == "state":
+            if s.form == "state" and rounded_state is not None:
+                score = compute.derived_logits(s, rounded_state)
+            elif s.form == "state":
                 score = _state_logits(
                     score_bases[i],
                     z,
@@ -2082,6 +2417,8 @@ def _run_derived_state(y0, lora, depth, target, regions, x, positions, shared=Fa
                 score = score + 1.0 / (len(lora) * p.experts[i])
             logits.append(score.masked_fill(keys[i][1] == 0, -1e9))
         gates = compute._gates_from_logits(logits, lora, joint, 0.0, regs)
+        if compute._route_freeze.RECORDS:
+            compute._note_routes(target, gates, lora)
         reads_all = torch.cat(reads, -1).reshape(n, -1).contiguous()
         gates_all = torch.cat(gates, -1).reshape(n, -1).contiguous()
         survival = (
@@ -2201,6 +2538,7 @@ def _run_derived_state(y0, lora, depth, target, regions, x, positions, shared=Fa
                 m = compute._read_dropout_for_set(
                     value, coefs[i], s.per_expert, names[i], k, columns[i], s.key
                 )
+                compute._route_freeze.record_input_keep(target, k, i, m)
                 if holds[i] is None:
                     carried[i] = m * value
                 else:
@@ -2312,12 +2650,35 @@ def derived_batched_step(s, c0, logits, region, previous, scale=1.0, *, entry=No
         CP=cp,
         SP=p.CP,
         EP=p.EP,
+        perm_ptr=dummy,
+        count_ptr=dummy,
     )
     gates = weights[..., :experts].expand(batch, tokens, experts).reshape(*lead, experts)
     return gates, result.reshape(*lead, c)
 
 
-def run_fused(
+def _split_walk_note(note: dict, walk_stats) -> None:
+    def row(value, n):
+        if isinstance(value, tuple):
+            return tuple(v[n] for v in value)
+        return value[n]
+
+    for n, st in enumerate(walk_stats):
+        for key, value in note.items():
+            if key == "record_macro":
+                continue
+            st[key] = [row(v, n) for v in value] if isinstance(value, list) else value[n]
+
+
+def run_fused(*args, **kwargs):
+    if _call_profile.active():
+        walks = kwargs.get("walks")
+        _call_profile.note_walks(0 if walks is None else int(walks.shape[0]))
+        return _call_profile.run_chain(_run_fused, *args, **kwargs)
+    return _run_fused(*args, **kwargs)
+
+
+def _run_fused(
     y0,
     sets,
     depth,
@@ -2332,7 +2693,11 @@ def run_fused(
     entry=None,
     path_stats=None,
     positions=None,
+    walks=None,
+    walk_stats=None,
+    skips=None,
 ):
+
     if depth <= 0 and compute._derived_state_sets(sets):
         return y0
     if compute._derived_state_sets(sets) and len([s for s in sets if s.down is not None]) > 1:
@@ -2356,6 +2721,21 @@ def run_fused(
     lora = [s for s in sets if s.down is not None and s.form in ("state", "input")]
     s = lora[0]
     region = (regions or [None])[0]
+    width = 0 if walks is None else int(walks.shape[0])
+    if width:
+        x_one = x
+        lead_one = tuple(y0.shape[:-1])
+        rows_one = math.prod(lead_one)
+        y0 = y0.expand(width, *y0.shape).contiguous()
+        if region is not None:
+            region = region.expand(width, *region.shape).contiguous()
+        entry = walks
+        path_stats = {
+            key: value for key, value in (path_stats or {}).items() if key.startswith("forced_")
+        } or None
+        walk_note = {}
+        if walk_stats and any(st.get("record_macro") for st in walk_stats):
+            walk_note["record_macro"] = True
     state = s.form == "state"
     inp = True
     position = positions[0] if state and positions is not None else 0
@@ -2388,6 +2768,9 @@ def run_fused(
             if state:
                 state_base = F.linear(y2, p.state_joint)
                 c0 = F.linear(y2, p.down_dt)
+            elif width:
+                c0 = F.linear(value.to(dt).reshape(rows_one, value.shape[-1]), p.down_dt)
+                c0 = c0.repeat(width, 1)
             else:
                 c0 = F.linear(value.to(dt).reshape(N, value.shape[-1]), p.down_dt)
             state_c0 = c0 if state else None
@@ -2435,10 +2818,18 @@ def run_fused(
         if jump:
             steps, low = 1, 1
         first_z = None
+        rows_out = None
         if td is not None:
             steps, low, frac = td.steps, td.steps, 0.0
             depth_rows = td.d.contiguous()
             out = y0
+            if (
+                inp
+                and not s.exact
+                and not width
+                and not (path_stats and path_stats.get("record_macro"))
+            ):
+                rows_out = td.rows()
         fold = (
             not state
             and by_read
@@ -2471,7 +2862,10 @@ def run_fused(
                 start = None
             carry_out = True
         sig0 = c0
-        if steps > 1 or _drop_last or carry_out:
+        if (steps > 1 or _drop_last or carry_out) and width:
+            one = c0[:rows_one].float().reshape(rows_one, p.E, p.R)
+            sig0 = one.pow(2).mean(-1).sqrt().repeat(width, 1)
+        elif steps > 1 or _drop_last or carry_out:
             sig0 = c0.float().reshape(N, p.E, p.R).pow(2).mean(-1).sqrt()
         dropped = s.carry == "dropped"
         accum_set = s.aggregation != "replace" and not (inp and s.iteration == "path")
@@ -2522,7 +2916,19 @@ def run_fused(
             and (not fold or not compute.base_reference())
             and not (path_stats and path_stats.get("forced_gates"))
         )
-        tgate = None if adaptive else _torch_gate(s, p, start, z_start, region_t, position)
+        tgate = (
+            None
+            if adaptive
+            else _torch_gate(
+                s,
+                p,
+                start,
+                z_start,
+                region_t,
+                position,
+                _walk_draws(width, rows_one) if width else None,
+            )
+        )
         hist = compute.gate_history(start, 0, z_start, region_t) if adaptive else None
         gate_base_reference = compute.base_reference()
         first_norm = torch.empty(N, dtype=f32, device=dev) if adaptive else None
@@ -2572,7 +2978,13 @@ def run_fused(
         za_out = None
         inp_gate = None
         y_low = None
-        if by_derived and not state:
+        if by_derived and not state and width:
+            lg[:, :E] = (
+                compute.pooled_derived_logits(s, x_one.reshape(*lead_one, x.shape[-1]), target)
+                .reshape(rows_one, E)
+                .repeat(width, 1)
+            )
+        elif by_derived and not state:
             lg[:, :E] = compute.pooled_derived_logits(
                 s, x.reshape(*lead, x.shape[-1]), target
             ).reshape(N, E)
@@ -2604,11 +3016,67 @@ def run_fused(
         )
         coefficient_blend = td is not None and tgate is None and not s.exact
         if coefficient_blend:
+            rows_out = None
+        gather = None
+        if (
+            rows_out is not None
+            and gathered_rows()
+            and chain
+            and not s.exact
+            and compute.learned_kind(s) == "none"
+            and entry is None
+            and path_stats is None
+            and not _TRACE
+            and not _drop_last
+            and not compute._route_freeze.RECORDS
+            and not linear_jump._RECORDS
+        ):
+            gather = td.gather(T)
+            rows_out = None
+            blank = torch.zeros if gather.zeros else torch.empty
+            if gather.zeros:
+                gates_w.zero_()
+                if z is None and zm is not None:
+                    zm.index_fill_(0, gather.zero_rows, 0.0)
+            z_state = z.clone() if z is not None else blank((N, C), dtype=f32, device=dev)
+            z_step = blank((N, C), dtype=f32, device=dev)
+            projected_state = torch.empty((N, C), dtype=f32, device=dev)
+            coefficients = torch.empty((max(gather.total, 1), C), dtype=f32, device=dev)
+            metric_f32 = chain_metric.float().contiguous()
+            token_parts, channel_parts = [], []
+            gated_output = False
+            if z is not None:
+                z = z_state
+        if rows_out is not None:
+            out_rows = torch.empty((N, OUT), dtype=dt, device=dev)
+        if coefficient_blend:
             z_blend = torch.empty((N, C), dtype=f32, device=dev)
         exact_weights = None
         exact_extra = None
         exact_low = None
+        walk_logits = None
+        if width and walk_stats is not None:
+            walk_logits = compute.derived_logits(s, x_one)
+            walk_logits = walk_logits.expand(width, *walk_logits.shape)
+        skip_table = None
+        if skips is not None:
+            refused = not chain or state or frac or jump or s.exact
+            if refused or region is not None:
+                raise ValueError(
+                    "depth skips run on the fused import chain only; "
+                    "check fused.import_skip_reason first"
+                )
+            from .segments import skip_mask
+
+            skip_table = skips
+            skip_x = x.expand(width, *x.shape) if width else x
+        skip_prev = None
+        mark = _call_profile.tick if _call_profile.active() else None
+        marked = 0
         for k in [steps] if fold else range(1, steps + 1):
+            if mark is not None:
+                mark("blend" if marked else "prep", marked)
+                marked = k
             step_read = c0
             if state:
                 state_z = zm if k > 1 or start is not None else None
@@ -2683,7 +3151,7 @@ def run_fused(
                 lg[:, :E] = entry.expand(*lead, E).reshape(N, E) * 20.0
             elif entry is not None and k == 2:
                 lg[:, :E] = base_logits[:, :E]
-            if by_derived and not state and k > 1 and compute.derived_mode() == "full":
+            if by_derived and not state and k > 1 and compute.derived_mode(s) == "full":
                 lg[:, :E] = base_logits[:, :E] * compute.derived_lift_after()
             if transition is not None and prev is not None:
                 prior = gates_w[..., :E].expand(B, T, E).reshape(N, E).float() @ transition
@@ -2691,7 +3159,7 @@ def run_fused(
                     base_logits[:, :E]
                     * (
                         compute.derived_lift_after()
-                        if by_derived and compute.derived_mode() == "full"
+                        if by_derived and compute.derived_mode(s) == "full"
                         else 1.0
                     )
                     + gamma * (prior + 1e-6).log()
@@ -2744,6 +3212,8 @@ def run_fused(
                 lg[:, :E] = compute._mask_derived_logits(s, lg[:, :E].reshape(*lead, E)).reshape(
                     N, E
                 )
+            if mark is not None:
+                mark("route", k)
             last = k == steps
             do_drop = not last or _drop_last
             carry_end = last and carry_out and not frac and not _drop_last and td is None
@@ -2761,8 +3231,12 @@ def run_fused(
                 zl = snap[2] if low > 0 else None
                 if low == 0:
                     zl = torch.zeros((N, C), dtype=f32, device=dev)
-            z_new = torch.empty((N, C), dtype=f32, device=dev)
-            z_kept = torch.empty_like(z_new) if td is not None else None
+            if gather is not None:
+                g_rows, g_entry, g_counts, g_widest, g_active = gather.step(k)
+                z_new, z_kept = z_step, z_state
+            else:
+                z_new = torch.empty((N, C), dtype=f32, device=dev)
+                z_kept = torch.empty_like(z_new) if td is not None else None
             a_new = (
                 torch.empty(N, dtype=f32, device=dev)
                 if (sep or reg is not None) and tgate is None and not inp
@@ -2772,6 +3246,18 @@ def run_fused(
                 za_out = torch.empty((N, C), dtype=odt, device=dev)
             update_cp = min(p.CP, _COLUMN_BLOCK) if by_read else p.CP
             update_grid = (B, triton.cdiv(T, BT), triton.cdiv(C, update_cp))
+            if gather is not None:
+                update_grid = (B, max(1, triton.cdiv(g_widest, BT)), triton.cdiv(C, update_cp))
+            owners = None
+            if width and token and gather is None and not sep and (chain or not do_drop):
+                owners = compute.walk_representatives(
+                    width,
+                    rows_one,
+                    lg[:, :E],
+                    update_read,
+                    z,
+                    entry_values if k == 1 and entry is not None else None,
+                )
             _update_kernel[update_grid](
                 lg,
                 entry_values,
@@ -2840,11 +3326,99 @@ def run_fused(
                 CP=update_cp,
                 SP=p.CP,
                 EP=p.EP,
+                walk_rows=rows_one if width else 1,
+                WALKS=bool(width),
+                perm_ptr=gather.perm_local if gather is not None else dummy,
+                count_ptr=g_counts if gather is not None else dummy,
+                GATHER=gather is not None,
+                owner_ptr=owners if owners is not None else dummy,
+                DEDUP=owners is not None,
             )
+            if owners is not None:
+                z_new = z_new.index_select(0, owners)
+                if token:
+                    gates_w.copy_(
+                        gates_w.reshape(N, p.EP).index_select(0, owners).reshape_as(gates_w)
+                    )
+            if mark is not None:
+                mark("update", k)
+            if skip_table is not None:
+                if k == 1 and entry is not None:
+                    current = entry.expand(*lead, E).float()
+                    current = current / current.sum(-1, keepdim=True).clamp_min(1e-30)
+                elif path_stats is not None and "forced_routes" in path_stats:
+                    current = path_stats["forced_routes"][k - 1]
+                elif skip_prev is not None:
+                    current = compute._import_gates(
+                        [s],
+                        [step_read.reshape(*lead, C)],
+                        [region],
+                        skip_x,
+                        [skip_prev],
+                        [transition],
+                        gamma,
+                        target,
+                    )[0]
+                else:
+                    current = compute._import_gates(
+                        [s],
+                        [step_read.reshape(*lead, C)],
+                        [region],
+                        skip_x,
+                        None,
+                        [transition],
+                        gamma,
+                        target,
+                    )[0]
+                if skip_prev is not None and k < steps:
+                    following = compute._import_gates(
+                        [s],
+                        [step_read.reshape(*lead, C)],
+                        [region],
+                        skip_x,
+                        [current],
+                        [transition],
+                        gamma,
+                    )[0]
+                    skipped = skip_mask(skip_table, skip_prev, current, following)
+                    skipped = torch.broadcast_to(skipped, lead).reshape(N)
+                    z_new = torch.where(skipped[:, None], z, z_new)
+                skip_prev = current
+            if mark is not None:
+                mark("skips", k)
             old_exact_extra = exact_extra
             if chain:
                 ratio = None
-                if not s.exact:
+                if not s.exact and gather is not None:
+                    n_rows = int(g_rows.numel())
+                    _import_bound_kernel[(triton.cdiv(n_rows, 16),)](
+                        z_new,
+                        z if z is not None else dummy,
+                        z_new,
+                        projected_state,
+                        projected_state,
+                        bound_ref,
+                        depth_rows,
+                        n_rows,
+                        C,
+                        k,
+                        HAS_OLD=z is not None and k > 1,
+                        HAS_DEPTH=True,
+                        BUDGET=chain_set.radial_budget,
+                        RADIAL=chain_set.radial_step,
+                        ORTHOGONAL=chain_set.orthogonal_step,
+                        SPLIT=not state or compute.depth_split_on(s),
+                        KEEP_ZERO=state,
+                        BT=16,
+                        CP=p.CP,
+                        enable_fp_fusion=False,
+                        rows_ptr=g_rows,
+                        metric_ptr=metric_f32,
+                        GATHER=True,
+                        PROJECT=True,
+                    )
+                    projected_prev = projected_state
+                elif not s.exact:
                     projected = z_new @ chain_metric
                     next_projected = torch.empty_like(z_new)
                     _import_bound_kernel[(triton.cdiv(N, 4),)](
@@ -2868,6 +3442,8 @@ def run_fused(
                         BT=4,
                         CP=p.CP,
                         enable_fp_fusion=False,
+                        rows_ptr=dummy,
+                        metric_ptr=dummy,
                     )
                     projected_prev = next_projected
                 else:
@@ -2915,10 +3491,12 @@ def run_fused(
                 record_keep = do_drop and (
                     bool(compute._route_freeze.RECORDS)
                     or bool(path_stats and path_stats.get("record_macro"))
+                    or bool(width and walk_note.get("record_macro"))
                 )
                 keeps = torch.empty_like(z_new) if record_keep else dummy
                 forced_keep = path_stats.get("forced_read_keeps") if path_stats else None
-                _import_carry_kernel[(triton.cdiv(N * C, 256),)](
+                carry_rows = int(g_rows.numel()) if gather is not None else N
+                _import_carry_kernel[(triton.cdiv(carry_rows * C, 256),)](
                     z_new,
                     z if z is not None else dummy,
                     zm,
@@ -2931,7 +3509,7 @@ def run_fused(
                     depth_rows if td is not None else dummy,
                     keeps,
                     forced_keep[k - 1].reshape(N, C) if forced_keep and do_drop else dummy,
-                    N,
+                    carry_rows,
                     C,
                     p.R,
                     E,
@@ -2950,15 +3528,29 @@ def run_fused(
                     USE_LIBDEVICE=_HAVE_LIBDEVICE and not _interpret(),
                     DELTA=compute.DROPOUT_DELTA,
                     BLOCK=256,
+                    walk_rows=rows_one if width else 1,
+                    WALKS=bool(width),
+                    rows_ptr=g_rows if gather is not None else dummy,
+                    entry_ptr=g_entry if gather is not None else dummy,
+                    coef_ptr=coefficients if gather is not None else dummy,
+                    GATHER=gather is not None,
+                    WRITE_COEF=gather is not None,
                 )
                 if record_keep:
                     if path_stats is not None and path_stats.get("record_macro"):
                         path_stats.setdefault("read_keeps", []).append(keeps.view(*lead, C).clone())
-                    for rec in compute._route_freeze.RECORDS:
-                        rec.setdefault("input_keeps", {})[(target, k)] = {
-                            0: keeps.view(*lead, C).clone()
-                        }
-            if entry is not None:
+                    if width and walk_note.get("record_macro"):
+                        walk_note.setdefault("read_keeps", []).append(keeps.view(*lead, C))
+                    compute._route_freeze.record_input_keep(target, k, 0, keeps.view(*lead, C))
+            if mark is not None:
+                mark("chain", k)
+            if width:
+                if walk_stats is not None:
+                    path_gates = gates_w[..., :E].reshape(*lead[:-1], T if token else 1, E)
+                    compute._derived_path_note(
+                        walk_note, walks if k == 1 else path_gates.clone(), walk_logits
+                    )
+            elif entry is not None:
                 path_gates = gates_w[..., :E].reshape(*lead[:-1], T if token else 1, E)
                 compute._derived_path_note(
                     path_stats,
@@ -2975,7 +3567,11 @@ def run_fused(
                 z_new = (part if s.iteration == "path" else part * fold_count).reshape(N, C)
             if compute._route_freeze.RECORDS:
                 weights = gates_w[..., :E].reshape(*lead[:-1], T if token else 1, E)
-                compute._route_freeze.note_routes(target, [weights.clone()])
+                packed = compute._route_freeze._PACK
+                compute._route_freeze.note_routes(target, [weights if packed else weights.clone()])
+            if compute._FUSED_MASS and not width and not compute._SET_SHARE_HOLD:
+                weights = gates_w[..., :E].reshape(*lead[:-1], T if token else 1, E)
+                compute._note_fused_mass(target, [weights.clone()], [s])
             if linear_jump._RECORDS and k == 1:
                 first_z = z_new.clone()
             if (
@@ -2986,6 +3582,8 @@ def run_fused(
                 and td is None
             ):
                 linear_jump.note(target, depth, first_z, z_new)
+            if mark is not None:
+                mark("stats", k)
             if jump:
                 z_new = z_new + z_new @ fitted[0].to(device=dev, dtype=z_new.dtype)
             if sep:
@@ -3079,6 +3677,8 @@ def run_fused(
                     BT=32,
                     CP=p.CP,
                     BO=32,
+                    walk_rows=rows_one if width else 1,
+                    WALKS=bool(width),
                 )
                 fast_output = last and not frac and (not _interpret() or dt == torch.float32)
                 delta = torch.matmul(za.to(dt).view(*lead, C), p.up_dt) if fast_output else None
@@ -3116,6 +3716,8 @@ def run_fused(
                     BT=32,
                     CP=p.CP,
                     BO=32,
+                    walk_rows=B // width if width else 1,
+                    WALKS=bool(width),
                 )
                 if compute._route_freeze.RECORDS:
                     compute._route_freeze.note_gate(
@@ -3138,8 +3740,32 @@ def run_fused(
                     ab = forced[k - 1]
                 elif td is None:
                     ab = tgate(zz, y0_stats, gw, gate_target, steps if fold else k, last)
+                elif gather is not None:
+                    lows = gather.lows[k]
+                    every = g_active == N
+                    if every and region_t is None:
+                        zz = zz.clone()
+                    ab = tgate(
+                        zz,
+                        y0_stats,
+                        gw,
+                        gate_target,
+                        k,
+                        td.last(k) if lows else True,
+                        None if every else td.active(k),
+                        channel_rows=bool(lows),
+                    )
                 else:
-                    ab = tgate(zz, y0_stats, gw, gate_target, k, td.last(k), td.active(k))
+                    ab = tgate(
+                        zz,
+                        y0_stats,
+                        gw,
+                        gate_target,
+                        k,
+                        td.last(k),
+                        td.active(k),
+                        channel_rows=rows_out is not None and inp,
+                    )
                 if inp:
                     inp_gate = ab
                 elif ab is None:
@@ -3155,6 +3781,12 @@ def run_fused(
                         gh = _gated_read(p, b_gate)
                         g_mat, g_bs, g_rs = gh, gh.stride(0), gh.stride(1)
                         h_mat, h_bs, h_rs = gh[:, :, p.CP :], gh.stride(0), gh.stride(1)
+            if mark is not None:
+                mark("gate", k)
+            if width and walk_note.get("record_macro") and inp_gate is not None:
+                walk_note.setdefault("output_gates", []).append(
+                    tuple(v.detach().clone() for v in inp_gate)
+                )
             if (
                 entry is not None
                 and path_stats is not None
@@ -3191,7 +3823,14 @@ def run_fused(
                     exact_output = exact_output * inp_gate[0].to(dt) * inp_gate[1].to(dt)
             else:
                 exact_output = exact_extra
-            if td is not None and not coefficient_blend:
+            if gather is not None:
+                gated_output = (
+                    _depth_entry_gates(token_parts, channel_parts, inp_gate, gather, k, lead, OUT)
+                    or gated_output
+                )
+            elif rows_out is not None:
+                _depth_rows_output(out_rows, y2, z_new, inp_gate, p, rows_out, k, lead, dt)
+            elif td is not None and not coefficient_blend:
                 if inp:
                     y_k = _input_output(y0, z_new, inp_gate, p, lead, dt)
                     if exact_output is not None:
@@ -3235,6 +3874,10 @@ def run_fused(
                     exact_low = exact_output
             if frac and k == low:
                 snap = (None, zm.clone() if zm is not None else None, z.clone(), a_prev, b_gate)
+        if mark is not None and marked:
+            mark("blend", marked)
+        if width and walk_stats is not None:
+            _split_walk_note(walk_note, walk_stats)
         if td is not None:
             if carry_out:
                 change = z.reshape(*lead, C)
@@ -3245,6 +3888,20 @@ def run_fused(
                     carry[target] = {"carried": [ends], "change": [change], "depth": depth}
             if coefficient_blend:
                 return y0 + torch.matmul(z_blend.view(*lead, C).to(dt), p.up_dt)
+            if gather is not None:
+                return _depth_entries_output(
+                    y2,
+                    coefficients,
+                    token_parts,
+                    channel_parts,
+                    gated_output,
+                    gather,
+                    p,
+                    lead,
+                    dt,
+                )
+            if rows_out is not None:
+                return out_rows.view(*lead, OUT)
             return out
         if carry_out:
             change = z.reshape(*lead, C)
@@ -3329,7 +3986,15 @@ def run_fused(
         return (y_lo + frac * (y_hi - y_lo)).to(dt)
 
 
-def _torch_gate(s: compute.LayerSet, p, start, z_start, region, index=0):
+def _walk_draws(width: int, rows: int):
+    def draws(n, name, k, device):
+        one = uniforms(n // width, name, k, device)
+        return torch.cat((one[:rows].repeat(width), one[rows:].repeat(width)))
+
+    return draws
+
+
+def _torch_gate(s: compute.LayerSet, p, start, z_start, region, index=0, draws=None):
     adaptive = compute.uses_adaptive(s)
     learned = compute.learned_kind(s) == "separable"
     forced = s.form == "state" or os.environ.get("KILORA_FUSED_GATE", "kernel").strip() == "torch"
@@ -3337,7 +4002,7 @@ def _torch_gate(s: compute.LayerSet, p, start, z_start, region, index=0):
         return None
     hist = compute.gate_history(start, 0, z_start, region)
 
-    def gate(z, y0_stats, gate_w, target, k, last, active=None):
+    def gate(z, y0_stats, gate_w, target, k, last, active=None, channel_rows=False):
         return compute.split_gate(
             s,
             z,
@@ -3350,7 +4015,8 @@ def _torch_gate(s: compute.LayerSet, p, start, z_start, region, index=0):
             region,
             last,
             active=active,
-            uniforms=uniforms,
+            uniforms=uniforms if draws is None else draws,
+            channel_rows=channel_rows,
         )
 
     gate.hist = hist
@@ -3546,6 +4212,111 @@ def _input_output(y0, z, gate, p, lead, dt):
     return channel_change(y, b_t.reshape(*lead[:-1], 1, p.OUT), y0)
 
 
+def _depth_entry_gates(token_parts, channel_parts, gate, plan, k, lead, OUT):
+    ends, lows = plan.ends[k], plan.lows[k]
+    if not ends and not lows:
+        return False
+    picked = plan.picked(k)
+    B = plan.samples
+    if gate is None:
+        token_parts.append(torch.ones(picked.numel(), dtype=torch.float32, device=picked.device))
+        ones = torch.ones((B, OUT), dtype=torch.float32, device=picked.device)
+        channel_parts.extend([ones] * (bool(ends) + bool(lows)))
+        return False
+    a_t, b_t = gate
+    token_parts.append(a_t.expand(*lead, 1).reshape(-1).index_select(0, picked).float())
+    draws, rates = b_t if isinstance(b_t, tuple) else (b_t, b_t)
+    if ends:
+        channel_parts.append(rates.expand(*lead[:-1], 1, OUT).reshape(B, OUT).float())
+    if lows:
+        channel_parts.append(draws.expand(*lead[:-1], 1, OUT).reshape(B, OUT).float())
+    return True
+
+
+def _depth_entries_output(y2, coefficients, token_parts, channel_parts, gated, plan, p, lead, dt):
+    N, OUT = y2.shape
+    total = plan.total
+    if total == 0:
+        return y2.view(*lead, OUT)
+    tokens = torch.cat(token_parts).contiguous()
+    table = torch.cat(channel_parts).contiguous() if gated else y2
+    out = torch.empty_like(y2)
+    BT, BO = 16, 32
+    _depth_entries_output_kernel[(triton.cdiv(N, BT), triton.cdiv(OUT, BO))](
+        y2,
+        coefficients,
+        tokens,
+        p.up_dt,
+        table,
+        plan.high,
+        plan.low,
+        plan.high_group,
+        plan.low_group,
+        plan.code,
+        out,
+        N,
+        p.C,
+        OUT,
+        HAS_GATE=gated,
+        INTERPRET=_interpret(),
+        BT=BT,
+        CP=p.CP,
+        BO=BO,
+    )
+    return out.view(*lead, OUT)
+
+
+def _depth_rows_output(out, y2, z, gate, p, plan, k, lead, dt):
+    rows, weights, is_last, computed = plan.step(k)
+    if rows.numel() == 0:
+        return
+    y2 = y2.contiguous()
+    N, OUT = y2.shape
+    T = lead[-1]
+    B = N // T
+    delta = y2
+    table, groups = y2, rows
+    if computed:
+        picked = rows[:computed]
+        zr = z.index_select(0, picked)
+        if gate is None:
+            delta = torch.matmul(zr.to(dt), p.up_dt)
+        else:
+            a_t, b_t = gate
+            a = a_t.expand(*lead, 1).reshape(N, 1).index_select(0, picked)
+            delta = torch.matmul(token_gate(zr, a, dt), p.up_dt)
+            if isinstance(b_t, tuple):
+                table = torch.cat(
+                    (
+                        b_t[0].expand(*lead[:-1], 1, OUT).reshape(B, OUT),
+                        b_t[1].expand(*lead[:-1], 1, OUT).reshape(B, OUT),
+                    )
+                )
+                groups = rows // T + B * is_last
+            elif b_t.numel() == N * OUT:
+                table = b_t.reshape(N, OUT)
+            else:
+                table = b_t.expand(*lead[:-1], 1, OUT).reshape(B, OUT)
+                groups = rows // T
+            table = table.contiguous()
+    total = rows.numel() * OUT
+    _depth_rows_output_kernel[(triton.cdiv(total, 256),)](
+        y2,
+        delta.contiguous(),
+        table,
+        rows,
+        groups.contiguous(),
+        weights,
+        out,
+        OUT,
+        total,
+        computed,
+        HAS_GATE=computed > 0 and gate is not None,
+        INTERPRET=_interpret(),
+        BLOCK=256,
+    )
+
+
 def _hold_now(zm, hold0, c0, s):
     if hold0:
         return c0.float() * compute._scale(s, torch.float32)
@@ -3643,6 +4414,7 @@ def _synthetic(t: compute.LayerSet, dev, gen, width: int | None = None) -> compu
         routing_up=None if t.routing_up is None else up.clone(),
         form=t.form,
         import_score=t.import_score,
+        derived_mode=t.derived_mode,
         expert_ids=None if t.expert_ids is None else t.expert_ids.to(dev),
         expert_mask=None if t.expert_mask is None else torch.ones(1, 1, cols, device=dev),
         iteration=t.iteration if t.form == "input" else "accumulate",

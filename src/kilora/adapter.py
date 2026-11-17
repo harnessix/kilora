@@ -20,6 +20,7 @@ from .adaptive_gate import DEFAULT_KAPPA, check_gate_mode, check_kappa
 from .base_weights import read_base_weight
 from .compute import (
     CARRIES,
+    SAVED_DERIVED_MODE_MISSING,
     LayerSet,
     check_routing,
     derived_default_depth,
@@ -123,6 +124,7 @@ class Settings:
     token_roles: str = "auto"
     import_score: str = "derived"
     derived_entry_temp: float | None = None
+    derived_mode: str | None = None
     candidates: int = 0
     candidate_summary: str = "keys"
 
@@ -153,37 +155,78 @@ IMPORTED_SCORE = "derived"
 
 
 def imported_settings(**overrides) -> Settings:
+    mode = derived_mode(overrides.pop("derived_mode", None))
     values = dict(
         depth=IMPORTED_DEPTH,
         softmax_scope="per_set",
         gate_mode="auto",
         route_freeze=IMPORTED_ROUTE_FREEZE,
         import_score=IMPORTED_SCORE,
+        derived_mode=mode,
     )
-    if (
-        os.environ.get("KILORA_IMPORT_SCORE") or IMPORTED_SCORE
-    ) == "derived" and derived_mode() == "full":
+    if (os.environ.get("KILORA_IMPORT_SCORE") or IMPORTED_SCORE) == "derived" and mode == "full":
         values.update(depth=derived_default_depth(), path_width=3)
     values.update(overrides)
     return Settings(**values)
 
 
-def imported_schedule_fields() -> dict:
-    if (
-        os.environ.get("KILORA_IMPORT_SCORE") or IMPORTED_SCORE
-    ) == "derived" and derived_mode() == "full":
+def imported_schedule_fields(mode: str | None = None) -> dict:
+    if (os.environ.get("KILORA_IMPORT_SCORE") or IMPORTED_SCORE) == "derived" and derived_mode(
+        mode
+    ) == "full":
         return {}
     return {"depth_schedule": IMPORTED_DEPTH_SCHEDULE, "schedule_yields_to_depth": True}
 
 
-def imported_schedule():
+def imported_schedule(mode: str | None = None):
     from .depth_schedule import compile_schedule
 
-    if (
-        os.environ.get("KILORA_IMPORT_SCORE") or IMPORTED_SCORE
-    ) == "derived" and derived_mode() == "full":
+    if (os.environ.get("KILORA_IMPORT_SCORE") or IMPORTED_SCORE) == "derived" and derived_mode(
+        mode
+    ) == "full":
         return None
     return compile_schedule(IMPORTED_DEPTH_SCHEDULE)
+
+
+def imported_share_fields(
+    *,
+    content_keys: str | None = None,
+    lycoris_apply: str | None = None,
+    import_score: str | None = None,
+    derived_mode: str | None = None,
+) -> dict:
+
+    fields = dict(imported_schedule_fields(derived_mode))
+    if content_keys is None:
+        content_keys = os.environ.get("KILORA_CONTENT_KEYS", "per_expert")
+    if lycoris_apply is None:
+        lycoris_apply = os.environ.get("KILORA_LYCORIS_APPLY") or "truncated"
+    if import_score is None:
+        import_score = os.environ.get("KILORA_IMPORT_SCORE") or IMPORTED_SCORE
+    fields["content_keys"] = content_keys
+    fields["lycoris_apply"] = lycoris_apply
+    fields["import_score"] = import_score
+    return fields
+
+
+def apply_imported_share_defaults(manifest: dict) -> dict:
+
+    edits = manifest.get("edits")
+    if not isinstance(edits, dict):
+        return manifest
+    sources = edits.get("sources")
+    if not isinstance(sources, list) or not sources:
+        return manifest
+    adapter = manifest.get("adapter")
+    saved = adapter.get("derived_mode") if isinstance(adapter, dict) else None
+    defaults = imported_share_fields(derived_mode=saved or SAVED_DERIVED_MODE_MISSING)
+    if "depth_schedule" in manifest:
+        defaults.pop("depth_schedule", None)
+        defaults.pop("schedule_yields_to_depth", None)
+    extra = {key: value for key, value in defaults.items() if key not in manifest}
+    if not extra:
+        return manifest
+    return {**manifest, **extra}
 
 
 def _axis_fields(axis: str) -> dict:
@@ -936,6 +979,7 @@ class KiLoRA(nn.Module):
                     entry_windows=info["extra"].get("entry_windows", ()),
                     import_score=self.settings.import_score,
                     derived_entry_temp=self.settings.derived_entry_temp,
+                    derived_mode=info["extra"].get("derived_mode"),
                     learned_cross=info["learned_cross"],
                     learned_cross_zero=info["learned_cross_zero"],
                 )
@@ -978,9 +1022,11 @@ class KiLoRA(nn.Module):
         from .compute import _cache_get, _cache_put, _tensor_key, base_weight_transition
         from .compute import import_score as effective_import_score
 
-        needs_norm = (
-            any(s.form == "input" and effective_import_score(s) == "derived" for s in sets)
-            and derived_mode() == "full"
+        needs_norm = any(
+            s.form == "input"
+            and effective_import_score(s) == "derived"
+            and derived_mode(s) == "full"
+            for s in sets
         )
         needs_base = os.environ.get("KILORA_SHARE_TRANSITION_KIND") == "base"
         source_weight = getattr(module, "weight", None)
@@ -1233,8 +1279,9 @@ def compose(
             sets.append(dataclasses.replace(source))
             continue
         mod = load_mod(source)
-        if mod.manifest.get("schedule_yields_to_depth") and mod.manifest.get("depth_schedule"):
-            yielding_schedule = yielding_schedule or mod.manifest["depth_schedule"]
+        manifest = apply_imported_share_defaults(mod.manifest)
+        if manifest.get("schedule_yields_to_depth") and manifest.get("depth_schedule"):
+            yielding_schedule = yielding_schedule or manifest["depth_schedule"]
         mod_sections.extend((x, len(sets)) for x in getattr(mod, "sections", []))
         sets.extend(mod.sets)
         if settings is None:
@@ -1250,7 +1297,7 @@ def compose(
     if (
         yielding_schedule is not None
         and import_score(settings, form="input") == "derived"
-        and derived_mode() == "full"
+        and derived_mode(settings) == "full"
         and mix != "stack"
     ):
         settings = dataclasses.replace(
@@ -1308,7 +1355,7 @@ def compose(
     if token_depth is not None:
         adapter.set_token_depth(token_depth, token_depth_start, token_depth_base)
     if routed_import and depth is None:
-        adapter.depth_schedule = imported_schedule()
+        adapter.depth_schedule = imported_schedule(settings.derived_mode)
     elif yielding_schedule is not None and depth is None:
         from .depth_schedule import compile_schedule
 

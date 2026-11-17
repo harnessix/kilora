@@ -15,6 +15,7 @@ import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
 
+from kilora.branches import BranchStore, EditBranch
 from kilora.compute import (
     DerivedKeyVersions,
     LayerSet,
@@ -28,11 +29,11 @@ from kilora.compute import (
 )
 from kilora.editors import Editor, EditorFileInfo, EditorPlugin, EditorSupport
 from kilora.errors import KiLoRAError, ModFormatError
-from kilora.i18n import text
 from kilora.path_graph import PathGraphCache
+from kilora.path_merge import mean_keeps
 from kilora.path_rotation import rotate_pair
 
-from .editor import BranchStore, ChunkEditor, ChunkState, ChunkWriter, EditBranch, _load_residual
+from .editor import ChunkEditor, ChunkState, ChunkWriter, _load_residual
 
 log = logging.getLogger("kilora.editor.chunk")
 
@@ -883,6 +884,7 @@ class ChunkLive(Editor):
             + path
             + eps
             + f" pinned={pinned}. {self.last_note}"
+            + (" " + getattr(self, "_estimate_note", ""))
         )
 
     def state_effect_norm(self) -> float | None:
@@ -954,96 +956,6 @@ class ChunkLive(Editor):
         if want != chunks.enabled:
             chunks.enabled = want
 
-    def next_combined_state(self, state, records):
-        st = self.session.editor_state
-        chunks = st.chunks
-        initial = chunks.snapshot()
-        sums = {group: {} for group in ("coef", "node_coef")}
-        last = None
-        merge_sums = {group: {} for group in ("coef", "node_coef")}
-        off_sums = {group: {} for group in ("coef", "node_coef")}
-        merge_paths = []
-        self._staged_merge = None
-        for record in records:
-            chunks.restore(initial)
-            self._staged_merge = None
-            self._staged_merge_off = None
-            result = self.next_state(state, record)
-            if result is None:
-                continue
-            last = chunks.snapshot()
-            staged = self._staged_merge
-            staged_off = self._staged_merge_off
-            if staged_off is not None:
-                off_before, off_after = staged_off
-                for group in off_sums:
-                    for key in off_before[group].keys() | off_after[group].keys():
-                        exemplar = off_after[group].get(key, off_before[group].get(key))
-                        start = off_before[group].get(key, torch.zeros_like(exemplar))
-                        end = off_after[group].get(key, torch.zeros_like(exemplar))
-                        delta = end - start
-                        off_sums[group][key] = (
-                            off_sums[group].get(key, torch.zeros_like(delta)) + delta
-                        )
-            if staged is not None:
-                base_merge, merged, paths = staged
-                merge_paths.extend(paths)
-                for group in merge_sums:
-                    for key in base_merge[group].keys() | merged[group].keys():
-                        exemplar = merged[group].get(key, base_merge[group].get(key))
-                        start = base_merge[group].get(key, torch.zeros_like(exemplar))
-                        end = merged[group].get(key, torch.zeros_like(exemplar))
-                        delta = end - start
-                        merge_sums[group][key] = (
-                            merge_sums[group].get(key, torch.zeros_like(delta)) + delta
-                        )
-            for group in sums:
-                base = initial[group]
-                for key, value in last[group].items():
-                    delta = value - base.get(key, torch.zeros_like(value))
-                    sums[group][key] = sums[group].get(key, torch.zeros_like(delta)) + delta
-        if last is None:
-            chunks.restore(initial)
-            return None
-        chunks.restore(last)
-        for group, updates in sums.items():
-            target = getattr(chunks, group)
-            base = initial[group]
-            for key, delta in updates.items():
-                target[key] = base.get(key, torch.zeros_like(delta)) + delta
-        chunks.events = initial["events"] + len(records)
-        if (
-            self._stage_writes
-            and self.options.get("path_merge", True)
-            and not getattr(self, "provisional", False)
-        ):
-            if "merge_write_directions" in initial["prior"]:
-                chunks.prior["merge_write_directions"] = initial["prior"][
-                    "merge_write_directions"
-                ].clone()
-            else:
-                chunks.prior.pop("merge_write_directions", None)
-            combined = chunks.snapshot()
-            self._remember_write(initial, combined)
-            combined = chunks.snapshot()
-            if self.options.get("cross_layer", "off") in ("rls", "jvp"):
-                for group, updates in off_sums.items():
-                    target = getattr(chunks, group)
-                    for key, delta in updates.items():
-                        target[key] = target.get(key, torch.zeros_like(delta)) + delta
-                self._bound_path_write(chunks, combined, self.writer)
-                self._staged_merge_off = (combined, chunks.snapshot())
-                chunks.restore(combined)
-            for group, updates in merge_sums.items():
-                target = getattr(chunks, group)
-                for key, delta in updates.items():
-                    target[key] = target.get(key, torch.zeros_like(delta)) + delta
-            self._bound_path_write(chunks, combined, self.writer)
-            merged = chunks.snapshot()
-            chunks.restore(combined)
-            self._staged_merge = (combined, merged, merge_paths)
-        return self._expanded_state(state)
-
     def _record_hierarchy(self, record, stats):
         from kilora.recording import MAP_DECAY, BlockMaps, record_hierarchy
 
@@ -1096,7 +1008,6 @@ class ChunkLive(Editor):
 
         counts: dict[str, torch.Tensor] = {}
         raw_keeps: dict[tuple[str, int], list[torch.Tensor]] = {}
-        keeps: dict[tuple[str, int], list[torch.Tensor]] = {}
         merge_on = self.options.get("path_merge", True)
         self.path_report = None
 
@@ -1225,6 +1136,15 @@ class ChunkLive(Editor):
         before_u = st.chunks.expanded_u(self.editor) if merge_on else None
         history = st.chunks.prior.get("merge_write_directions") if merge_on else None
         snapshot_seconds = time.perf_counter() - snapshot_start
+        from kilora.write_estimates import mean_write_values
+
+        def average(values):
+            means, self._estimate_note = mean_write_values(
+                self.session, state, values, kind="chunk", valid=set(w._pool(st.chunks))
+            )
+            return means
+
+        w.average_estimate = average
         w.step(st.chunks, loss, shares, seed=0)
         if history is not None:
             st.chunks.prior["merge_write_directions"] = history
@@ -1238,11 +1158,7 @@ class ChunkLive(Editor):
             after_u = st.chunks.expanded_u(self.editor)
             self._write_target = {h: after_u[h] - before_u[h] for h in self.targets}
             recording_start = time.perf_counter()
-            for key, values in raw_keeps.items():
-                keeps[key] = [
-                    v.float().reshape(-1, self.experts, v.shape[-1]).mean((0, 2)).cpu()
-                    for v in values
-                ]
+            keeps = mean_keeps(raw_keeps, self.experts)
             measured_shares = shares()
             self.merge_recording_seconds = recording_time + time.perf_counter() - recording_start
             self._graph_state = before
@@ -1469,20 +1385,9 @@ class ChunkLive(Editor):
             }
 
     def finish_write(self, session, records):
-        self._stage_writes = False
-        staged, self._staged_merge = self._staged_merge, None
-        result = (
-            ""
-            if staged is None
-            else self.commit_path_merge(session, records, staged, source="merge")
-        )
-        if self.options.get("cross_layer") == "jvp":
-            if "cross_layer_jvp=" not in result:
-                result += self._jvp_write_note()
-            pairs = self._jvp_write_pairs
-            if pairs and all(reason is not None for reason in pairs.values()):
-                result += " " + text("msg.cross_layer_jvp_unavailable")
-        return result
+        from kilora.path_merge import finish_write
+
+        return finish_write(self, session, records)
 
     def _jvp_write_note(self):
         pairs = self._jvp_write_pairs
@@ -1496,93 +1401,9 @@ class ChunkLive(Editor):
 
     def commit_path_merge(self, session, records, staged, *, source):
 
-        from kilora.editors import guard_check
-        from kilora.live import LearnResult
+        from kilora.path_merge import commit_path_merge
 
-        timing = self.options.get("cross_layer") == "jvp" and hasattr(self, "_cross_layer_times")
-        if timing:
-            started = time.perf_counter()
-        before, merged, paths = staged
-        chunks = session.editor_state.chunks
-        delta = self._coefficient_vector(merged) - self._coefficient_vector(before)
-        before_u, merged_u = self._snapshot_residual(before), self._snapshot_residual(merged)
-        residual_changed = any(not torch.equal(before_u[h], merged_u[h]) for h in self.targets)
-        if not bool(delta.norm()) and not residual_changed:
-            return ""
-        self.merge_accounting = self._merge_units(delta, chunks.prior.get("merge_write_directions"))
-        off_equiv = ""
-        if self.options.get("cross_layer", "off") in ("rls", "jvp") and self._staged_merge_off:
-            off_before, off_after = self._staged_merge_off
-            off_delta = self._coefficient_vector(off_after) - self._coefficient_vector(off_before)
-            off_units = self._merge_units(off_delta, chunks.prior.get("merge_write_directions"))[0]
-            off_equiv = f" merge_equiv_off={off_units:.4g}"
-        if self.options.get("cross_layer") == "jvp":
-            off_equiv += self._jvp_write_note()
-        if timing:
-            self._cross_layer_stamp("merge_accounting", started)
-            started = time.perf_counter()
-        editor_before = session.editor_snapshot()
-        chunks.restore(merged)
-        chunks.prior = {k: v.clone() for k, v in before["prior"].items()}
-        session.editor_state.forest.branches[session.editor_state.forest.current].paths.extend(
-            paths
-        )
-        new = self._expanded_state(session.state)
-        if not all(bool(torch.isfinite(v).all()) for parts in new.values() for v in parts.values()):
-            session.editor_state.load_tensors(editor_before)
-            return " Merge refused: non-finite state."
-        for record in records:
-            refused, note = guard_check(self, session, record, new)
-            if refused:
-                session.editor_state.load_tensors(editor_before)
-                return f" Merge refused: {note}"
-        session.pending = {
-            h: {k: v.detach().cpu().clone() for k, v in parts.items()} for h, parts in new.items()
-        }
-        session._pending_info = LearnResult(
-            sum(r.images for r in records), 1.0, 0.0, False, False, source
-        )
-        if self.options.get("keep_merge_pairs", False):
-            session.editor_state.merge_v0 = {
-                k: v.detach().cpu().clone() for k, v in self.v0.items()
-            }
-
-            def pair_snapshot(snap):
-                return {
-                    "coef": {k: v.detach().cpu().clone() for k, v in snap["coef"].items()},
-                    "node_coef": {
-                        k: v.detach().cpu().clone() for k, v in snap["node_coef"].items()
-                    },
-                    "enabled": list(snap["enabled"]),
-                }
-
-            branch = session.editor_state.forest.branches[session.editor_state.forest.current]
-            branch.merge_pairs.append(
-                (len(session.commits) + 1, pair_snapshot(before), pair_snapshot(merged))
-            )
-            del branch.merge_pairs[:-32]
-        result = session.commit(editor_before=editor_before)
-        if timing:
-            self._cross_layer_stamp("other", started)
-        timing_note = (
-            "".join(
-                f" cross_layer_ms:{phase}={value:.4g}"
-                for phase, value in self._cross_layer_times.items()
-            )
-            if timing
-            else ""
-        )
-        a, b, c = self.merge_accounting
-        residual = getattr(self, "merge_residual_share", 0.0)
-        term_count, seconds = getattr(self, "merge_compaction", (0, 0.0))
-        residual_note = (
-            " (explore draw: no residuals kept)" if getattr(self, "_explore_draw", False) else ""
-        )
-        return (
-            f" {result} source={source} merge_equiv={a:.4g}{off_equiv} "
-            f"merge_repeat={b:.4g} merge_new={c:.4g} residual_kept={residual:.4g}{residual_note} "
-            f"terms={term_count} compaction_s={seconds:.4g}{timing_note}."
-        )
+        return commit_path_merge(self, session, records, staged, source=source)
 
     def _snapshot_residual(self, snapshot):
         result = {h: torch.zeros(self.experts, *self.editor.shapes[h]) for h in self.targets}
@@ -1614,442 +1435,14 @@ class ChunkLive(Editor):
         return new
 
     def _path_merge(self, chunks, state, shares, keeps, frozen_keys=None):
-        depths = {
-            h: max((k + 2 for name, k in keeps if name == h), default=1) for h in self.targets
-        }
-        layers = []
-        for name in self.targets:
-            ex = self.live_set.experts[name]
-            kin, rin, kout, rout = (
-                frozen_keys[name][:4]
-                if frozen_keys is not None
-                else (ex.keys_in, ex.rows_in, ex.keys_out, ex.rows_out)
-            )
-            layer = LayerSet(
-                router=self.live_set.router_for(name),
-                keys_in=kin,
-                keys_out=kout,
-                rows_in=rin,
-                rows_out=rout,
-            )
-            layers.append((name, layer, depths[name]))
-        cross = {
-            (a, b): torch.ones(self.experts)
-            for a, b in zip(self.targets, self.targets[1:], strict=False)
-        }
-        if self.options.get("cross_layer", "off") in ("rls", "jvp"):
-            from kilora.cross_layer import variance_weight
+        from kilora.path_merge import _path_merge as merge_paths
 
-            for (a, b), flat in cross.items():
-                link = self._cross_link((a, b))
-                if link is None:
-                    continue
-                precision = variance_weight(link.residual_variance)
-                energy = link.weights.float().square().sum(dim=1)
-                basis = self.v0[a].float().cpu()
-                if energy.numel() != basis.shape[0]:
-                    continue
-                transmission = torch.stack(
-                    [
-                        (basis[:, self.col_expert[a].cpu() == e].square().sum(dim=1) * energy).sum()
-                        for e in range(self.experts)
-                    ]
-                ).sqrt()
-                peak = transmission.max()
-                if peak > 0:
-                    transmission = transmission / peak
-                    cross[(a, b)] = flat * (1 - precision) + transmission * precision
-
-        def tensor_version(tensor):
-            if tensor is None:
-                return None
-            if tensor.is_inference():
-                return object()
-            return (id(tensor), tensor._version)
-
-        versions = tuple(
-            (
-                h,
-                depths[h],
-                *(
-                    tensor_version(getattr(self.live_set.experts[h], field))
-                    for field in ("keys_in", "keys_out", "rows_in", "rows_out")
-                ),
-            )
-            for h in self.targets
-        )
-        snapshot = getattr(self, "_graph_state", None) or chunks.snapshot()
-        old = getattr(self, "_graph_node_values", {})
-        node_versions = getattr(self, "_graph_node_versions", {})
-        values = {}
-        for h in self.targets:
-            for e in range(self.experts):
-                key = (h, e)
-                parts = []
-                for family in sorted(snapshot["coef"]):
-                    parts.append(
-                        (
-                            family,
-                            family in snapshot["enabled"],
-                            snapshot["coef"][family][e].detach().clone(),
-                            snapshot["node_coef"].get((family, h)),
-                        )
-                    )
-                parts = [
-                    (
-                        f,
-                        enabled,
-                        coef,
-                        torch.zeros_like(coef) if delta is None else delta[e].detach().clone(),
-                    )
-                    for f, enabled, coef, delta in parts
-                ]
-                residual = snapshot.get("residual", {}).get(key)
-                if residual is not None:
-                    value = (residual[0] @ residual[1]).detach().clone().reshape(-1)
-                else:
-                    value = torch.zeros(math.prod(self.editor.shapes[h]))
-                parts.append(("__residual__", True, value, torch.zeros_like(value)))
-                previous = old.get(key)
-                same = (
-                    previous is not None
-                    and len(previous) == len(parts)
-                    and all(
-                        a[0:2] == b[0:2] and torch.equal(a[2], b[2]) and torch.equal(a[3], b[3])
-                        for a, b in zip(previous, parts, strict=True)
-                    )
-                )
-                if not same:
-                    node_versions[key] = node_versions.get(key, 0) + 1
-                values[key] = parts
-        self._graph_node_values, self._graph_node_versions = values, node_versions
-        graph = self.path_graph.get((id(self.live_set), versions), layers, cross, node_versions)
-
-        def stamp():
-            if torch.cuda.is_available() and any(v.is_cuda for v in self.v0.values()):
-                torch.cuda.synchronize()
-            return time.perf_counter()
-
-        section_start = stamp()
-        observed_keep = {h: torch.stack(v).mean(0) for h, v in keeps.items() if v}
-        u = chunks.expanded_u(self.editor)
-        updates = {h: torch.zeros_like(v) for h, v in u.items()}
-        rotation_edges = []
-        spread_edges = []
-        reads = {}
-
-        def read_for(hook, expert):
-            key = (hook, expert)
-            if key not in reads:
-                mask = (self.col_expert[hook] == expert).float()
-                reads[key] = (self.v0[hook].float() * mask) @ _down(state[hook])
-            return reads[key]
-
-        owned = set()
-
-        def add_coefficients(hook, expert, coeff, active):
-            offset = 0
-            for chunk in active:
-                n = chunk.q.shape[0]
-                key = (chunk.family, hook)
-                if key not in owned:
-                    old = chunks.node_coef.get(key)
-                    chunks.node_coef[key] = (
-                        old.clone()
-                        if old is not None
-                        else torch.zeros_like(chunks.coef[chunk.family])
-                    )
-                    owned.add(key)
-                chunks.node_coef[key][expert] += coeff[offset : offset + n].to(
-                    chunks.node_coef[key]
-                )
-                offset += n
-
-        hook_order = {name: i for i, name in enumerate(self.targets)}
-        ordered_graph = sorted(
-            graph,
-            key=lambda edge: (
-                hook_order[edge.predecessor.hook],
-                edge.predecessor.depth,
-                edge.predecessor.expert,
-                hook_order[edge.successor.hook],
-                edge.successor.depth,
-                edge.successor.expert,
-            ),
-        )
-        edge_start = stamp()
-        setup_seconds = edge_start - section_start
-        for edge in ordered_graph:
-            pred, succ = edge.predecessor, edge.successor
-            if pred.hook == succ.hook:
-                q = observed_keep.get((pred.hook, pred.depth))
-                if q is None:
-                    continue
-                weight = edge.weight * float(q[pred.expert])
-            else:
-                if pred.hook not in shares or succ.hook not in shares:
-                    continue
-                weight = shares[pred.hook][pred.expert] * shares[succ.hook][succ.expert]
-                if self.options.get("cross_layer", "off") in ("rls", "jvp"):
-                    weight *= edge.weight
-            if weight == 0:
-                continue
-            down = _down(state[succ.hook])
-            if down.shape[1] != u[pred.hook].shape[1]:
-                continue
-            read = read_for(succ.hook, succ.expert)
-            core = read @ u[pred.hook][pred.expert].float()
-            updates[pred.hook][pred.expert] += weight * (u[succ.hook][succ.expert].float() @ core)
-            rotation_edges.append((pred, succ, weight))
-            spread_edges.append((pred, succ, weight, read))
-            editor_state = getattr(getattr(self, "session", None), "editor_state", None)
-            if editor_state is not None:
-                forest = editor_state.forest
-                forest.branches[forest.current].paths.append(
-                    {
-                        "predecessor": [pred.hook, pred.depth, pred.expert],
-                        "successor": [succ.hook, succ.depth, succ.expert],
-                        "p": weight,
-                    }
-                )
-
-        spread_start = stamp()
-        edge_seconds = spread_start - edge_start
-        target = getattr(self, "_write_target", None)
-        if target is not None:
-            predecessors = {pred for pred, _, _, _ in spread_edges}
-            successors = {succ for _, succ, _, _ in spread_edges}
-            signals = {
-                node: target[node.hook][node.expert].float().clone()
-                for node in successors - predecessors
-            }
-            for pred, succ, weight, read in reversed(spread_edges):
-                signal = signals.get(succ)
-                if signal is None:
-                    continue
-                propagated = read.T @ (u[succ.hook][succ.expert].float().T @ signal)
-                if pred.hook != succ.hook and self.options.get("cross_layer", "off") in (
-                    "rls",
-                    "jvp",
-                ):
-                    from kilora.cross_layer import pass_back, variance_weight
-
-                    link = self._cross_link((pred.hook, succ.hook))
-                    if link is not None and signal.shape[0] == propagated.shape[0]:
-                        precision = variance_weight(link.residual_variance)
-                        if precision:
-                            passed = pass_back(link.weights.T, signal)
-                            if passed.shape == propagated.shape:
-                                propagated = propagated * (1 - precision) + passed * precision
-                propagated = weight * propagated
-                signals[pred] = signals.get(pred, torch.zeros_like(propagated)) + propagated
-                updates[pred.hook][pred.expert] += propagated
-
-        truncation_start = stamp()
-        spread_seconds = truncation_start - spread_start
-        residual_size = projected_size = 0.0
-        keep_residual = self.options.get("merge_residual", "keep") == "keep" and not getattr(
-            self, "_explore_draw", False
-        )
-        merged_norm = math.sqrt(sum(float(v.square().sum()) for v in updates.values()))
-        self.path_report = (
-            len(spread_edges),
-            merged_norm,
-            float(self.options.get("path_angle", 0.05)),
-        )
-        for h, update in updates.items():
-            if not torch.count_nonzero(update):
-                continue
-            active = [c for c in self.editor.chunks if c.family in chunks.enabled]
-            if not active:
-                continue
-            directions = torch.cat([self.editor.per_hook(c.q)[h] for c in active], dim=0)
-            basis = directions.reshape(directions.shape[0], -1).t().float()
-            for e in range(self.experts):
-                if not torch.count_nonzero(update[e]):
-                    continue
-                candidate = u[h][e].float() + update[e]
-                if torch.equal(candidate, u[h][e]):
-                    continue
-                q, r = torch.linalg.qr(candidate, mode="reduced")
-                left, singular, right = torch.linalg.svd(r, full_matrices=False)
-                truncated = (q @ left * singular) @ right
-                delta = (truncated - u[h][e].float()).reshape(-1)
-                coeff = torch.linalg.lstsq(basis, delta[:, None]).solution[:, 0]
-                add_coefficients(h, e, coeff, active)
-                projected = basis @ coeff
-                residual = delta - projected
-                if keep_residual:
-                    residual_size += float(residual.square().sum())
-                projected_size += float(projected.square().sum())
-                if keep_residual and float(residual.norm()) > 1e-6 * float(delta.norm()):
-                    chunks.add_residual(h, e, residual.reshape_as(update[e]))
-
-        rotation_start = stamp()
-        truncation_seconds = rotation_start - truncation_start
-        residuals = []
-        angle = float(getattr(self, "options", {}).get("path_angle", 0.05))
-        active = [c for c in self.editor.chunks if c.family in chunks.enabled]
-        bases = {}
-        for index, (pred, succ, weight) in enumerate(rotation_edges):
-            if (pred.hook, pred.expert) == (succ.hook, succ.expert) or not active or angle == 0:
-                continue
-            current = chunks.expanded_u(self.editor, {pred.hook, succ.hook})
-            bp = current[pred.hook][pred.expert].float()
-            bs = current[succ.hook][succ.expert].float()
-            read = read_for(succ.hook, succ.expert)
-            rp, ra = rotate_pair(
-                bp,
-                read,
-                f"{pred.hook}:{pred.expert}:{succ.hook}:{succ.expert}",
-                index,
-                angle * min(abs(weight), 1.0),
-            )
-            desired = bs @ ra
-            projected_s = torch.linalg.lstsq(read.T, desired.T).solution.T
-            for node, delta in ((pred, rp - bp), (succ, projected_s - bs)):
-                if node.hook not in bases:
-                    directions = torch.cat(
-                        [self.editor.per_hook(c.q)[node.hook] for c in active], dim=0
-                    )
-                    bases[node.hook] = directions.reshape(directions.shape[0], -1).T.float()
-                coeff = torch.linalg.lstsq(bases[node.hook], delta.reshape(-1, 1)).solution[:, 0]
-                add_coefficients(node.hook, node.expert, coeff, active)
-                remainder = delta - (bases[node.hook] @ coeff).reshape_as(delta)
-                if keep_residual:
-                    residual_size += float(remainder.square().sum())
-                projected_size += float((delta - remainder).square().sum())
-                if keep_residual and float(remainder.norm()) > 1e-6 * float(delta.norm()):
-                    chunks.add_residual(node.hook, node.expert, remainder)
-            after = chunks.expanded_u(self.editor, {pred.hook, succ.hook})
-            actual = (
-                after[succ.hook][succ.expert].float() @ read @ after[pred.hook][pred.expert].float()
-            )
-            original = bs @ read @ bp
-            residuals.append(float((actual - original).norm() / original.norm().clamp_min(1e-30)))
-        rotation_seconds = stamp() - rotation_start
-        self.merge_residual_share = (
-            math.sqrt(residual_size / (residual_size + projected_size))
-            if keep_residual and residual_size + projected_size
-            else 0.0
-        )
-        self.path_merge_timings = {
-            "snapshot": getattr(self, "path_snapshot_seconds", 0.0),
-            "setup": setup_seconds,
-            "edge": edge_seconds,
-            "spread": spread_seconds,
-            "truncation": truncation_seconds,
-            "rotation": rotation_seconds,
-        }
-        log.info(
-            "path merge edges=%d spread_edges=%d nodes=%d seconds=%s",
-            len(graph),
-            len(spread_edges),
-            len({node for edge in graph for node in (edge.predecessor, edge.successor)}),
-            self.path_merge_timings,
-        )
-        self.rotation_residual = max(residuals, default=0.0)
-        self.rotation_residual_mean = sum(residuals) / len(residuals) if residuals else 0.0
-        log.debug(
-            "path rotation projection relative residual: max=%.8g mean=%.8g (steps=%d)",
-            self.rotation_residual,
-            self.rotation_residual_mean,
-            len(residuals),
-        )
+        return merge_paths(self, chunks, state, shares, keeps, frozen_keys)
 
     def _bound_path_write(self, chunks, before, writer):
-        def copy_coefficients():
-            return (
-                {k: v.clone() for k, v in chunks.coef.items()},
-                {k: v.clone() for k, v in chunks.node_coef.items()},
-                {k: (u.clone(), v.clone()) for k, (u, v) in chunks.residual.items()},
-            )
+        from kilora.path_merge import _bound_path_write as bound_path_write
 
-        def assign(start, end, scale):
-            for group, old, new in zip(
-                (chunks.coef, chunks.node_coef), start[:2], end[:2], strict=True
-            ):
-                group.clear()
-                for key in old.keys() | new.keys():
-                    exemplar = new.get(key, old.get(key))
-                    a = old.get(key, torch.zeros_like(exemplar))
-                    b = new.get(key, torch.zeros_like(exemplar))
-                    group[key] = a + (b - a) * scale
-            chunks.residual = {}
-            for key in start[2].keys() | end[2].keys():
-                pieces = []
-                if key in start[2] and scale != 1:
-                    up, down = start[2][key]
-                    pieces.append((up * (1 - scale), down))
-                if key in end[2] and scale != 0:
-                    up, down = end[2][key]
-                    pieces.append((up * scale, down))
-                if pieces:
-                    chunks.residual[key] = (
-                        torch.cat([p[0] for p in pieces], 1),
-                        torch.cat([p[1] for p in pieces], 0),
-                    )
-
-        def hook_norms():
-            expanded = chunks.expanded_u(self.editor)
-            result = {}
-            for h, values in expanded.items():
-                v0 = self.v0[h].float()
-                result[h] = math.sqrt(
-                    sum(
-                        float(
-                            ((values[e].float() @ v0) * (self.col_expert[h] == e).float())
-                            .square()
-                            .sum()
-                        )
-                        for e in range(self.experts)
-                    )
-                )
-            return result
-
-        old = (before["coef"], before["node_coef"], before.get("residual", {}))
-        new = copy_coefficients()
-        assign(old, new, 0.0)
-        old_u = chunks.expanded_u(self.editor)
-        assign(old, new, 1.0)
-        new_u = chunks.expanded_u(self.editor)
-        delta_norm = math.sqrt(
-            sum(
-                float(
-                    (
-                        ((new_u[h][e] - old_u[h][e]).float() @ self.v0[h].float())
-                        * (self.col_expert[h] == e).float()
-                    )
-                    .square()
-                    .sum()
-                )
-                for h in self.targets
-                for e in range(self.experts)
-            )
-        )
-        if delta_norm > writer.write_norm:
-            assign(old, new, max(writer.write_norm, 0.0) / delta_norm)
-        norms = hook_norms()
-        total = math.sqrt(sum(n * n for n in norms.values()))
-        scale = (
-            min(1.0, writer.total_cap / total) if writer.total_cap is not None and total else 1.0
-        )
-        cap = self._per_hook_cap()
-        if cap is not None:
-            for h, n in norms.items():
-                limit = cap * self.hook_scale.get(h, 0.0)
-                if limit > 0 and n > limit:
-                    scale = min(scale, limit / n)
-        if scale < 1.0:
-            current = copy_coefficients()
-            assign(({}, {}, {}), current, scale)
-        if self.path_report:
-            steps, norm, angle = self.path_report
-            self.path_report = (
-                steps,
-                norm * min(1.0, writer.write_norm / delta_norm) * scale if delta_norm else 0.0,
-                angle,
-            )
+        return bound_path_write(self, chunks, before, writer)
 
     def checkout_branch(self, branch_id, *, promote=False):
         if self.session.pending is not None:

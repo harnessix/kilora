@@ -55,7 +55,7 @@ def test_node_defs_cover_every_node_input_and_output(monkeypatch):
     defs = help_texts.node_defs("de", NODE_CLASS_MAPPINGS)
     assert set(defs) == set(NODE_CLASS_MAPPINGS)
     for key, cls in NODE_CLASS_MAPPINGS.items():
-        names = {n for group in cls.INPUT_TYPES().values() for n in group}
+        names = {n for g, group in cls.INPUT_TYPES().items() if g != "hidden" for n in group}
         assert set(defs[key]["inputs"]) == names
         if getattr(cls, "OUTPUT_TOOLTIPS", None):
             assert len(defs[key]["outputs"]) == len(cls.RETURN_TYPES)
@@ -72,7 +72,7 @@ def test_messages_follow_kilora_lang(monkeypatch):
 def test_every_product_node_input_has_its_own_strings(monkeypatch):
     monkeypatch.setattr(FOLDERS, "list", lambda *a, **k: [])
     for key, cls in NODE_CLASS_MAPPINGS.items():
-        names = {n for group in cls.INPUT_TYPES().values() for n in group}
+        names = {n for g, group in cls.INPUT_TYPES().items() if g != "hidden" for n in group}
         assert names == set(help_texts.SPEC[key][1]), key
 
 
@@ -145,6 +145,36 @@ def test_layer_compose_help_is_shipped_in_every_locale(lang, monkeypatch):
     assert inputs["compose"]["name"] == texts["in.compose"]
     assert inputs["compose"]["tooltip"] == texts["tip.compose"]
     assert "single" in texts["tip.compose"] and "crop" in texts["tip.compose"]
+
+
+@pytest.mark.parametrize("lang", i18n.LOCALES)
+def test_region_penalty_and_mount_scope_help_is_shipped_in_every_locale(lang, monkeypatch):
+    monkeypatch.setattr(FOLDERS, "list", lambda *a, **k: [])
+    texts = _raw(lang)
+    spec = help_texts.SPEC["KiLoRALayerConditioning"][1]
+    inputs = help_texts.node_defs(lang, NODE_CLASS_MAPPINGS)["KiLoRALayerConditioning"]["inputs"]
+    for name in ("region_penalty", "mount_scope"):
+        assert spec[name] == (f"in.{name}", f"tip.{name}")
+        assert texts[f"in.{name}"].strip() and texts[f"tip.{name}"].strip()
+        assert inputs[name] == {"name": texts[f"in.{name}"], "tooltip": texts[f"tip.{name}"]}
+    assert "single" in texts["tip.region_penalty"] and "0" in texts["tip.region_penalty"]
+    for word in ("single", "cross_kv", "all"):
+        assert word in texts["tip.mount_scope"]
+
+
+def test_english_region_penalty_and_mount_scope_help():
+    texts = _raw("en")
+    assert texts["tip.region_penalty"] == (
+        "With compose single: how strongly image areas of different layers stop reading "
+        "each other in the early steps. 0 turns it off. The value of the first layer is "
+        "used, and every layer must set the same value."
+    )
+    assert texts["tip.mount_scope"] == (
+        "With compose single: all applies a layer's mods to the image area of the layer and "
+        "to its own text. cross_kv applies them only to the cross-attention keys and values "
+        "of its own text, so a LoRA without those weights has no effect. Every layer must "
+        "set the same value."
+    )
 
 
 @pytest.mark.parametrize("lang", i18n.LOCALES)
@@ -247,9 +277,56 @@ def test_image_solve_help_covers_inputs_and_rights(lang, monkeypatch):
         "images",
         "captions",
         "folder",
+        "contrast_components",
+        "masks",
+        "mask_contrast",
+        "two_stage",
+        "mask_start",
+        "mask_samples",
+        "refit_rounds",
+        "guard_rule",
+        "trajectory_check",
     }
     assert all(value["tooltip"] for value in node["inputs"].values())
     assert node["outputs"]["2"]["tooltip"]
     if lang == "en":
         assert "responsible for the rights" in node["description"]
         assert "responsible for the rights" in node["inputs"]["images"]["tooltip"]
+
+
+@pytest.mark.parametrize("lang", i18n.LOCALES)
+def test_depth_map_auto_inputs_have_strings_in_every_locale(lang, monkeypatch):
+    monkeypatch.setattr(FOLDERS, "list", lambda *a, **k: [])
+    texts = _raw(lang)
+    defs = help_texts.node_defs(lang, NODE_CLASS_MAPPINGS)["KiLoRADepthMap"]["inputs"]
+    names = {"source": "depth_source"}
+    order = ("source", "mean_depth", "detail_weight", "change_weight", "disagreement_weight")
+    for name in (*order, "smooth"):
+        key = names.get(name, name)
+        assert texts[f"in.{key}"] == name and texts[f"tip.{key}"].strip()
+        assert defs[name] == {"name": texts[f"in.{key}"], "tooltip": texts[f"tip.{key}"]}
+    assert "auto" in texts["tip.depth_source"] and "-1" in texts["tip.mean_depth"]
+    assert (
+        "auto" in help_texts.node_defs(lang, NODE_CLASS_MAPPINGS)["KiLoRADepthMap"]["description"]
+    )
+    assert list(defs)[7] == "source"
+    assert list(defs)[-1] == "smooth" and list(defs)[-2] == "disagreement_weight"
+
+
+@pytest.mark.parametrize("lang", i18n.LOCALES)
+def test_image_solve_measurement_switches_have_translated_help(lang, monkeypatch):
+    monkeypatch.setattr(FOLDERS, "list", lambda *a, **k: [])
+    raw = _raw(lang)
+    en = _raw("en")
+    inputs = help_texts.node_defs(lang, NODE_CLASS_MAPPINGS)["KiLoRASolveFromImages"]["inputs"]
+    for name in ("mask_start", "mask_samples", "refit_rounds", "guard_rule", "trajectory_check"):
+        label, tip = f"in.image_solve_{name}", f"tip.image_solve_{name}"
+        assert inputs[name] == {"name": raw[label], "tooltip": raw[tip]}
+        assert raw[label].strip() and raw[tip].strip()
+        if lang != "en":
+            assert raw[label] != en[label]
+            assert raw[tip] != en[tip]
+    if lang == "en":
+        assert "full schedule" in raw["tip.image_solve_mask_samples"]
+        assert "1.25" in raw["tip.image_solve_guard_rule"]
+        assert "last result" in raw["tip.image_solve_refit_rounds"]

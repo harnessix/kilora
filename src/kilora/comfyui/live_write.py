@@ -16,20 +16,22 @@ from typing import Any
 import torch
 
 from .. import fused
+from ..call_profile import CallProfile, profiling
 from ..compute import recording_routes, routing_flips, timing_layers
 from ..editors import Editor as WriteRule
 from ..editors import commit_write
 from ..errors import KiLoRAError
+from ..forward_estimate import free_cached as _free_cached
+from ..forward_estimate import out_of_memory as _out_of_memory
 from ..i18n import text
 from ..live_queue import (
-    Preempted,
     async_enabled,
     begin_prompts,
     end_prompts,
     note_timing,
     on_pause,
-    preemptible,
     queue_for,
+    write_activity,
     yield_point,
 )
 from ..recording import GenerationRecord, PathRecorder, observing_blocks
@@ -172,6 +174,7 @@ class PathHandle:
     depth: float | None = None
     entry_temperature: float = 0.0
     block_modules: Any = None
+    render_probe: Any = None
 
 
 def uncond_rows(batch: int, cond_or_uncond: list[int] | None) -> list[int]:
@@ -359,6 +362,51 @@ def record(patcher: Any, rule: WriteRule, mod_id: str | None = None) -> tuple[An
             handle.seed = int(seed)
         rows = cond_rows(x.shape[0], args.get("cond_or_uncond"))
         learning = bool(session.learning) and rows != []
+        from ..live_experts import setting
+        from ..prediction_write import session_learn
+        from .probe_rows import ForwardRenderProbe, probe_step, render_probe
+
+        if (
+            learning
+            and isinstance(session, ImportedLiveSession)
+            and setting(session, "probe_rows")
+            and getattr(session, "edits", "on") != "off"
+            and setting(session, "write_measure") == "forward"
+            and session_learn(session) == "measure"
+            and setting(session, "forward_draws") >= 2
+            and setting(session, "probe_draws") != 1
+            and setting(session, "probe_budget") >= 2
+            and handle.render_probe is None
+        ):
+            schedule = options.get("sample_sigmas")
+            pending = any(
+                not p.ready and not p.dropped for p in getattr(session, "_probe_writes", ())
+            )
+            if pending or (schedule is not None and handle.sampling is not None):
+                index = None if pending else probe_step(schedule, handle.sampling, session)
+                if pending or index is not None:
+                    selected_sigma = None if pending else float(schedule[index])
+
+                    def empty_for_probe(args):
+                        if handle.empty_conditioning is not None:
+                            return handle.empty_conditioning
+                        if handle.encode_empty is None:
+                            return None
+                        handle.empty_conditioning = handle.encode_empty(
+                            args, args["input"].shape[0]
+                        )
+                        return handle.empty_conditioning
+
+                    handle.render_probe = ForwardRenderProbe(
+                        session,
+                        lambda a: pending or float(a["timestep"].reshape(-1)[0]) == selected_sigma,
+                        empty_conditioning=empty_for_probe,
+                    )
+
+        def render_call():
+            with render_probe(handle.render_probe):
+                return call(apply_model, args)
+
         try:
             if handle.recorder is not None and learning:
                 handle.recorder.rows = rows
@@ -375,9 +423,9 @@ def record(patcher: Any, rule: WriteRule, mod_id: str | None = None) -> tuple[An
                     handle.recorder.recording(),
                     observing_blocks(handle.block_modules or (), blocks),
                 ):
-                    result = call(apply_model, args)
+                    result = render_call()
             else:
-                result = call(apply_model, args)
+                result = render_call()
         except BaseException as exc:
             handle.failed = True
             _end_generation(handle)
@@ -561,13 +609,44 @@ def _attach_targets(handle: PathHandle, blocks: Any, latent: Any, record: Any) -
         record.extra["target_forward_s"] = seconds
 
 
-def ensure_loaded(handle: PathHandle) -> None:
+RESIDENT_ENV = "KILORA_WRITE_RESIDENT"
+
+
+def wants_resident() -> bool:
+    return os.environ.get(RESIDENT_ENV, "1").strip() != "0"
+
+
+def resident_fits(mm: Any, patcher: Any, reserve: int) -> bool:
+    try:
+        size = int(patcher.model_size())
+        loaded = int(patcher.loaded_size()) if hasattr(patcher, "loaded_size") else 0
+        device = patcher.load_device
+        free = int(mm.get_free_memory(device))
+    except Exception:
+        return False
+    others = 0
+    for item in getattr(mm, "current_loaded_models", None) or ():
+        model = getattr(item, "model", None)
+        if model is None or model is patcher:
+            continue
+        if str(getattr(model, "load_device", device)) != str(device):
+            continue
+        try:
+            others += int(model.loaded_size())
+        except Exception:
+            continue
+    return max(size - loaded, 0) + max(int(reserve), 0) <= free + others
+
+
+def ensure_loaded(handle: PathHandle, reserve: int = 0) -> bool:
+
     if handle.patcher is None:
-        return
+        return False
     try:
         import comfy.model_management as mm
     except ImportError:
-        return
+        return False
+    full = False
     load = getattr(mm, "load_models_gpu", None)
     if load is not None:
         from .bypass import same_patcher_reload
@@ -575,9 +654,13 @@ def ensure_loaded(handle: PathHandle) -> None:
         loaded = getattr(mm, "current_loaded_models", ())
         same = any(getattr(item, "model", None) is handle.patcher for item in loaded)
         context = same_patcher_reload(handle.patcher) if same else contextlib.nullcontext()
+        full = bool(reserve) and wants_resident() and resident_fits(mm, handle.patcher, reserve)
         try:
             with context:
-                load([handle.patcher])
+                if full:
+                    full = _load_resident(mm, load, handle.patcher, reserve)
+                else:
+                    load([handle.patcher])
         except BaseException:
             eject_model = getattr(handle.patcher, "eject_model", None)
             if callable(eject_model):
@@ -587,6 +670,29 @@ def ensure_loaded(handle: PathHandle) -> None:
             raise
     elif hasattr(mm, "load_model_gpu"):
         mm.load_model_gpu(handle.patcher)
+    return full
+
+
+def _load_resident(mm: Any, load: Any, patcher: Any, reserve: int) -> bool:
+    from .patching import reserve_working_memory
+
+    try:
+        missing = int(patcher.model_size()) - int(getattr(patcher, "loaded_size", lambda: 0)())
+    except Exception:
+        missing = 0
+    reserve_working_memory(
+        patcher.load_device,
+        max(missing, 0) + int(reserve),
+        phase="live_write",
+        mm=mm,
+        keep=[patcher],
+    )
+    try:
+        load([patcher], force_full_load=True)
+    except TypeError:
+        load([patcher])
+        return False
+    return True
 
 
 def _model_device(handle: PathHandle, fallback: torch.device) -> torch.device:
@@ -659,6 +765,104 @@ def wants_timing() -> bool:
     return os.environ.get(TIMING_ENV, "").strip() in ("1", "on", "true")
 
 
+PROFILE_ENV = "KILORA_WRITE_PROFILE"
+
+
+def wants_profile() -> bool:
+    return os.environ.get(PROFILE_ENV, "").strip() in ("1", "on", "true")
+
+
+CALL_SCOPE_ENV = "KILORA_WRITE_CALL_SCOPE"
+
+
+@contextlib.contextmanager
+def write_call_scope():
+
+    if os.environ.get(CALL_SCOPE_ENV, "1").strip() == "0":
+        yield
+        return
+    from ..call_values import host_values
+    from ..compute import derived_call
+
+    with host_values(), derived_call():
+        yield
+
+
+class WriteProfile:
+    def __init__(self) -> None:
+        self.loads: list[float] = []
+        self.calls: list[tuple[int, float]] = []
+        self.phases: list[tuple[str, float]] = []
+        self.timing: dict[str, Any] | None = None
+        self.split = CallProfile()
+
+    def phase(self, name: str):
+        return _ProfilePhase(self, name)
+
+    def line(self) -> str:
+        parts = [f"loads {len(self.loads)} ({sum(self.loads):.2f} s)"]
+        by_rows: dict[int, list[float]] = {}
+        for rows, seconds in self.calls:
+            by_rows.setdefault(rows, []).append(seconds)
+        calls = ", ".join(
+            f"{len(v)} x {rows} rows {sum(v) / len(v):.2f} s" for rows, v in sorted(by_rows.items())
+        )
+        total = sum(seconds for _rows, seconds in self.calls)
+        parts.append(f"model calls {len(self.calls)} ({total:.2f} s: {calls or 'none'})")
+        parts.append(f"batch rows {sum(rows for rows, _s in self.calls)}")
+        for name, seconds in self.phases:
+            parts.append(f"{name} {seconds:.2f} s")
+        timing = self.timing or {}
+        if timing:
+            layers = f"layer calls fused {timing.get('fused', 0)}, eager {timing.get('eager', 0)}"
+            walks = (timing.get("walks_fused", 0), timing.get("walks_eager", 0))
+            if any(walks):
+                layers += f", walks stacked {walks[0]}, eager {walks[1]}"
+            reasons = timing.get("reasons") or {}
+            if reasons:
+                layers += (
+                    " (eager: "
+                    + ", ".join(f"{why} ({n})" for why, n in sorted(reasons.items()))
+                    + ")"
+                )
+            parts.append(layers)
+        split = self.split.line()
+        if split:
+            parts.append(split)
+        return " Write profile: " + ", ".join(parts) + "."
+
+
+class _ProfilePhase:
+    def __init__(self, profile: WriteProfile, name: str) -> None:
+        self.profile, self.name = profile, name
+
+    def __enter__(self):
+        _synchronize()
+        self.start = time.perf_counter()
+        return self
+
+    def __exit__(self, *exc):
+        _synchronize()
+        self.profile.phases.append((self.name, time.perf_counter() - self.start))
+        return False
+
+
+def _synchronize() -> None:
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+
+
+def _still_loaded(handle: PathHandle) -> bool:
+    try:
+        import comfy.model_management as mm
+    except ImportError:
+        return True
+    loaded = getattr(mm, "current_loaded_models", None)
+    if loaded is None:
+        return True
+    return any(getattr(item, "model", None) is handle.patcher for item in loaded)
+
+
 def wants_flips(handle: PathHandle) -> bool:
     if os.environ.get(FLIPS_ENV, "").strip() in ("1", "on", "true"):
         return True
@@ -694,6 +898,14 @@ def timing_note(record: Any) -> str:
     count = getattr(record.measure, "sample_count", 1)
     if isinstance(count, int) and count > 1:
         parts.append(f"measure_samples={count} ({sum(trial):.2f} s on the samples)")
+    sigmas = getattr(record.measure, "sigmas", None)
+    if sigmas:
+        estimate = ", ".join(f"{s:.9g}" for s in sigmas[:count])
+        held = ", ".join(f"{s:.9g}" for s in sigmas[count:])
+        parts.append(f"T={count}, sigma=[{estimate}], held-out sigma=[{held}]")
+    rows = getattr(record.measure, "rows_count", None)
+    if rows is not None:
+        parts.append(f"{rows[0]} sample rows")
     if base:
         parts.append(f"base {base[0]:.2f} s")
     if trial:
@@ -728,9 +940,6 @@ def timing_split(timing: dict[str, Any]) -> dict[str, float]:
     }
 
 
-SAMPLE_SEED_STEP = 104729
-
-
 def measure_samples(session: Any) -> int:
     count = getattr(session, "measure_samples", 1)
     if isinstance(count, bool) or not isinstance(count, int) or count < 1:
@@ -738,12 +947,179 @@ def measure_samples(session: Any) -> int:
     return count
 
 
-def sample_plan(timesteps: Any, seed: int, count: int) -> list[tuple[float, int]]:
-    ordered = sorted(timesteps)
-    n = len(ordered)
-    return [
-        (ordered[int((j + 0.5) / count * n)], seed + SAMPLE_SEED_STEP * j) for j in range(count)
-    ]
+def sample_chunk(session: Any) -> int:
+    from ..live_experts import setting
+
+    try:
+        chunk = int(setting(session, "forward_chunk"))
+    except (TypeError, ValueError):
+        return 1
+    return max(chunk, 1)
+
+
+TRAINING_STEPS = 1000
+
+
+def _shifted(shift: float, t: torch.Tensor) -> torch.Tensor:
+    if shift == 1.0:
+        return t
+    return shift * t / (1 + (shift - 1) * t)
+
+
+def min_sigma(sampling: Any) -> float:
+    value = getattr(sampling, "sigma_min", None)
+    if value is not None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            pass
+    shift = float(getattr(sampling, "shift", 1.0) or 1.0)
+    return float(_shifted(shift, torch.tensor(1.0 / TRAINING_STEPS, dtype=torch.float64)))
+
+
+def flow_sigmas(sampling: Any, u: torch.Tensor) -> torch.Tensor:
+
+    u = u.to(torch.float64)
+    sigma_fn = getattr(sampling, "sigma", None)
+    multiplier = getattr(sampling, "multiplier", None)
+    if callable(sigma_fn) and multiplier is not None:
+        sigmas = torch.as_tensor(sigma_fn(u * float(multiplier)), dtype=torch.float64)
+    elif getattr(sampling, "shift", None) is not None:
+        sigmas = _shifted(float(sampling.shift), u)
+    else:
+        sigmas = u.clone()
+    high = getattr(sampling, "sigma_max", None)
+    try:
+        high = 1.0 if high is None else float(high)
+    except (TypeError, ValueError):
+        high = 1.0
+    return sigmas.clamp(min=min_sigma(sampling), max=max(high, min_sigma(sampling)))
+
+
+def write_size(session: Any) -> int:
+
+    value = getattr(session, "write_resolution", None)
+    if value is None:
+        value = getattr(session, "measure_size", 512)
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def write_latent(latent: torch.Tensor, session: Any, vae: Any = None) -> tuple[torch.Tensor, str]:
+
+    from ..measure_size import measurement_latent
+
+    return measurement_latent(
+        latent,
+        size=write_size(session),
+        reducer=getattr(session, "measure_reducer", "latent"),
+        vae=vae,
+    )
+
+
+PATCH = 2
+
+
+def write_tokens(shape: tuple[int, ...]) -> int:
+    if len(shape) < 4:
+        return int(shape[-1]) if shape else 0
+    h, w = int(shape[-2]), int(shape[-1])
+    frames = 1
+    for n in shape[2:-2]:
+        frames *= int(n)
+    return frames * (-(-h // PATCH)) * (-(-w // PATCH))
+
+
+FLUX_SHIFT_SLOPE = (1.15 - 0.5) / (4096 - 256)
+
+
+def _flux_shift(mu: float, t: torch.Tensor) -> torch.Tensor:
+    t = t.to(torch.float64)
+    return math.exp(mu) / (math.exp(mu) + (1.0 / t.clamp(min=1e-12) - 1.0))
+
+
+class TokenShift:
+    STEPS = 10000
+
+    def __init__(self, sampling: Any, mu: float) -> None:
+        self._sampling = sampling
+        self.shift = float(mu)
+        self.multiplier = 1.0
+        self.sigma_min = float(self.sigma(torch.tensor(1.0 / self.STEPS)))
+        self.sigma_max = 1.0
+
+    def sigma(self, t: torch.Tensor) -> torch.Tensor:
+        return _flux_shift(self.shift, torch.as_tensor(t))
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "_sampling":
+            raise AttributeError(name)
+        return getattr(self._sampling, name)
+
+
+def _token_shifted(sampling: Any) -> bool:
+    return any(c.__name__ == "ModelSamplingFlux" for c in type(sampling).__mro__)
+
+
+def write_sampling(sampling: Any, render_tokens: int, tokens: int) -> Any:
+
+    if sampling is None or not _token_shifted(sampling):
+        return sampling
+    mu = float(getattr(sampling, "shift", 1.15)) + FLUX_SHIFT_SLOPE * (
+        int(tokens) - int(render_tokens)
+    )
+    return TokenShift(sampling, mu)
+
+
+def flow_seed(session: Any, retry: int = 0) -> int:
+    import hashlib
+
+    count = len(getattr(session, "commits", ()) or ())
+    name = getattr(session, "mod_id", None) or getattr(session, "name", "session")
+    digest = hashlib.sha256(f"flow/{name}/{count}/{int(retry)}".encode()).digest()
+    return int.from_bytes(digest[:7], "big")
+
+
+def flow_pairs(
+    sampling: Any, shape: tuple[int, ...], count: int, held: int, seed: int
+) -> tuple[list[tuple[float, torch.Tensor]], list[tuple[float, torch.Tensor]]]:
+    gen = torch.Generator().manual_seed(int(seed))
+    pairs = []
+    for _ in range(count + held):
+        u = torch.rand((1,), generator=gen, dtype=torch.float64).clamp(min=1e-12)
+        sigma = float(flow_sigmas(sampling, u)[0])
+        noise = torch.randn(shape, generator=gen)
+        pairs.append((sigma, noise))
+    return pairs[:count], pairs[count:]
+
+
+WRITE_MEMORY_ENV = "KILORA_WRITE_MEMORY_GIB"
+
+
+WRITE_ROW_BYTES = 300 * 2**20
+
+
+def write_reserve_bytes(rows: int) -> int:
+    return WRITE_ROW_BYTES * max(int(rows), 1)
+
+
+def _reserve_write_memory(handle: Any, rows: int) -> int:
+    from .patching import reserve_working_memory
+
+    device = getattr(handle.patcher, "load_device", None)
+    keep = [handle.patcher] if wants_resident() else ()
+    return reserve_working_memory(device, write_reserve_bytes(rows), phase="live_write", keep=keep)
+
+
+def write_memory_budget() -> float | None:
+    value = os.environ.get(WRITE_MEMORY_ENV, "").strip()
+    try:
+        budget = float(value) if value else None
+    except ValueError:
+        return None
+    return budget if budget is not None and budget > 0 else None
 
 
 def image_loss(
@@ -754,9 +1130,11 @@ def image_loss(
     region_conditioning: dict[str, Any] | None = None,
     region: Any = None,
     retry: int = 0,
+    render_shape: tuple[int, ...] | None = None,
 ):
 
     from ..compute import key_probes
+    from ..live_queue import rendering
     from ..recording import perturbing
     from ..regions import is_full, latent_mask, masked_mean
 
@@ -764,28 +1142,29 @@ def image_loss(
     if handle.process_in is not None:
         x0 = handle.process_in(x0)
     x0 = x0.to(_model_device(handle, x0.device))
-    t_value = sorted(handle.timesteps)[len(handle.timesteps) // 2]
-    seed = 1009 * (event + 1) + 7919 * retry
-    t = torch.full((x0.shape[0],), t_value, device=x0.device, dtype=x0.dtype)
-    sampling = handle.sampling
-
-    def noised(seed_: int, value: float | None = None) -> torch.Tensor:
-        value, t_ = (t_value, t) if value is None else (value, torch.full_like(t, value))
-        gen = torch.Generator().manual_seed(seed_)
-        noise = torch.randn(x0.shape, generator=gen).to(x0.device, x0.dtype)
-        if sampling is not None and hasattr(sampling, "noise_scaling"):
-            return sampling.noise_scaling(t_.reshape(-1, *([1] * (x0.dim() - 1))), noise, x0)
-        sigma = min(max(value, 0.0), 1.0)
-        return sigma * noise + (1 - sigma) * x0
-
-    x_t = noised(seed)
+    tokens = write_tokens(tuple(x0.shape))
+    render_tokens = write_tokens(tuple(render_shape)) if render_shape else tokens
+    sampling = write_sampling(handle.sampling, render_tokens, tokens)
+    seed = flow_seed(handle.session, retry)
     count = measure_samples(handle.session)
-    plan = sample_plan(handle.timesteps, seed, count)
-    samples = []
-    if count > 1:
-        for value, seed_j in plan:
-            t_j = torch.full_like(t, value)
-            samples.append((noised(seed_j, value), t_j, torch.cat([t_j, t_j])))
+    held_count = count
+    estimate_pairs, held_pairs = flow_pairs(sampling, tuple(x0.shape), count, held_count, seed)
+    pairs = [*estimate_pairs, *held_pairs]
+    sigmas = [sigma for sigma, _noise in pairs]
+
+    def noised(index: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        sigma, noise = pairs[index]
+        noise = noise.to(x0.device, x0.dtype)
+        t_ = torch.full((x0.shape[0],), sigma, device=x0.device, dtype=x0.dtype)
+        if sampling is not None and hasattr(sampling, "noise_scaling"):
+            x_ = sampling.noise_scaling(t_.reshape(-1, *([1] * (x0.dim() - 1))), noise, x0)
+        else:
+            x_ = sigma * noise + (1 - sigma) * x0
+        return x_, t_, torch.cat([t_, t_])
+
+    all_samples = [noised(i) for i in range(len(pairs))]
+    samples = all_samples[:count]
+    x_t, t, t_2 = samples[0]
     if mask is not None:
         mask = latent_mask(mask, x0).to(x0.device)
         if is_full(mask):
@@ -822,13 +1201,64 @@ def image_loss(
         timing.update(layers_s=0.0, hooks_s=0.0)
     base_outs: list = []
     joined = batch_conditions(conds[0], conds[1], int(x_t.shape[0]))
-    t_2 = torch.cat([t, t])
     calls = [0]
+    rows_count = [0]
     home = x0.device
+    profile = WriteProfile() if wants_profile() else None
+    held = {"depth": 0, "loaded": False}
+
+    def load(fresh: bool = False) -> None:
+        if rendering():
+            yield_point()
+            fresh = True
+        if fresh:
+            held["loaded"] = False
+        if held["depth"] and held["loaded"] and _still_loaded(handle):
+            return
+        start = time.perf_counter()
+        rows = sample_chunk(handle.session)
+        if not ensure_loaded(handle, write_reserve_bytes(rows)):
+            _reserve_write_memory(handle, rows)
+        if profile is not None:
+            profile.loads.append(time.perf_counter() - start)
+        if held["depth"]:
+            held["loaded"] = True
+
+    def between_calls() -> float:
+        paused = yield_point()
+        if paused:
+            load(fresh=True)
+        return paused or 0.0
+
+    @contextlib.contextmanager
+    def hold():
+        held["depth"] += 1
+        try:
+            yield
+        finally:
+            held["depth"] -= 1
+            if not held["depth"]:
+                held["loaded"] = False
+
+    def model(x, tt, **cond):
+        calls[0] += 1
+        if profile is None:
+            with write_call_scope():
+                return handle.apply_model(x, tt, **cond)
+        _synchronize()
+        start = time.perf_counter()
+        with profiling(profile.split), write_call_scope():
+            out = handle.apply_model(x, tt, **cond)
+            _synchronize()
+        seconds = time.perf_counter() - start
+        profile.split.total += seconds
+        profile.calls.append((int(x.shape[0]), seconds))
+        return out
 
     def release() -> None:
         nonlocal x0, x_t, t, t_2, mask, joined
         x_t = None
+        all_samples.clear()
         samples.clear()
         x0, t, t_2, mask, joined = _moved((x0, t, t_2, mask, joined), "cpu")
         conds[:] = _moved(conds, "cpu")
@@ -839,121 +1269,94 @@ def image_loss(
         x0, t, t_2, mask, joined = _moved((x0, t, t_2, mask, joined), home)
         conds[:] = _moved(conds, home)
         base_outs[:] = _moved(base_outs, home)
-        x_t = noised(seed)
-        if count > 1:
-            for value, seed_j in plan:
-                t_j = torch.full_like(t, value)
-                samples.append((noised(seed_j, value), t_j, torch.cat([t_j, t_j])))
+        all_samples[:] = [noised(i) for i in range(len(pairs))]
+        samples[:] = all_samples[:count]
+        x_t = samples[0][0]
 
     on_pause(release, restore)
 
-    def outputs(trial, probes_pass=False, x=None, sample=None):
+    def outputs(trial, probes_pass=False, x=None, sample=None, copies=1, index=0):
         x = x_t if x is None else x
         tt, tt_2 = t, t_2
         if sample is not None:
             x, tt, tt_2 = sample
+        begin = getattr(trial, "begin_sample", None)
+        if begin is not None:
+            begin(index)
+        if copies > 1:
+            rows_count[0] += copies
+            return _copies_outputs(model, trial, x, tt, tt_2, joined, conds, copies)
+        rows_count[0] += 1
         with contextlib.ExitStack() as stack:
             if trial is not None:
                 stack.enter_context(perturbing(trial))
             if joined is not None and not probes_pass:
-                calls[0] += 1
-                out = handle.apply_model(torch.cat([x, x]), tt_2, **joined)
+                out = model(torch.cat([x, x]), tt_2, **joined)
                 return list(out.chunk(2))
             outs = []
             for n, cond in enumerate(conds):
-                calls[0] += 1
                 if probes_pass and n == 0:
                     with key_probes() as probes:
-                        outs.append(handle.apply_model(x, tt, **cond))
+                        outs.append(model(x, tt, **cond))
                     region.probes = probes
                 else:
-                    outs.append(handle.apply_model(x, tt, **cond))
+                    outs.append(model(x, tt, **cond))
             return outs
 
-    def loss_of(outs) -> float:
-        losses = [float(masked_mean((o.float() - x0.float()).pow(2), mask)) for o in outs]
+    def loss_of(outs, index: int = 0) -> float:
+        weight = 1.0 / (sigmas[index] ** 2)
+        losses = [float(masked_mean((o.float() - x0.float()).pow(2), mask)) * weight for o in outs]
         return sum(losses) / len(losses)
 
-    def run_preemptible(run, allowed):
-        lost = 0.0
-        while True:
-            start = time.perf_counter()
-            try:
-                with preemptible(allowed):
-                    return run(), lost
-            except Preempted as stop:
-                dropped = time.perf_counter() - start
-                timing["preempts"] += 1
-                timing["preempt_wait_s"] += stop.seconds
-                timing["preempt_dropped_s"] += dropped
-                yield_point()
-                ensure_loaded(handle)
-                lost += time.perf_counter() - start
+    def record_counts(f0, r0, layer_time) -> None:
+        for k in ("fused", "eager"):
+            timing[k] += fused.COUNTS[k] - f0[k]
+        for k in ("walks_fused", "walks_eager"):
+            timing[k] = timing.get(k, 0) + fused.COUNTS.get(k, 0) - f0.get(k, 0)
+        for why, n in fused.REASONS.items():
+            if n > r0.get(why, 0):
+                timing["reasons"][why] = timing["reasons"].get(why, 0) + n - r0.get(why, 0)
+        if layer_time is not None:
+            timing["layers_s"] += layer_time["layers_s"]
+            timing["hooks_s"] += layer_time["hooks_s"]
 
     def forward_samples(trial):
-        yield_point()
-        ensure_loaded(handle)
+        load(fresh=bool(yield_point()))
         record = recording_routes() if flips_on else contextlib.nullcontext({})
         clock = timing_layers() if timed else contextlib.nullcontext(None)
-        if timed and x_t.is_cuda:
-            torch.cuda.synchronize(x_t.device)
         t0, f0, r0 = time.perf_counter(), dict(fused.COUNTS), dict(fused.REASONS)
         between = not flips_on and not timed
         per_sample, waited = [], 0.0
         with torch.no_grad(), record as routes, clock as layer_time:
             for i in range(len(samples)):
                 if i and between:
-                    paused = yield_point()
-                    if paused:
-                        waited += paused
-                        ensure_loaded(handle)
-                outs, lost = run_preemptible(lambda i=i: outputs(trial, sample=samples[i]), between)
-                waited += lost
-                per_sample.append(outs)
+                    waited += between_calls()
+                per_sample.append(outputs(trial, sample=samples[i]))
         last = per_sample[-1]
         if last and last[0].is_cuda:
             torch.cuda.synchronize(last[0].device)
         seconds = time.perf_counter() - t0 - waited
         timing["base_s" if trial is None else "trial_s"].append(seconds)
-        for k in ("fused", "eager"):
-            timing[k] += fused.COUNTS[k] - f0[k]
-        for why, n in fused.REASONS.items():
-            if n > r0.get(why, 0):
-                timing["reasons"][why] = timing["reasons"].get(why, 0) + n - r0.get(why, 0)
-        if layer_time is not None:
-            timing["layers_s"] += layer_time["layers_s"]
-            timing["hooks_s"] += layer_time["hooks_s"]
-        losses = [loss_of(outs) for outs in per_sample]
+        record_counts(f0, r0, layer_time)
+        losses = [loss_of(outs, i) for i, outs in enumerate(per_sample)]
         measure.sample_losses = losses
         return sum(losses) / len(losses), routes
 
     def forward(trial):
-        yield_point()
-        ensure_loaded(handle)
+        load(fresh=bool(yield_point()))
         probes_pass = trial is None and region is not None and region.probes is None
         record = recording_routes() if flips_on else contextlib.nullcontext({})
         clock = timing_layers() if timed else contextlib.nullcontext(None)
-        if timed and x_t.is_cuda:
-            torch.cuda.synchronize(x_t.device)
         t0, f0, r0 = time.perf_counter(), dict(fused.COUNTS), dict(fused.REASONS)
-        allowed = not flips_on and not timed and not probes_pass
         with torch.no_grad(), record as routes, clock as layer_time:
-            outs, lost = run_preemptible(lambda: outputs(trial, probes_pass), allowed)
+            outs = outputs(trial, probes_pass)
         if outs and outs[0].is_cuda:
             torch.cuda.synchronize(outs[0].device)
-        seconds = time.perf_counter() - t0 - lost
-        timing["base_s" if trial is None else "trial_s"].append(seconds)
-        for k in ("fused", "eager"):
-            timing[k] += fused.COUNTS[k] - f0[k]
-        for why, n in fused.REASONS.items():
-            if n > r0.get(why, 0):
-                timing["reasons"][why] = timing["reasons"].get(why, 0) + n - r0.get(why, 0)
-        if layer_time is not None:
-            timing["layers_s"] += layer_time["layers_s"]
-            timing["hooks_s"] += layer_time["hooks_s"]
+        timing["base_s" if trial is None else "trial_s"].append(time.perf_counter() - t0)
+        record_counts(f0, r0, layer_time)
         if trial is None:
             base_outs[:] = [o.float() for o in outs]
-        return loss_of(outs), routes
+        return loss_of(outs, 0), routes
 
     def measure(trial) -> float:
         if trial is None:
@@ -962,26 +1365,135 @@ def image_loss(
             base_routes.update(routes)
             measure.last_flips = 0
             return value
-        if samples:
-            if flips_on and not sample_routes:
-                _, routes = forward_samples(None)
-                sample_routes.update(routes)
-            value, routes = forward_samples(trial)
-            reference = sample_routes
-        else:
-            if flips_on and not base_routes:
-                _, routes = forward(None)
-                base_routes.update(routes)
-            value, routes = forward(trial)
-            reference = base_routes
+        if flips_on and not sample_routes:
+            _, routes = forward_samples(None)
+            sample_routes.update(routes)
+        value, routes = forward_samples(trial)
         if not flips_on:
             return value
-        flips = routing_flips(reference, routes)
+        flips = routing_flips(sample_routes, routes)
         measure.last_flips = flips
         measure.flips.append(flips)
         if flips:
             log.info("live measurement: %d routing choices changed by the trial step", flips)
         return value
+
+    def copies_loss(trial, copies):
+        load(fresh=bool(yield_point()))
+        clock = timing_layers() if timed else contextlib.nullcontext(None)
+        t0 = time.perf_counter()
+        per_sample, waited = [], 0.0
+        with torch.no_grad(), clock as layer_time:
+            for i, sample in enumerate(samples):
+                if i:
+                    waited += between_calls()
+                outs = outputs(trial, sample=sample, copies=copies, index=i)
+                per_sample.append((i, outs if copies > 1 else [outs]))
+        last = per_sample[-1][1][-1]
+        if last and last[0].is_cuda:
+            torch.cuda.synchronize(last[0].device)
+        timing["trial_s"].append(time.perf_counter() - t0 - waited)
+        if layer_time is not None:
+            timing["layers_s"] += layer_time["layers_s"]
+            timing["hooks_s"] += layer_time["hooks_s"]
+        return [
+            sum(loss_of(outs[j], i) for i, outs in per_sample) / len(per_sample)
+            for j in range(copies)
+        ]
+
+    chunking = {"chunk": sample_chunk(handle.session), "used": None, "split": 0}
+    chunking["separate"] = False
+    chunking["budget"] = None
+    memory = {"peak": 0, "per_row": None}
+
+    def cap_by_budget(size: int, base: int) -> None:
+        if not torch.cuda.is_available() or home.type != "cuda":
+            return
+        peak = int(torch.cuda.max_memory_allocated(home))
+        memory["peak"] = max(memory["peak"], peak)
+        budget = write_memory_budget()
+        if budget is None or memory["per_row"] is not None or size < 1:
+            return
+        per_row = max(peak - base, 1) / size
+        memory["per_row"] = per_row
+        rows = int((budget * 2**30 - base) // per_row)
+        chunking["budget"] = max(rows, 1)
+        chunking["chunk"] = max(min(chunking["chunk"], chunking["budget"]), 1)
+
+    def rows(trial, layout) -> list[float]:
+        items = [item if isinstance(item, tuple) else (int(item), None) for item in layout]
+        if not items:
+            return []
+        load(fresh=bool(yield_point()))
+        clock = timing_layers() if timed else contextlib.nullcontext(None)
+        begin_rows = getattr(trial, "begin_rows", None)
+        if (
+            begin_rows is None
+            and getattr(trial, "begin_sample", None) is not None
+            and not hasattr(trial, "begin_samples")
+        ):
+            chunking["chunk"] = 1
+        t0, f0, r0 = time.perf_counter(), dict(fused.COUNTS), dict(fused.REASONS)
+        losses, waited, start, outs = [], 0.0, 0, None
+        with torch.no_grad(), clock as layer_time:
+            while start < len(items):
+                if start:
+                    waited += between_calls()
+                size = min(chunking["chunk"], len(items) - start)
+                group = items[start : start + size]
+                indices = [i for i, _tag in group]
+                if begin_rows is not None:
+                    begin_rows(group)
+                base = 0
+                if torch.cuda.is_available() and home.type == "cuda":
+                    base = int(torch.cuda.memory_allocated(home))
+                    with contextlib.suppress(Exception):
+                        torch.cuda.reset_peak_memory_stats(home)
+                try:
+                    outs = _samples_outputs(
+                        model,
+                        trial,
+                        [all_samples[i] for i in indices],
+                        indices,
+                        None if chunking["separate"] else joined,
+                        conds,
+                        begin=begin_rows is None,
+                    )
+                except _out_of_memory():
+                    drop = getattr(trial, "drop_rows", None)
+                    if callable(drop):
+                        drop()
+                    if size == 1 and (chunking["separate"] or joined is None):
+                        raise
+                    if size == 1:
+                        chunking["separate"] = True
+                    else:
+                        chunking["chunk"] = max(size // 2, 1)
+                    chunking["split"] += 1
+                    _free_cached()
+                    continue
+                end = getattr(trial, "end_rows", None)
+                if callable(end):
+                    end()
+                rows_count[0] += size
+                cap_by_budget(size, base)
+                losses.extend(loss_of(o, i) for o, i in zip(outs, indices, strict=True))
+                chunking["used"] = max(chunking["used"] or 0, size)
+                start += size
+        if outs and outs[-1] and outs[-1][0].is_cuda:
+            torch.cuda.synchronize(outs[-1][0].device)
+        timing["base_s" if trial is None else "trial_s"].append(time.perf_counter() - t0 - waited)
+        record_counts(f0, r0, layer_time)
+        return losses
+
+    def batched(trial) -> float:
+        losses = rows(trial, range(count))
+        measure.sample_losses = losses
+        return sum(losses) / len(losses)
+
+    def held_loss(trial) -> float:
+        losses = rows(trial, range(count, count + held_count))
+        return sum(losses) / len(losses)
 
     def gap_of(out_c, out_e) -> float:
         loss_c = float(masked_mean((out_c.float() - x0.float()).pow(2), mask))
@@ -992,15 +1504,14 @@ def image_loss(
         if trial is None and base_outs:
             out_c, out_e = base_outs
         else:
-            yield_point()
-            ensure_loaded(handle)
+            load(fresh=bool(yield_point()))
             with torch.no_grad():
                 out_c, out_e = (o.float() for o in outputs(trial))
         score = {"gap": gap_of(out_c, out_e), "spread": float(out_c.float().std())}
-        yield_point()
-        ensure_loaded(handle)
+        load(fresh=bool(yield_point()))
+        alt = all_samples[count] if held_count else noised(0)
         with torch.no_grad():
-            score["gap_alt"] = gap_of(*outputs(trial, x=noised(seed + 104729)))
+            score["gap_alt"] = gap_of(*outputs(trial, sample=alt))
         return score
 
     measure.last_flips = 0
@@ -1008,13 +1519,95 @@ def image_loss(
     measure.flips = []
     measure.guard_score = guard_score
     measure.calls = calls
+    measure.rows_count = rows_count
     measure.timing = timing
-    measure.samples = plan
+    measure.seed = seed
+    measure.samples = [(s, seed) for s in sigmas[:count]]
+    measure.held_samples = [(s, seed) for s in sigmas[count:]]
+    measure.sigmas = sigmas
+    measure.pairs = pairs
     measure.sample_count = count
+    measure.tokens = tokens
+    measure.render_tokens = render_tokens
+    from ..measure_size import PIXELS_PER_LATENT
+
+    measure.resolution = (
+        int(x0.shape[-2]) * PIXELS_PER_LATENT,
+        int(x0.shape[-1]) * PIXELS_PER_LATENT,
+    )
+    measure.sampling = sampling
+    measure.accept_count = held_count
     measure.sample_losses = []
+    measure.copies = copies_loss
+    measure.rows = rows
+    measure.batched = batched
+    measure.held = held_loss
+    measure.chunking = chunking
+    measure.memory = memory
+    measure.hold = hold
+    measure.profile = profile
+    if profile is not None:
+        profile.timing = timing
     if region is not None:
         region.ensure_probes = lambda: forward(None)
     return measure
+
+
+def _repeated(cond: dict, rows: int, copies: int) -> dict:
+    out = {}
+    for k, v in cond.items():
+        if isinstance(v, torch.Tensor) and v.dim() and v.shape[0] == rows:
+            out[k] = v.repeat(copies, *([1] * (v.dim() - 1)))
+        else:
+            out[k] = v
+    return out
+
+
+def _copies_outputs(model, trial, x, tt, tt_2, joined, conds, copies):
+    from ..recording import perturbing
+
+    rows = int(x.shape[0])
+    reps = (copies, *([1] * (x.dim() - 1)))
+    with contextlib.ExitStack() as stack:
+        if trial is not None:
+            stack.enter_context(perturbing(trial))
+        if joined is not None:
+            both = torch.cat([x, x]).repeat(*reps)
+            out = model(both, tt_2.repeat(copies), **_repeated(joined, 2 * rows, copies))
+            return [list(chunk.chunk(2)) for chunk in out.chunk(copies)]
+        per_cond = []
+        for cond in conds:
+            out = model(x.repeat(*reps), tt.repeat(copies), **_repeated(cond, rows, copies))
+            per_cond.append(out.chunk(copies))
+        return [[outs[j] for outs in per_cond] for j in range(copies)]
+
+
+def _samples_outputs(model, trial, group, indices, joined, conds, begin=True):
+    from ..recording import perturbing
+
+    n = len(group)
+    rows = int(group[0][0].shape[0])
+    start = getattr(trial, "begin_samples", None) if begin else None
+    if start is not None:
+        start(indices)
+    elif begin and getattr(trial, "begin_sample", None) is not None:
+        trial.begin_sample(indices[0])
+    with contextlib.ExitStack() as stack:
+        if trial is not None:
+            stack.enter_context(perturbing(trial))
+        if joined is not None:
+            both = torch.cat([torch.cat([x, x]) for x, _t, _t2 in group])
+            times = torch.cat([t2 for _x, _t, t2 in group])
+            cond = joined if n == 1 else _repeated(joined, 2 * rows, n)
+            out = model(both, times, **cond)
+            return [list(chunk.chunk(2)) for chunk in out.chunk(n)]
+        per_cond = []
+        for cond in conds:
+            xs = torch.cat([x for x, _t, _t2 in group])
+            times = torch.cat([t for _x, t, _t2 in group])
+            out = model(xs, times, **(cond if n == 1 else _repeated(cond, rows, n)))
+            per_cond.append(out.chunk(n))
+        return [[outs[j] for outs in per_cond] for j in range(n)]
 
 
 def _moved(value: Any, device: Any) -> Any:
@@ -1034,20 +1627,13 @@ def _end_generation(handle: PathHandle) -> None:
 
 
 def measured_record(handle: PathHandle, samples: dict[str, Any], vae: Any = None):
-    from ..measure_size import measurement_latent
-
     _end_generation(handle)
     latent = samples.get("samples")
-    if latent is None or handle.apply_model is None or not handle.timesteps:
+    if latent is None or handle.apply_model is None:
         raise KiLoRAError("the generation left nothing to measure")
     s = handle.session
-    small, _ = measurement_latent(
-        latent,
-        size=getattr(s, "measure_size", 512),
-        reducer=getattr(s, "measure_reducer", "latent"),
-        vae=vae,
-    )
-    measure = image_loss(handle, small, len(s.commits))
+    small, _ = write_latent(latent, s, vae)
+    measure = image_loss(handle, small, len(s.commits), render_shape=tuple(latent.shape))
     return GenerationRecord(
         latent=latent.detach().cpu().clone(),
         conditioning=handle.conditioning,
@@ -1077,6 +1663,11 @@ class QueuedWrite:
         jobs = [e.run for e in events]
         session, rule = self.session, self.rule
         original = session
+        if not hasattr(original, "_probe_writes"):
+            original._probe_writes = []
+        align = getattr(original, "align_for_moves", None)
+        if align is not None:
+            align()
         branch = events[0].branch
         if branch is not None:
             session = copy.copy(original)
@@ -1084,7 +1675,7 @@ class QueuedWrite:
             session.editor_state.load_tensors(original.editor_snapshot())
             session.editor_state.checkout(branch)
             session.commits = list(original.commits)
-            session.undo_log = copy.deepcopy(original.undo_log)
+            session.undo_log = type(original.undo_log)(original.undo_log.max_mb)
             session._memory_saves = {}
             session.saves_dir = None
             session.pending = None
@@ -1093,7 +1684,8 @@ class QueuedWrite:
             session.pinned_write_branch = None
             rule = copy.copy(rule)
             rule.session = session
-            session.editor_state.expand_live = rule._expanded_state
+            if not callable(getattr(type(session.editor_state), "expand_live", None)):
+                session.editor_state.expand_live = rule._expanded_state
             session.state = rule._expanded_state(original.state)
 
         records = [job.ready() for job in jobs]
@@ -1107,6 +1699,8 @@ class QueuedWrite:
             )
             and all(
                 not r.extra.get("region")
+                and not r.extra.get("render_probe")
+                and not r.extra.get("probe_acceptances")
                 and not float((r.extra.get("draw") or {}).get("temperature", 0) or 0)
                 for r in records
             )
@@ -1121,6 +1715,30 @@ class QueuedWrite:
             for job, record in zip(jobs, records, strict=True):
                 active_rule = rule if branch is not None else job.rule
                 reports.append(commit_write(session, active_rule, record))
+        accepted = []
+        for record in records:
+            for candidate in record.extra.get("probe_acceptances", ()):
+                if candidate.ready and not any(candidate is p for p in accepted):
+                    accepted.append(candidate)
+        for candidate in accepted:
+            retained = copy.copy(candidate.record)
+            retained.extra = {
+                k: v
+                for k, v in retained.extra.items()
+                if k not in ("render_probe", "probe_acceptances")
+            }
+            retained.extra["accepted_probe"] = candidate
+            retained.guard_score = lambda trial, p=candidate: (
+                p.guard_before if trial is None else p.guard_after
+            )
+            before = len(session.commits)
+            reports.append(commit_write(session, rule, retained))
+            if len(session.commits) > before:
+                original._probe_writes[:] = [
+                    p for p in original._probe_writes if p is not candidate
+                ]
+            else:
+                candidate.ready = False
         if branch is not None:
             source = session.editor_state
             target = original.editor_state
@@ -1133,6 +1751,10 @@ class QueuedWrite:
                         else source._branch_regions[key]
                     )
             target.forest.serial = max(target.forest.serial, source.forest.serial)
+            original.commits.extend(session.commits[len(original.commits) :])
+            original.undo_log._entries.extend(session.undo_log._entries)
+            original.undo_log._trim()
+            original.revision += 1
             original._autosave()
         written = (
             session.editor_state.forest.current
@@ -1143,6 +1765,7 @@ class QueuedWrite:
         return " ".join(reports) + f" combined={count} branch={written}." + editor_note(rule)
 
 
+@write_activity()
 def write(
     handle: PathHandle,
     samples: dict[str, Any] | None = None,
@@ -1172,16 +1795,31 @@ def write(
 
         prompt = str(getattr(handle, "prompt", "") or "")
         region = Region(mask=mask, name=region_caption or prompt, caption=region_caption)
-    if latent is not None and handle.apply_model is not None and handle.timesteps:
-        from ..measure_size import measurement_latent
+    retained_probe = None
+    if region is None and latent is not None and handle.render_probe is not None:
+        target = latent if handle.process_in is None else handle.process_in(latent)
+        retained_probe = handle.render_probe.finish(target)
+        if retained_probe is not None:
+            from .probe_rows import RetainedProbeMeasure
 
+            measure = RetainedProbeMeasure(retained_probe)
+            estimate, _routes, outputs = retained_probe
+            difference = handle.render_probe.request.reference_difference
+            note = (
+                f"Render probes: sigma {outputs.sigma:g}, {estimate.draws} draws, "
+                f"{estimate.render_rows} perturbed rows, "
+                f"probe peak memory {outputs.peak_bytes / 2**30:.2f} GiB, "
+                f"clean reference maximum difference {difference:.6g}. "
+                + getattr(
+                    handle.render_probe,
+                    "acceptance_note",
+                    "Probe estimate collected; no candidate to test.",
+                )
+            )
+    if latent is not None and handle.apply_model is not None and retained_probe is None:
         s = handle.session
-        small, note = measurement_latent(
-            latent,
-            size=getattr(s, "measure_size", 512),
-            reducer=getattr(s, "measure_reducer", "latent"),
-            vae=vae,
-        )
+        small, note = write_latent(latent, s, vae)
+        render_shape = tuple(latent.shape)
         region_conditioning = None
         if region is not None:
             from ..regions import latent_mask
@@ -1211,6 +1849,7 @@ def write(
                     region_conditioning=region_conditioning,
                     region=region,
                     retry=retry,
+                    render_shape=render_shape,
                 )
         else:
             measure = image_loss(
@@ -1221,7 +1860,26 @@ def write(
                 region_conditioning=region_conditioning,
                 region=region,
                 retry=_retry(s),
+                render_shape=render_shape,
             )
+    if retained_probe is None and any(
+        not p.ready and not p.dropped for p in getattr(handle.session, "_probe_writes", ())
+    ):
+        reason = (
+            "Probe candidate not tested: region measurement requested."
+            if region is not None
+            else (
+                "Probe candidate not tested: no completed eligible render probe; "
+                "retained for next render."
+            )
+        )
+        note = (note + " " if note else "") + reason
+        log.info("%s", reason)
+    if handle.render_probe is not None and handle.render_probe.request.failure is not None:
+        failure = handle.render_probe.request.failure
+        peak = handle.render_probe.request.peak_bytes / 2**30
+        note = (note + " " if note else "") + f"{failure}; probe peak memory {peak:.2f} GiB."
+        log.info("%s", failure)
     blocks = _block_recorder(handle.recorder)
     rec = GenerationRecord(
         stats=handle.recorder.finish() if handle.recorder is not None else None,
@@ -1234,7 +1892,7 @@ def write(
     )
     if handle.seed is None and samples is not None and samples.get("noise_seed") is not None:
         handle.seed = int(samples["noise_seed"])
-    if blocks is not None and latent is not None:
+    if blocks is not None and latent is not None and retained_probe is None:
         if handle.queue is not None and prepare is not None:
             saved_handle.seed = handle.seed
             target, measured = latent.detach().cpu().clone(), prepare
@@ -1251,6 +1909,18 @@ def write(
     }
     if region is not None:
         rec.extra["region"] = region
+    if retained_probe is not None:
+        rec.extra["render_probe"] = retained_probe
+        rec.extra["probe_report"] = {
+            "sigma": retained_probe[2].sigma,
+            "rows": retained_probe[0].render_rows,
+            "peak_bytes": retained_probe[2].peak_bytes,
+            "reference_difference": handle.render_probe.request.reference_difference,
+        }
+    ready = [p for p in getattr(handle.session, "_probe_writes", ()) if p.ready]
+    if ready:
+        rec.extra["probe_acceptances"] = ready
+    handle.render_probe = None
     handle.calls, handle.timesteps, handle.conditioning, handle.images = 0, [], None, 0
     handle.empty_conditioning = None
     handle.first_args = None
@@ -1260,7 +1930,12 @@ def write(
     if handle.queue is not None:
         number = handle.queue.submit(QueuedWrite(session, rule, rec, prepare))
         return text("msg.queued", number=number) + note
-    return commit_write(session, rule, rec) + timing_note(rec) + editor_note(rule) + note
+    if not rec.extra.get("render_probe") and not rec.extra.get("probe_acceptances"):
+        return commit_write(session, rule, rec) + timing_note(rec) + editor_note(rule) + note
+    from ..live_queue import Event
+
+    job = QueuedWrite(session, rule, rec, prepare)
+    return job.run_many([Event(0, job)]) + timing_note(rec) + note
 
 
 PROMPT_HOOK_MARK = "_kilora_prompt_hook"

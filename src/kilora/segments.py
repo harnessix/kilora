@@ -250,19 +250,62 @@ def skip_decisions(s):
     return skips
 
 
+_SKIP_WORK: dict[int, list] = {}
+_SKIP_WORK_LIMIT = 256
+_DENSE_TABLE_EXPERTS = 256
+
+
+def _skip_work(skips) -> list:
+    entry = _SKIP_WORK.get(id(skips))
+    if entry is None or entry[0] is not skips:
+        if len(_SKIP_WORK) >= _SKIP_WORK_LIMIT:
+            _SKIP_WORK.clear()
+        entry = _SKIP_WORK[id(skips)] = [skips, None, {}]
+    return entry
+
+
 def has_skips(skips):
     if skips is None:
         return False
-    if isinstance(skips, dict):
-        return any(bool(row.any()) for row in skips.values())
-    return bool(skips.any())
+    entry = _skip_work(skips)
+    if entry[1] is None:
+        if isinstance(skips, dict):
+            entry[1] = any(bool(row.any()) for row in skips.values())
+        else:
+            entry[1] = bool(skips.any())
+    return entry[1]
+
+
+def _dense_table(skips, experts: int, device) -> torch.Tensor | None:
+    if experts > _DENSE_TABLE_EXPERTS:
+        return None
+    entry = _skip_work(skips)
+    key = (str(device), int(experts))
+    table = entry[2].get(key)
+    if table is None:
+        table = torch.zeros((experts, experts, experts), dtype=torch.bool, device=device)
+        for (source, relay), destinations in skips.items():
+            source, relay = int(source), int(relay)
+            row = destinations.to(device=device, dtype=torch.bool).reshape(-1)
+            if not (0 <= source < experts and 0 <= relay < experts) or row.numel() > experts:
+                return None
+            table[source, relay, : row.numel()] |= row
+        entry[2][key] = table
+    return table
 
 
 def skip_mask(skips, previous, current, following):
     a = previous.argmax(-1)
     b = current.argmax(-1)
     c = following.argmax(-1)
-    if isinstance(skips, dict):
+    table = (
+        _dense_table(skips, int(previous.shape[-1]), a.device)
+        if isinstance(skips, dict) and os.environ.get("KILORA_SKIP_TABLE", "1") != "0"
+        else None
+    )
+    if table is not None:
+        mask = table[a, b, c]
+    elif isinstance(skips, dict):
         mask = torch.zeros_like(a, dtype=torch.bool)
         for (source, relay), destinations in skips.items():
             mask |= (a == source) & (b == relay) & destinations[c]

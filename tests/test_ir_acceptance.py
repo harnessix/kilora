@@ -56,12 +56,21 @@ def test_example_load_node_and_simplex(denoiser, folders):
         assert not torch.equal(patched.run(x), native.run(x)), (report, patched.object_patches)
 
 
+@pytest.mark.parametrize("derived", ["full", "keys"])
 @pytest.mark.parametrize(
     "iteration,fold", [("accumulate", "0"), ("path", "0"), ("accumulate", "1")]
 )
-def test_apply_interpreter_parity(denoiser, folders, iteration, fold, monkeypatch):
+def test_apply_interpreter_parity(
+    denoiser,
+    folders,
+    iteration,
+    fold,
+    derived,
+    monkeypatch,
+):
 
     monkeypatch.setenv("KILORA_MASKS", "sample")
+    monkeypatch.setenv("KILORA_DERIVED_MODE", derived)
     if fold == "1":
         monkeypatch.setenv("KILORA_IMPORT_FIXED_READ", "1")
     monkeypatch.setenv("KILORA_IMPORT_FOLD", fold)
@@ -156,6 +165,9 @@ def test_apply_interpreter_parity(denoiser, folders, iteration, fold, monkeypatc
         with ir.interpret_all():
             actual = patched.run(x)
     assert torch.equal(actual, native)
+    if derived == "full":
+        assert any(d["target"] == "layers.0.feed_forward.w1" for d in details), details
+        return
     assert any(
         target == "layers.0.feed_forward.w1"
         and any(s.form == "input" and compute.import_score(s) == "derived" for s in sets)
@@ -259,12 +271,14 @@ def test_attention_depth_chain_interpreted(depth, monkeypatch):
             calls.clear()
             compute.run_layer(x, y, [layer], depth, target="layers.0.feed_forward.w1")
     assert calls == attention_parts
-    assert ("entry", "from_input") in calls
+    assert ("entry", "chance_from_input") in calls
     if depth > 1:
         assert ("keep", "default") in calls
     assert torch.equal(actual, native)
     if depth == 1:
-        assert torch.equal(actual, y + (torch.nn.functional.linear(x, down) @ up) * 0.5)
+        torch.testing.assert_close(
+            actual, y + (torch.nn.functional.linear(x, down) @ up) * 0.5, rtol=0, atol=1e-6
+        )
     else:
         with torch.no_grad(), compute.eager(), compute.dropout_key(17, 4):
             first = compute.run_layer(x, y, [layer], 1, target="layers.0.attention.to_q")

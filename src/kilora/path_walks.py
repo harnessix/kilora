@@ -700,6 +700,10 @@ def walks(y0, lora, depth, shared, noise_scale, grad_steps, target, regions, sto
 
 
 def select_weights(state: list[dict], select: str) -> torch.Tensor:
+    return _select_weights(state, select)
+
+
+def _select_weights(state, select):
     check_path_select(select)
     score = torch.stack([st["score"].float() for st in state], -1)
     if select == "mix":

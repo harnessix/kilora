@@ -53,6 +53,11 @@ _QUEUE: contextvars.ContextVar[WriteQueue | None] = contextvars.ContextVar(
 )
 
 
+def rendering() -> bool:
+    queue = _QUEUE.get()
+    return queue is not None and not queue._stop and queue._busy()
+
+
 def preempt_check() -> None:
     fn = _PREEMPT.get()
     if fn is not None:
@@ -167,6 +172,32 @@ def write_context() -> contextvars.Context:
 _ALL_QUEUES: weakref.WeakSet[WriteQueue] = weakref.WeakSet()
 _ALL_LOCK = threading.Lock()
 _PROMPTS_RUNNING = 0
+_WRITES_RUNNING = 0
+
+
+@contextlib.contextmanager
+def write_activity() -> Iterator[None]:
+    global _WRITES_RUNNING
+    with _ALL_LOCK:
+        _WRITES_RUNNING += 1
+    try:
+        yield
+    finally:
+        with _ALL_LOCK:
+            _WRITES_RUNNING -= 1
+
+
+def writes_busy() -> bool:
+
+    with _ALL_LOCK:
+        if _WRITES_RUNNING:
+            return True
+        queues = list(_ALL_QUEUES)
+    for queue in queues:
+        with queue._cond:
+            if queue._running is not None or (queue._pending and not queue._stop):
+                return True
+    return False
 
 
 def begin_prompts() -> None:
@@ -297,7 +328,7 @@ class WriteQueue:
             state = getattr(session, "editor_state", None)
             forest = getattr(state, "forest", None)
             if forest is not None and hasattr(run, "run_many"):
-                event.revision = (forest, forest.current, session.revision)
+                event.revision = (state, forest.current, session.revision)
                 event.snapshot = (copy.deepcopy(forest.state), copy.deepcopy(state.regions))
             self._pending.append(event)
             self._cond.notify_all()
@@ -321,7 +352,7 @@ class WriteQueue:
             forest = getattr(editor_state, "forest", None)
             groups: dict[tuple, list[Event]] = {}
             for event in self._pending:
-                if event.branch is None and event.revision and event.revision[0] is forest:
+                if event.branch is None and event.revision and event.revision[0] is editor_state:
                     groups.setdefault(event.revision, []).append(event)
             kept = []
             for revision, events in groups.items():
@@ -342,6 +373,39 @@ class WriteQueue:
                 self._keeps[branch] = [(event, created) for event in events]
                 kept.append((branch, numbers))
             return kept or None
+
+    def capture_pending_branches(self, editor_state: Any) -> dict:
+        with self._cond:
+            forest = getattr(editor_state, "forest", None)
+            if forest is None:
+                return {}
+            names = set()
+            for event in self._pending:
+                name = event.branch
+                while name in forest.branches and name not in names:
+                    names.add(name)
+                    name = forest.branches[name].parent
+            return {
+                name: (
+                    copy.deepcopy(forest.branches[name]),
+                    copy.deepcopy(
+                        editor_state.regions
+                        if name == forest.current
+                        else editor_state._branch_regions[name]
+                    ),
+                )
+                for name in names
+            }
+
+    def restore_pending_branches(self, editor_state: Any, branches: dict) -> None:
+        with self._cond:
+            forest = getattr(editor_state, "forest", None)
+            for name, (branch, regions) in branches.items():
+                if name not in forest.branches:
+                    forest.branches[name] = branch
+                    editor_state._branch_regions[name] = regions
+                    if name.startswith("branch-"):
+                        forest.serial = max(forest.serial, int(name.removeprefix("branch-")))
 
     def cancel_keep(self, editor_state: Any, branch: str) -> None:
         with self._cond:
@@ -390,7 +454,16 @@ class WriteQueue:
                     )
                     if self._stop:
                         return
-                taken = self._take_and_run()
+                try:
+                    taken = self._take_and_run()
+                except BaseException as exc:
+                    if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                        raise
+                    log.exception("live write worker failed")
+                    with self._cond:
+                        self._running = None
+                        self._cond.notify_all()
+                    continue
                 if taken is None:
                     continue
                 with self._cond:
@@ -452,8 +525,10 @@ class WriteQueue:
                     else:
                         context, event.context = event.context, None
                         report = context.run(self._run_events, events)
-                except Exception as exc:
-                    report = f"The live write failed: {exc}"
+                except BaseException as exc:
+                    if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                        raise
+                    report = f"The live write failed: {exc!r}"
                     log.exception("live write %d failed", number)
             return number, report
         finally:
@@ -462,7 +537,10 @@ class WriteQueue:
             for item in events:
                 release = getattr(item.run, "release", None)
                 if release is not None:
-                    release()
+                    try:
+                        release()
+                    except Exception:
+                        log.exception("live write %d: release failed", item.number)
                 item.snapshot = None
             events.clear()
             event = None

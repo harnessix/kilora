@@ -19,17 +19,27 @@ def _sd(seed=3):
     }
 
 
-def test_the_import_defaults():
+def test_the_import_defaults(monkeypatch):
+    monkeypatch.delenv("KILORA_DERIVED_MODE", raising=False)
+    monkeypatch.delenv("KILORA_DERIVED_DIFFUSE", raising=False)
     s = imported_settings()
     assert (IMPORTED_DEPTH, IMPORTED_ROUTE_FREEZE) == (3, 0.4)
-    assert (s.depth, s.iteration, s.route_freeze, s.gate_mode) == (3, "accumulate", 0.4, "auto")
+    assert (s.depth, s.iteration, s.route_freeze, s.gate_mode) == (4, "accumulate", 0.4, "auto")
+    assert s.path_width == 3
 
 
-def test_compose_of_imports_is_routed_and_stack_is_plain(denoiser):
+def test_the_keys_arm_keeps_the_old_import_defaults(monkeypatch):
+    monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
+    s = imported_settings()
+    assert (s.depth, s.path_width, s.route_freeze, s.gate_mode) == (3, 1, 0.4, "auto")
+
+
+def test_compose_of_imports_is_routed_and_stack_is_plain(denoiser, monkeypatch):
+    monkeypatch.delenv("KILORA_DERIVED_MODE", raising=False)
     imported = import_lora(_sd(), denoiser).adapter_set
     routed = compose(denoiser, [imported])
     st = routed.settings
-    assert (st.depth, st.route_freeze, st.gate_mode) == (3, 0.4, "auto")
+    assert (st.depth, st.route_freeze, st.gate_mode) == (4, 0.4, "auto")
     routed.remove()
     plain = compose(denoiser, [imported], mix="stack")
     st = plain.settings
@@ -58,7 +68,8 @@ def test_trained_mods_keep_their_settings(model):
     again.remove()
 
 
-def test_kilora_import_files_store_the_defaults(denoiser, tmp_path):
+def test_kilora_import_files_store_the_defaults(denoiser, tmp_path, monkeypatch):
+    monkeypatch.delenv("KILORA_DERIVED_MODE", raising=False)
     from kilora.lora_import import import_to_mod
     from kilora.modfile import load_mod
 
@@ -67,10 +78,11 @@ def test_kilora_import_files_store_the_defaults(denoiser, tmp_path):
     out = tmp_path / "style.kmod.safetensors"
     import_to_mod(str(src), denoiser, out)
     st = load_mod(out).settings
-    assert (st.depth, st.route_freeze, st.gate_mode) == (3, 0.4, "auto")
+    assert (st.depth, st.route_freeze, st.gate_mode) == (4, 0.4, "auto")
 
 
-def test_kilora_import_files_store_the_late_schedule(denoiser, folders):
+def test_kilora_import_files_store_the_late_schedule(denoiser, folders, monkeypatch):
+    monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
     from kilora.adapter import IMPORTED_DEPTH_SCHEDULE
     from kilora.comfyui import nodes as N
     from kilora.comfyui import patching
@@ -98,13 +110,15 @@ def test_kilora_import_files_store_the_late_schedule(denoiser, folders):
     assert patching.applied(explicit)["depth_schedule"] is None
 
 
-def test_add_lora_in_comfyui_runs_at_depth_three(denoiser, folders):
+def test_add_lora_in_comfyui_runs_at_depth_four(denoiser, folders, monkeypatch):
     from kilora.comfyui import nodes as N
+
+    monkeypatch.delenv("KILORA_DERIVED_MODE", raising=False)
 
     save_file(_sd(), str(folders["loras"] / "style.safetensors"))
     (selected,) = N.KiLoRAImportLoRA().add("style.safetensors", 1.0)
     _, report, _ = N.KiLoRAApply().apply(FakePatcher(FakeBaseModel(denoiser)), selected, -1)
-    assert "Depth: 3" in report
+    assert "Depth: 4" in report
 
 
 def test_simple_mixes():
@@ -155,7 +169,7 @@ def test_default_routes_with_derived_keys_without_state_pass(three, monkeypatch,
     m = Toy().eval()
     adapter = compose(m, [routed])
     assert adapter.settings.import_score == "derived"
-    assert compute.derived_mode() == "keys"
+    assert compute.derived_mode() == "full"
     assert not adapter._keys_todo
     x = torch.randn(1, 3, DIM)
     with torch.no_grad():
@@ -181,3 +195,21 @@ def test_default_joint_import_skips_key_cache(denoiser, chain, monkeypatch, tmp_
     assert "key_pass" not in patching.applied(patched)
     assert torch.isfinite(_call(patched, torch.randn(1, 5, 4), torch.ones(1, 2))).all()
     assert not list((tmp_path / "cache").glob("*.safetensors"))
+
+
+def test_derived_mode_defaults_to_full(monkeypatch):
+    from kilora import compute
+    from kilora.adapter import imported_schedule
+
+    for name in ("KILORA_DERIVED_MODE", "KILORA_DERIVED_DIFFUSE", "KILORA_IMPORT_SCORE"):
+        monkeypatch.delenv(name, raising=False)
+    assert compute.DEFAULT_DERIVED_MODE == "full"
+    assert compute.derived_mode() == "full"
+    s = imported_settings()
+    assert (s.depth, s.path_width) == (4, 3)
+    assert imported_schedule() is None
+    monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
+    assert compute.derived_mode() == "keys"
+    s = imported_settings()
+    assert (s.depth, s.path_width) == (3, 1)
+    assert imported_schedule() is not None

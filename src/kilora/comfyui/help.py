@@ -73,7 +73,24 @@ SPEC: dict[str, tuple[str, dict[str, tuple[str, str]], tuple | None]] = {
             },
             **{
                 name: (f"in.image_solve_{name}", f"tip.image_solve_{name}")
-                for name in ("vae", "name", "cue", "ignore_guard", "images", "captions", "folder")
+                for name in (
+                    "vae",
+                    "name",
+                    "cue",
+                    "ignore_guard",
+                    "images",
+                    "captions",
+                    "folder",
+                    "contrast_components",
+                    "masks",
+                    "mask_contrast",
+                    "two_stage",
+                    "mask_start",
+                    "mask_samples",
+                    "refit_rounds",
+                    "guard_rule",
+                    "trajectory_check",
+                )
             },
         },
         (
@@ -182,6 +199,8 @@ SPEC: dict[str, tuple[str, dict[str, tuple[str, str]], tuple | None]] = {
             "crop": ("in.crop", "tip.crop"),
             "batch": ("in.batch", "tip.batch"),
             "compose": ("in.compose", "tip.compose"),
+            "region_penalty": ("in.region_penalty", "tip.region_penalty"),
+            "mount_scope": ("in.mount_scope", "tip.mount_scope"),
         },
         (("out.conditioning", "otip.layer_conditioning"),),
     ),
@@ -520,8 +539,19 @@ SPEC: dict[str, tuple[str, dict[str, tuple[str, str]], tuple | None]] = {
             "feather": ("in.feather", "tip.depth_feather"),
             "start": ("in.depth_start", "tip.depth_start"),
             "base": ("in.depth_base", "tip.depth_base"),
+            "source": ("in.depth_source", "tip.depth_source"),
             "mask": ("in.mask", "tip.depth_mask"),
             "image": ("in.image", "tip.depth_image"),
+            **{
+                key: ("in." + key, "tip." + key)
+                for key in (
+                    "mean_depth",
+                    "detail_weight",
+                    "change_weight",
+                    "disagreement_weight",
+                    "smooth",
+                )
+            },
         },
         (("out.depth_map", "otip.depth_map"), ("out.preview", "otip.depth_map_preview")),
     ),
@@ -607,6 +637,19 @@ SPEC: dict[str, tuple[str, dict[str, tuple[str, str]], tuple | None]] = {
             "measure": ("in.measure", "tip.measure"),
             "measure_combos": ("in.measure_combos", "tip.measure_combos"),
             "edits": ("in.import_edits", "tip.import_edits"),
+            "live_expert_mass": ("in.live_expert_mass", "tip.live_expert_mass"),
+            "live_expert_top": ("in.live_expert_top", "tip.live_expert_top"),
+            "live_expert_history": ("in.live_expert_history", "tip.live_expert_history"),
+            "live_expert_copies": ("in.live_expert_copies", "tip.live_expert_copies"),
+            "write_measure": ("in.write_measure", "tip.write_measure"),
+            "forward_draws": ("in.forward_draws", "tip.forward_draws"),
+            "forward_sigma": ("in.forward_sigma", "tip.forward_sigma"),
+            "forward_chunk": ("in.forward_chunk", "tip.forward_chunk"),
+            "write_resolution": ("in.write_resolution", "tip.write_resolution"),
+            "probe_rows": ("in.probe_rows", "tip.probe_rows"),
+            "probe_budget": ("in.probe_budget", "tip.probe_budget"),
+            "probe_call": ("in.probe_call", "tip.probe_call"),
+            "probe_draws": ("in.probe_draws", "tip.probe_draws"),
             "measure_samples": ("in.measure_samples", "tip.measure_samples"),
             "learn": ("in.learn", "tip.learn"),
         },
@@ -691,7 +734,7 @@ def _desc_key(key: str) -> str:
 
 
 def _inputs(key: str, cls: Any) -> dict[str, tuple[str, str]]:
-    names = [n for group in cls.INPUT_TYPES().values() for n in group]
+    names = [n for g, group in cls.INPUT_TYPES().items() if g != "hidden" for n in group]
     given = SPEC[key][1]
     return {n: given[n] for n in names}
 
@@ -722,7 +765,9 @@ def decorate(classes: dict[str, Any]) -> dict[str, str]:
         def input_types(c, _original=original, _tips=tips):
             types = _original(c)
             return {
-                group: {name: _with_tooltip(spec, _tips[name]) for name, spec in inputs.items()}
+                group: inputs
+                if group == "hidden"
+                else {name: _with_tooltip(spec, _tips[name]) for name, spec in inputs.items()}
                 for group, inputs in types.items()
             }
 

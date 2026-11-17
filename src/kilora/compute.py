@@ -23,14 +23,18 @@ import torch
 import torch.nn.functional as F
 
 from . import ablation_settings as _ablation
+from . import call_profile as _call_profile
 from . import gate_stats as _gate_stats
 from . import route_freeze as _route_freeze
 from .adaptive_gate import (
     DEFAULT_KAPPA,
     HISTORY_RATE,
+    _token_gram,
     adaptive_keep,
     base_reference,
     change_stats,
+    fused_gate_enabled,
+    gate_call,
     resolve_mode,
 )
 from .live_queue import preempt_check as _preempt_check
@@ -78,7 +82,7 @@ def top1_gate(logits: torch.Tensor, noise: torch.Tensor | None = None) -> torch.
     probs = torch.softmax(logits, dim=-1)
     choice = (logits if noise is None else logits + noise).argmax(dim=-1, keepdim=True)
     picked = probs.gather(-1, choice)
-    weight = 1.0 + picked - picked.detach()
+    weight = 1.0 + (picked - picked.detach())
     return torch.zeros_like(probs).scatter(-1, choice, weight)
 
 
@@ -281,11 +285,15 @@ def dropout_key(seed: int = 0, step: float | int | torch.Tensor = 0) -> Iterator
         yield
 
 
+def dropout_base(target: str, k: int) -> int:
+    seed, step = _DROPOUT_KEY[-1]
+    return _mix32(seed ^ _mix32(step ^ _mix32(zlib.crc32(target.encode()) ^ _mix32(k))))
+
+
 def dropout_uniforms(
     shape: tuple[int, ...], target: str, k: int, device=None, columns: torch.Tensor | None = None
 ) -> torch.Tensor:
-    seed, step = _DROPOUT_KEY[-1]
-    base = _mix32(seed ^ _mix32(step ^ _mix32(zlib.crc32(target.encode()) ^ _mix32(k))))
+    base = dropout_base(target, k)
     if columns is None:
         h = _mix32(_index_hash(math.prod(shape), device) ^ base)
     else:
@@ -439,6 +447,7 @@ class LayerSet:
     import_score: str | None = None
     direction_core: torch.Tensor | None = None
     derived_entry_temp: float | None = None
+    derived_mode: str | None = None
     routing_down: torch.Tensor | None = None
     routing_up: torch.Tensor | None = None
     routing_source: tuple | None = None
@@ -523,6 +532,19 @@ def depth_split_on(s: LayerSet) -> bool:
 def depth_step_metric(up: torch.Tensor) -> torch.Tensor:
     u = up.detach().float()
     return u @ u.t()
+
+
+def up_gram(up: torch.Tensor) -> torch.Tensor:
+    u = up.detach().float()
+    if torch.is_grad_enabled() or up.requires_grad:
+        return u @ u.t()
+    key = _tensor_key("up-gram", [up])
+    hit = _cache_get(key)
+    if hit is not None:
+        return hit
+    gram = u @ u.t()
+    _cache_put(key, gram)
+    return gram
 
 
 def _step_metric(s: LayerSet, device) -> torch.Tensor:
@@ -621,6 +643,42 @@ def _set_keys(s: LayerSet) -> tuple[torch.Tensor, torch.Tensor]:
 
 _DERIVED: dict = {}
 _DERIVED_MAX = 4096
+_DERIVED_BYTES: dict = {}
+
+
+def _derived_budget() -> int:
+    try:
+        return int(float(os.environ.get("KILORA_DERIVED_CACHE_MB", "2048")) * 2**20)
+    except ValueError:
+        return 2048 * 2**20
+
+
+def _value_bytes(value, seen=None) -> int:
+    seen = set() if seen is None else seen
+    if isinstance(value, torch.Tensor):
+        try:
+            ptr = (value.device, value.untyped_storage().data_ptr())
+            size = value.untyped_storage().nbytes()
+        except (RuntimeError, NotImplementedError, TypeError):
+            return 0
+        if ptr in seen:
+            return 0
+        seen.add(ptr)
+        return size
+    if isinstance(value, (tuple, list)):
+        return sum(_value_bytes(v, seen) for v in value)
+    if isinstance(value, dict):
+        return sum(_value_bytes(v, seen) for v in value.values())
+    attrs = getattr(value, "__dict__", None)
+    if isinstance(attrs, dict) and not isinstance(value, type):
+        return sum(_value_bytes(v, seen) for v in attrs.values())
+    return 0
+
+
+def derived_bytes() -> int:
+    for stale in [k for k in _DERIVED_BYTES if k not in _DERIVED]:
+        del _DERIVED_BYTES[stale]
+    return sum(_DERIVED_BYTES.values())
 
 
 def _tensor_key(kind: str, tensors) -> tuple | None:
@@ -736,16 +794,30 @@ def _drop_derived(cache_key, refs) -> None:
     hit = _DERIVED.get(cache_key)
     if hit is not None and hit[0] is refs:
         _DERIVED.pop(cache_key, None)
+        _DERIVED_BYTES.pop(cache_key, None)
+
+
+def _evict_oldest() -> None:
+    oldest = next(iter(_DERIVED))
+    _DERIVED.pop(oldest)
+    _DERIVED_BYTES.pop(oldest, None)
 
 
 def _cache_put(key, value) -> None:
     if key is None:
         return
     if len(_DERIVED) >= _DERIVED_MAX:
-        _DERIVED.pop(next(iter(_DERIVED)))
+        _evict_oldest()
     owners = [None if r is None else r() for r in key[1]]
     stored, stripped = _strip(value, owners)
+    size = _value_bytes(stored)
+    budget = _derived_budget()
+    _DERIVED.pop(key[0], None)
+    _DERIVED_BYTES.pop(key[0], None)
+    while _DERIVED and derived_bytes() + size > budget:
+        _evict_oldest()
     _DERIVED[key[0]] = (key[1], stored, stripped)
+    _DERIVED_BYTES[key[0]] = size
     for owner in owners:
         if owner is not None:
             weakref.finalize(owner, _drop_derived, key[0], key[1])
@@ -1059,6 +1131,12 @@ def _sync(t: Any) -> None:
 
 
 def run_layer(*args, **kwargs):
+    if _call_profile.active():
+        return _call_profile.run_layer(_run_layer_body, *args, **kwargs)
+    return _run_layer_body(*args, **kwargs)
+
+
+def _run_layer_body(*args, **kwargs):
     _preempt_check()
     _ablation.read_dropout_off()
     _ablation.carry_steps(False)
@@ -1652,7 +1730,7 @@ def _run_layer(
         if low == high:
             depth = _whole(low)
         else:
-            td = _TokenDepth(values, high)
+            td = _TokenDepth(values, high, token_depth)
             depth = td.steps
         if depth <= 0:
             return y0
@@ -1674,9 +1752,10 @@ def _run_layer(
         and not any(s.expert_inputs is not None or s.expert_offsets is not None for s in sets)
         and td is None
         and not any(0 < s.candidates < s.keys_in.shape[0] for s in keyed)
-        and not (
-            derived_mode() == "full"
-            and any(import_score(s) == "derived" for s in keyed if s.form == "input")
+        and not any(
+            import_score(s) == "derived" and derived_mode(s) == "full"
+            for s in keyed
+            if s.form == "input"
         )
         and _route_freeze.active(keyed, current_progress() if t is None else float(t))
     )
@@ -1819,16 +1898,19 @@ def _run_layer(
         raise ValueError("a per-token depth needs accumulate iteration (path mode: later)")
     if once and not joint and depth > 0:
         ins = [sets[i] for i in once]
-        if any(s.axis_joint for s in ins) or (
-            (depth > 1 or td is not None) and any(depth_split_on(s) for s in ins)
-        ):
+        if any(s.axis_joint for s in ins):
             y0 = _run_input(x, y0, sets, once, depth, regs, target, td)
-        elif any(import_score(s) == "derived" for s in ins) and derived_mode() == "full":
+        elif any(import_score(s) == "derived" and derived_mode(s) == "full" for s in ins):
+            keys_once = [
+                i
+                for i in once
+                if import_score(sets[i]) == "derived" and derived_mode(sets[i]) == "keys"
+            ]
             y0 = _run_derived_walks(
                 x,
                 y0,
                 sets,
-                once,
+                [i for i in once if i not in keys_once],
                 depth,
                 regs,
                 target,
@@ -1837,7 +1919,14 @@ def _run_layer(
                 query_policy is None and noise_scale == 0,
                 current_progress() if t is None else float(t),
             )
-        elif any(import_score(s) == "derived" for s in ins) or td is not None:
+            if keys_once:
+                y0 = _run_input_fused(x, y0, sets, keys_once, depth, regs, target, td)
+        elif (
+            (depth > 1 or td is not None)
+            and any(depth_split_on(s) for s in ins)
+            or any(import_score(s) == "derived" for s in ins)
+            or td is not None
+        ):
             y0 = _run_input_fused(x, y0, sets, once, depth, regs, target, td)
         elif depth >= 1 and ins[0].iteration == "path" and ins[0].path_width > 1:
             y0 = _run_input_walks(x, y0, ins, depth, [regs[i] for i in once], target)
@@ -2856,12 +2945,14 @@ def split_gate(
     last=False,
     active=None,
     uniforms=None,
+    channel_rows=False,
 ):
     a = b = None
     if learned_kind(s) == "separable":
         a, b = separable_gate(s, z, hist.get("prev"), y0_norm, y0_rms, gate_w, target, i, k)
     hist["prev"] = z
     if uses_adaptive(s):
+        drawn_a = drawn_b = None
         limit = s.gate_head_limit
         if limit is not None and hist.get("head_count", 0) >= limit:
             qa, qb = hist["head_q"]
@@ -2870,12 +2961,13 @@ def split_gate(
             if active is not None:
                 zr = zr * active.to(zr.dtype)
             if "adaptive_gram" not in hist:
-                up = s.up.detach().float()
-                hist["adaptive_gram"] = up @ up.t()
+                hist["adaptive_gram"] = up_gram(s.up)
+            fast = fused_gate_enabled(zr)
             reference = {}
+            first_change = False
             if not base_reference():
-                first = "first_norm" not in hist
-                if first:
+                first_change = "first_norm" not in hist
+                if first_change and not fast:
                     before = hist.get("before")
                     dz = zr.detach().float()
                     if before is not None:
@@ -2884,21 +2976,47 @@ def split_gate(
                         dz, s.up, hist["adaptive_gram"], active
                     )
                 reference = dict(
-                    first_norm=hist["first_norm"], first_rms=hist["first_rms"], first_step=k == 1
+                    first_norm=hist.get("first_norm"),
+                    first_rms=hist.get("first_rms"),
+                    first_step=k == 1,
                 )
-            qa, qb, hist["m"] = adaptive_keep(
-                zr,
-                hist.get("before"),
-                hist.get("m"),
-                s.up,
-                y0_norm,
-                y0_rms,
-                s.gate_kappa,
-                s.gate_coherence,
-                active=active,
-                gram=hist["adaptive_gram"],
-                **reference,
-            )
+            if fast:
+                base = None
+                same = uniforms is None or getattr(uniforms, "same_as_dropout", False)
+                if not (last is True or expect_masks()) and same:
+                    base = dropout_base(f"{target}#{i}#adaptive", k)
+                with torch.no_grad():
+                    qa, qb, hist["m"], first_norm, first_rms, drawn_a, drawn_b = gate_call(
+                        zr,
+                        hist.get("before"),
+                        hist.get("m"),
+                        s.up,
+                        hist["adaptive_gram"],
+                        y0_norm,
+                        y0_rms,
+                        s.gate_kappa,
+                        s.gate_coherence,
+                        active,
+                        first_change=first_change,
+                        base=base,
+                        **reference,
+                    )
+                if first_change:
+                    hist["first_norm"], hist["first_rms"] = first_norm, first_rms
+            else:
+                qa, qb, hist["m"] = adaptive_keep(
+                    zr,
+                    hist.get("before"),
+                    hist.get("m"),
+                    s.up,
+                    y0_norm,
+                    y0_rms,
+                    s.gate_kappa,
+                    s.gate_coherence,
+                    active=active,
+                    gram=hist["adaptive_gram"],
+                    **reference,
+                )
             hist["before"] = zr
             hist["q"] = (qa if region is None else qa * region, qb)
             if limit is not None:
@@ -2911,6 +3029,11 @@ def split_gate(
             stats.append(qb.flatten())
         if last is True or expect_masks():
             ha, hb = qa, qb
+        elif drawn_a is not None:
+            ha, hb = drawn_a, drawn_b
+            if isinstance(last, torch.Tensor):
+                ha = torch.where(last, qa, ha)
+                hb = (hb, qb) if channel_rows else torch.where(last, qb, hb)
         else:
             n = qa.numel()
             name = f"{target}#{i}#adaptive"
@@ -2924,9 +3047,12 @@ def split_gate(
             hb = masks[n:].reshape(qb.shape)
             if isinstance(last, torch.Tensor):
                 ha = torch.where(last, qa, ha)
-                hb = torch.where(last, qb, hb)
+                hb = (hb, qb) if channel_rows else torch.where(last, qb, hb)
         a = ha if a is None else a * ha
-        b = hb if b is None else b * hb
+        if isinstance(hb, tuple):
+            b = hb if b is None else (b * hb[0], b * hb[1])
+        else:
+            b = hb if b is None else b * hb
     if a is None:
         return None
     return (a if region is None else a * region), b
@@ -3071,7 +3197,7 @@ def _separable_scores(zf, zp, up, y0_norm, y0_rms, w, tp, tw1, tb1, tw2, tb2, cw
     tokens = zf.shape[-2]
     v = zf if zp is None else torch.stack([zf, zp])
     norms = ((v @ gram) * v).sum(-1).clamp(min=0).sqrt()
-    chans = (((v.transpose(-1, -2) @ v / tokens) @ up) * up).sum(-2).clamp(min=0).sqrt()
+    chans = (((_token_gram(v) / tokens) @ up) * up).sum(-2).clamp(min=0).sqrt()
     if zp is None:
         norm, norm_p = norms, torch.zeros_like(norms)
         chan_z, chan_p = chans, torch.zeros_like(chans)
@@ -3327,6 +3453,7 @@ def generation(
             position["i"] += 1
         position["t"] = step
         ctx = contextlib.ExitStack()
+        ctx.enter_context(_route_freeze.release_after_records())
         ctx.enter_context(dropout_key(seed, t))
         if steps is not None:
             ctx.enter_context(sampling_progress(position["i"] / max(steps - 1, 1)))
@@ -3513,11 +3640,17 @@ def import_score(s: LayerSet | None = None, *, form: str | None = None) -> str:
     return value
 
 
-DEFAULT_DERIVED_MODE = "keys"
+DEFAULT_DERIVED_MODE = "full"
 
 
-def derived_mode():
-    mode = os.environ.get("KILORA_DERIVED_MODE", DEFAULT_DERIVED_MODE)
+SAVED_DERIVED_MODE_MISSING = "keys"
+
+
+def derived_mode(s=None):
+    mode = os.environ.get("KILORA_DERIVED_MODE")
+    if not mode:
+        own = s if isinstance(s, str) else getattr(s, "derived_mode", None)
+        mode = own or DEFAULT_DERIVED_MODE
     if mode not in ("full", "keys"):
         raise ValueError("KILORA_DERIVED_MODE must be full or keys")
     return mode
@@ -3541,7 +3674,7 @@ def derived_default_depth():
 
 def share_transition_gamma(s=None):
     derived = import_score(s) == "derived"
-    if derived and derived_mode() == "keys":
+    if derived and derived_mode(s) == "keys":
         return 0.0
     value = float(
         os.environ.get(
@@ -4200,23 +4333,38 @@ def _derived_logits(s: LayerSet, x: torch.Tensor) -> torch.Tensor:
             }
             chosen = {} if override is None else {"entry": override}
             with active_overrides(chosen):
-                return _run("entry", "from_input", inputs, sizes)["logits"]
+                variant = "from_input" if s.form == "state" else "chance_from_input"
+                return _run("entry", variant, inputs, sizes)["logits"]
         if needs_interpreter and override is not None:
             raise NotImplementedError("entry override requires float32 input without diffusion")
         if needs_interpreter:
             from .fused import _note
 
             _note("IR driver refused entry: unsupported dtype, layout, or diffusion")
-    keys = _as(kin, x.dtype).flatten(0, 1)
-    proj = (x @ keys.T).float().unflatten(-1, kin.shape[:2])
+    if s.form == "state":
+        keys = _as(kin, x.dtype).flatten(0, 1)
+        proj = (x @ keys.T).float().unflatten(-1, kin.shape[:2])
+        energy = torch.linalg.vector_norm(x.float(), dim=-1, keepdim=True).square()
+        logits = s.tau * proj.square().sum(-1) / (energy + SCORE_EPS)
+        logits = logits / (rows.clamp_min(1).float() / kin.shape[-1])
+        matrices = derived_diffusion_matrices(s) if derived_diffusion() else None
+        return logits @ matrices[1].T if matrices is not None else logits
+    keys = kin.float().flatten(0, 1)
+    proj = (x.float() @ keys.T).float().unflatten(-1, kin.shape[:2])
     energy = torch.linalg.vector_norm(
-        x.float() if s.form == "state" else x,
+        x.float(),
         dim=-1,
         keepdim=True,
         dtype=torch.float32,
     ).square()
-    logits = s.tau * proj.square().sum(-1) / (energy + SCORE_EPS)
-    logits = logits / (rows.clamp_min(1).float() / kin.shape[-1])
+    share = proj.square().sum(-1) / (energy + SCORE_EPS)
+    rank = rows.float()
+    width = kin.shape[-1]
+    variance = 2 * rank * (width - rank) / (width * width * (width + 2))
+    valid = (rank > 0) & (rank < width)
+    logits = s.tau * torch.where(
+        valid, (share - rank / width) / torch.where(variance > 0, variance, 1.0).sqrt(), 0.0
+    )
     matrices = derived_diffusion_matrices(s) if derived_diffusion() else None
     return logits @ matrices[1].T if matrices is not None else logits
 
@@ -4299,7 +4447,7 @@ def _import_gates(ins, coefs, regions, x, prev=None, transitions=None, gamma=0.0
         else:
             energy = read_energy(s, c)
             logits = s.tau * energy / (energy.sum(-1, keepdim=True) + 1e-12)
-        if prev is not None and import_score(s) == "derived" and derived_mode() == "full":
+        if prev is not None and import_score(s) == "derived" and derived_mode(s) == "full":
             logits = logits * derived_lift_after()
         if prev is not None and transitions is not None and transitions[i] is not None:
             logits = logits + gamma * (prev[i].float() @ transitions[i] + 1e-6).log()
@@ -4314,20 +4462,7 @@ def _import_gates(ins, coefs, regions, x, prev=None, transitions=None, gamma=0.0
         if mu:
             seed = prev[i] if prev is not None else _gate(logits, s, 0.0, region, candidate_mask)
             logits = logits - mu * (seed.float() @ derived_conflict(s))
-        if (
-            import_score(s) == "derived"
-            and derived_mode() == "keys"
-            and s.routing_select == "top1"
-            and not torch.is_grad_enabled()
-        ):
-            check_routing(s.routing_scope, s.routing_select)
-            choice_logits = region_mean(logits, region) if s.routing_scope == "tensor" else logits
-            if candidate_mask is not None:
-                choice_logits = choice_logits.masked_fill(~candidate_mask, -torch.inf)
-            choice = choice_logits.argmax(-1, keepdim=True)
-            gate = torch.zeros_like(choice_logits).scatter(-1, choice, 1.0).expand_as(logits)
-        else:
-            gate = _gate(logits, s, 0.0, region, candidate_mask)
+        gate = _gate(logits, s, 0.0, region, candidate_mask)
         out.append(gate)
     return out
 
@@ -4339,7 +4474,7 @@ def _axis_import_gates(ins, coefs, regions, x, query, prev=None, transitions=Non
         mode = import_score(s)
         if mode == "derived":
             score = derived_logits(s, x)
-            if prev is not None and derived_mode() == "full":
+            if prev is not None and derived_mode(s) == "full":
                 score = score * derived_lift_after()
         elif mode == "read_share":
             energy = read_energy(s, c)
@@ -4414,40 +4549,48 @@ def _import_fold_history(part, scale, steps, iteration, region, hist, up=None):
     weight = HISTORY_RATE**count if iteration == "path" else 1 - HISTORY_RATE**count
     hist["before"], hist["m"] = before, unit * weight
     if up is not None and not base_reference():
+        gram = up_gram(up)
         up = up.detach().float()
-        hist["first_norm"], hist["first_rms"] = change_stats(unit, up, up @ up.t())
+        hist["first_norm"], hist["first_rms"] = change_stats(unit, up, gram)
     return change
 
 
-def _run_input_fused(x, y0, sets, once, depth, regs, target, td=None, entry=None, stats=None):
-    if _STEP_CARRY and _ablation.carry_steps(False):
-        return _run_input(x, y0, sets, once, depth, regs, target, td, entry, stats)
-    skip_active = False
-    if len(once) == 1 and depth >= 3:
-        s = sets[once[0]]
-        if import_score(s) == "derived" and derived_mode() == "full":
-            from .segments import has_skips, skip_decisions
+def _count_import(on_fused: bool) -> None:
+    if _FUSED and os.environ.get("KILORA_FUSED", "1").strip() != "0":
+        _FUSED[0].count_import(on_fused)
 
-            skip_active = has_skips(skip_decisions(s))
-    if (
-        not skip_active
-        and len(once) == 1
-        and sets[once[0]].direction_core is None
-        and depth >= 1
-        and not (import_score(sets[once[0]]) == "derived" and derived_exclusion())
-        and _fast_path_ok(y0, [sets[once[0]]], 0.0, None, None)
-    ):
-        fused = _fused_module()
+
+def _import_fast_ok(y0, sets, depth, td=None) -> bool:
+    if not _fast_path_ok(y0, sets, 0.0, None, None, allow_depth_split=True):
+        return False
+    if not any(depth_split_on(s) for s in sets if s.down is not None):
+        return True
+    fused = _fused_module()
+    if fused is None:
+        return False
+    reason = fused.import_split_reason(sets, depth, td)
+    if reason is not None:
+        fused.refuse_import(reason)
+        return False
+    return True
+
+
+def _run_input_fused(x, y0, sets, once, depth, regs, target, td=None, entry=None, stats=None):
+    fused = _fused_module()
+    reason = _import_fused_reason(y0, sets, once, depth, td, fused)
+    skips = None
+    if reason is None:
         s = sets[once[0]]
-        if (
-            fused is not None
-            and not _READ_KEEP_DETAIL_OBSERVERS
-            and fused.fused_ok(y0, [s], depth, td=td)
-        ):
+        skips = _import_skips(s, depth)
+        if skips is not None:
+            reason = fused.import_skip_reason(s, depth, td, regs[once[0]])
+    if reason is None:
+        s = sets[once[0]]
+        if fused.fused_ok(y0, [s], depth, td=td):
             name = f"{target}#input{once[0]}"
             reg = [regs[once[0]]]
             try:
-                return fused.run_fused(
+                out = fused.run_fused(
                     y0,
                     [s],
                     depth,
@@ -4459,12 +4602,52 @@ def _run_input_fused(x, y0, sets, once, depth, regs, target, td=None, entry=None
                     td=td,
                     entry=entry,
                     path_stats=stats,
+                    skips=skips,
                 )
             except Exception as err:
                 if not fused.resource_error(err):
                     raise
                 fused.mark_too_big(y0, [s])
+                reason = "kernels too big for the device"
+            else:
+                _count_import(True)
+                return out
+        else:
+            reason = f"fused kernels refused the call ({fused._CALL_REASON.get() or 'off'})"
+    if fused is not None and reason:
+        fused.import_eager(reason)
+    _count_import(False)
     return _run_input(x, y0, sets, once, depth, regs, target, td, entry, stats)
+
+
+def _import_skips(s, depth):
+    if _depth_parts(depth)[0] < 3 or import_score(s) != "derived" or derived_mode(s) != "full":
+        return None
+    from .segments import has_skips, skip_decisions
+
+    skips = skip_decisions(s)
+    return skips if has_skips(skips) else None
+
+
+def _import_fused_reason(y0, sets, once, depth, td, fused):
+    if _STEP_CARRY and _ablation.carry_steps(False):
+        return "imported call with the step carry ablation"
+    if fused is None:
+        return ""
+    if len(once) != 1:
+        return "more than one imported set in one call"
+    s = sets[once[0]]
+    if s.direction_core is not None:
+        return "imported set with a direction core"
+    if depth < 1:
+        return "imported call below depth 1"
+    if import_score(s) == "derived" and derived_exclusion():
+        return "derived import with entry exclusion"
+    if not _import_fast_ok(y0, [s], depth, td):
+        return "imported call off the eager fast path"
+    if _READ_KEEP_DETAIL_OBSERVERS or _READ_KEEP_RAW_OBSERVERS:
+        return "imported call while read keeps are observed"
+    return None
 
 
 def _replay_import_chain(x, y0, sets, once, depth, regs, target, stats, entry=None):
@@ -4474,11 +4657,12 @@ def _replay_import_chain(x, y0, sets, once, depth, regs, target, stats, entry=No
         if (
             fused is not None
             and not _READ_KEEP_DETAIL_OBSERVERS
-            and _fast_path_ok(y0, [st], 0.0, None, None)
+            and not _READ_KEEP_RAW_OBSERVERS
+            and _import_fast_ok(y0, [st], depth)
             and fused.fused_ok(y0, [st], depth)
         ):
             try:
-                return fused.run_fused(
+                out = fused.run_fused(
                     y0,
                     [st],
                     depth,
@@ -4490,10 +4674,13 @@ def _replay_import_chain(x, y0, sets, once, depth, regs, target, stats, entry=No
                     entry=entry,
                     path_stats=stats,
                 )
+                fused.count_import(True)
+                return out
             except Exception as err:
                 if not fused.resource_error(err):
                     raise
                 fused.mark_too_big(y0, [st])
+    _count_import(False)
     return _run_input(x, y0, sets, once, depth, regs, target, entry=entry, stats=stats)
 
 
@@ -4532,7 +4719,7 @@ def derived_entries(s, x, target, width, region=None, prior=None, omega=0.0, pai
             (ids.to(logits.device), torch.arange(len(pairs), device=logits.device) + 0x40000000)
         )
     columns = _mix32(ids.to(device=logits.device, dtype=torch.int64).clone())
-    if temp == 0:
+    if temp == 0 or expect_masks():
         scores = logits
     else:
         u = dropout_uniforms(logits.shape, target + "#entry", 1, logits.device, columns)
@@ -4576,6 +4763,7 @@ def derived_entries(s, x, target, width, region=None, prior=None, omega=0.0, pai
         active = active.ne(0).any(-1)
         valid = (active.to(mapping.dtype) @ mapping.T) == mapping.sum(-1)
         valid = valid | ~active.any(-1, keepdim=True)
+        valid = valid.expand_as(scores)
         best = scores.masked_fill(~valid, -torch.inf).argmax(-1, keepdim=True)
         order = torch.where(valid.gather(-1, order), order, best)
     return [mapping[order[..., i]] for i in range(order.shape[-1])]
@@ -5024,6 +5212,151 @@ def _derived_exact_extra(s, x, coefs, weights, region, scale, gate, dtype):
     return extra
 
 
+_EXPERT_ID_KEYS: dict[int, tuple] = {}
+EXPERT_ID_READS = [0]
+
+
+def _expert_id_key(ids: torch.Tensor) -> tuple:
+    version = None if ids.is_inference() else ids._version
+    held = _EXPERT_ID_KEYS.get(id(ids))
+    if held is not None and held[0]() is ids and held[1] == version:
+        return held[2]
+    value = tuple(ids.detach().cpu().tolist())
+    EXPERT_ID_READS[0] += 1
+    if len(_EXPERT_ID_KEYS) > 4096:
+        _EXPERT_ID_KEYS.clear()
+    _EXPERT_ID_KEYS[id(ids)] = (weakref.ref(ids), version, value)
+    return value
+
+
+def _derived_stacked_walks(x, y0, sets, i, depth, regs, target, entries, skips=None, record=False):
+    from .path_walks import select_weights
+
+    s = sets[i]
+    fused = _fused_module()
+    states = [{"record_macro": True} if record else {} for _ in entries]
+    try:
+        paths = fused.run_fused(
+            y0,
+            [s],
+            depth,
+            False,
+            target,
+            [regs[i]],
+            x=x,
+            name=f"{target}#input{i}",
+            walks=torch.stack(entries),
+            walk_stats=states,
+            skips=skips,
+        )
+    except Exception as err:
+        if not fused.resource_error(err):
+            raise
+        fused.mark_too_big(y0, [s])
+        fused.count_walks(False, "stacked walks do not fit the device")
+        return None
+    fused.count_import(True)
+    fused.count_walks(True)
+    for state in states:
+        state.setdefault("converged", torch.zeros_like(state["score"], dtype=torch.bool))
+    weights = select_weights(states, s.path_select)
+    change = sum(
+        (paths[n] - y0) * weights[..., n : n + 1].to(paths.dtype) for n in range(len(entries))
+    )
+    return change, states, weights
+
+
+def _folded_stacked_replay(x, y0, sets, i, depth, regs, target, saved):
+    s = sets[i]
+    fused = _fused_module()
+    if fused is None:
+        return None
+    states = saved["paths"]
+    reason = None
+    if os.environ.get("KILORA_DERIVED_STACKED", "1") == "0":
+        reason = "folded replay with the stacked walks turned off"
+    elif len(states) < 2:
+        reason = "folded replay of one walk"
+    elif _READ_KEEP_DETAIL_OBSERVERS or _READ_KEEP_RAW_OBSERVERS:
+        reason = "folded replay while read keeps are observed"
+    elif y0.is_cuda and torch.cuda.is_current_stream_capturing():
+        reason = "folded replay while a graph is captured"
+    elif not (_import_fast_ok(y0, [s], depth) and fused.fused_ok(y0, [s], depth)):
+        reason = "folded replay without the fused import chain"
+    else:
+        reason = fused.walks_reason(y0, s)
+        if reason is not None:
+            reason = f"folded replay: {reason}"
+    forced = saved.get("stacked_forced")
+    if reason is None and forced is None:
+        forced = {}
+        for name, key in (
+            ("forced_routes", "routes"),
+            ("forced_gates", "output_gates"),
+            ("forced_read_keeps", "read_keeps"),
+        ):
+            parts = [st.get(key) for st in states]
+            if not parts[0]:
+                if any(parts):
+                    reason = f"folded replay with {key} on some walks only"
+                continue
+            if any(not part or len(part) != len(parts[0]) for part in parts):
+                reason = f"folded replay with {key} of different lengths"
+                break
+            if key == "output_gates":
+                forced[name] = [
+                    tuple(torch.stack(v) for v in zip(*step, strict=True))
+                    for step in zip(*parts, strict=True)
+                ]
+            else:
+                forced[name] = [torch.stack(step) for step in zip(*parts, strict=True)]
+        if reason is None:
+            saved["stacked_forced"] = forced
+            for name, key in (
+                ("forced_routes", "routes"),
+                ("forced_gates", "output_gates"),
+                ("forced_read_keeps", "read_keeps"),
+            ):
+                for n, st in enumerate(states):
+                    if name in forced:
+                        st[key] = [
+                            tuple(v[n] for v in step) if isinstance(step, tuple) else step[n]
+                            for step in forced[name]
+                        ]
+    if reason is None:
+        try:
+            out = fused.run_fused(
+                y0,
+                [s],
+                depth,
+                False,
+                target,
+                [regs[i]],
+                x=x,
+                name=f"{target}#input{i}",
+                walks=forced["forced_routes"][0],
+                path_stats=forced,
+            )
+        except Exception as err:
+            if not fused.resource_error(err):
+                raise
+            fused.mark_too_big(y0, [s])
+            reason = "folded replay does not fit the device"
+        else:
+            fused.count_import(True)
+            fused.count_folded(True)
+            return out
+    fused.count_folded(False, reason)
+    return None
+
+
+def _add_derived_change(s, out, change):
+    if s.expert_mask is None:
+        return out + change
+    active = s.expert_mask.ne(0).any(-1, keepdim=True)
+    return torch.where(active, out + change, out)
+
+
 def _run_derived_walks(x, y0, sets, once, depth, regs, target, td, index, macro_allowed, progress):
     from .path_walks import select_weights
 
@@ -5040,11 +5373,7 @@ def _run_derived_walks(x, y0, sets, once, depth, regs, target, td, index, macro_
         if anchor < 0:
             raise ValueError("KILORA_DERIVED_ANCHOR must be nonnegative")
         cache = _DERIVED_CARRY[-1] if _DERIVED_CARRY and omega > 0 else None
-        ids = (
-            None
-            if cache is None or s.expert_ids is None
-            else tuple(s.expert_ids.detach().cpu().tolist())
-        )
+        ids = None if cache is None or s.expert_ids is None else _expert_id_key(s.expert_ids)
         key = (s.key, s.axis, ids)
         record = cache.get(key) if cache is not None else None
         first_block = (
@@ -5072,6 +5401,7 @@ def _run_derived_walks(x, y0, sets, once, depth, regs, target, td, index, macro_
         from .segments import has_skips, skip_decisions
 
         skip_active = depth >= 3 and has_skips(skip_decisions(s))
+        split_unchained = depth > 1 and depth_split_on(s) and not _import_depth_chain(s)
         nofold = (
             os.environ.get("KILORA_DERIVED_FREEZE_NOFOLD") == "1"
             and os.environ.get("KILORA_DERIVED_MACRO", "1") == "0"
@@ -5082,7 +5412,8 @@ def _run_derived_walks(x, y0, sets, once, depth, regs, target, td, index, macro_
             and not (_STEP_CARRY and _ablation.carry_steps(False))
             and not (0 < s.candidates < s.keys_in.shape[0])
             and not skip_active
-            and derived_mode() == "full"
+            and not split_unchained
+            and derived_mode(s) == "full"
             and (nofold or os.environ.get("KILORA_DERIVED_MACRO", "1") != "0")
             and _route_freeze.active([s], progress)
             and not torch.is_grad_enabled()
@@ -5099,12 +5430,10 @@ def _run_derived_walks(x, y0, sets, once, depth, regs, target, td, index, macro_
                 or _route_freeze.RECORDS
             )
         )
+        share_observed = bool(_SET_SHARES)
         macro_key = ("derived_nofold" if nofold else "derived_macro", target, i)
         tensor_key = _tensor_key("macro", [s.down, s.up]) if macro else None
         macro = macro and tensor_key is not None
-        if macro:
-            cache = None
-            prior = None
         signature = (
             tuple(x.shape),
             x.device,
@@ -5126,31 +5455,48 @@ def _run_derived_walks(x, y0, sets, once, depth, regs, target, td, index, macro_
         )
         saved = _route_freeze._CACHES[-1].get(macro_key) if macro else None
         folded = saved is not None and saved["signature"] == signature
+        if share_observed and not folded:
+            macro = False
         if macro:
+            cache = None
+            prior = None
             _route_freeze.note_fold(folded, nofold)
         if folded and (nofold or saved.get("chain")):
             paths = []
-            for state in saved["paths"]:
-                stats = {
-                    "forced_routes": state["routes"],
-                    "forced_gates": state.get("output_gates"),
-                    "forced_read_keeps": state.get("read_keeps"),
-                }
-                paths.append(
-                    _replay_import_chain(
-                        x, y0, sets, [i], depth, regs, target, stats, state["routes"][0]
-                    )
+            with _SET_SHARES.hidden() as observers:
+                stacked_paths = (
+                    _folded_stacked_replay(x, y0, sets, i, depth, regs, target, saved)
                     if saved.get("chain")
-                    else _run_input_fused(
-                        x, y0, sets, [i], depth, regs, target, td, state["routes"][0], stats
-                    )
+                    else None
                 )
-            out = out + sum(
+                if stacked_paths is not None:
+                    paths = list(stacked_paths)
+                for state in saved["paths"] if stacked_paths is None else ():
+                    stats = {
+                        "forced_routes": state["routes"],
+                        "forced_gates": state.get("output_gates"),
+                        "forced_read_keeps": state.get("read_keeps"),
+                    }
+                    paths.append(
+                        _replay_import_chain(
+                            x, y0, sets, [i], depth, regs, target, stats, state["routes"][0]
+                        )
+                        if saved.get("chain")
+                        else _run_input_fused(
+                            x, y0, sets, [i], depth, regs, target, td, state["routes"][0], stats
+                        )
+                    )
+            _note_set_shares(observers, target, [saved["gates"]], [s])
+            _note_fused_mass(target, [saved["gates"]], [s], walks=True)
+            change = sum(
                 (path - y0) * saved["path_weights"][..., n : n + 1].to(path.dtype)
                 for n, path in enumerate(paths)
             )
+            out = _add_derived_change(s, out, change)
             continue
         if folded:
+            _note_set_shares(tuple(_SET_SHARES), target, [saved["gates"]], [s])
+            _note_fused_mass(target, [saved["gates"]], [s], walks=True)
             coef = _input_read(s, x, y0.dtype).float()
             if regs[i] is not None:
                 coef = coef * regs[i].float()
@@ -5180,7 +5526,7 @@ def _run_derived_walks(x, y0, sets, once, depth, regs, target, td, index, macro_
                         * b.float()
                         for w, b in zip(saved["weight"], gates, strict=True)
                     )
-            out = out + delta.to(y0.dtype)
+            out = _add_derived_change(s, out, delta.to(y0.dtype))
             if cache is not None and compatible:
                 cache[key] = {
                     "shape": shape,
@@ -5191,7 +5537,7 @@ def _run_derived_walks(x, y0, sets, once, depth, regs, target, td, index, macro_
                 }
             continue
         pairs = ()
-        if first_block and derived_mode() == "full":
+        if first_block and derived_mode(s) == "full":
             from . import segments
 
             pairs = segments.prepare(s)
@@ -5240,19 +5586,37 @@ def _run_derived_walks(x, y0, sets, once, depth, regs, target, td, index, macro_
         from . import linear_jump
 
         fused = _fused_module()
-        batched = (
+        walk_base = (
             os.environ.get("KILORA_DERIVED_BATCHED", "1") != "0"
             and not _ablation.force_loop()
             and not (_STEP_CARRY and _ablation.carry_steps(False))
-            and not macro
             and not (0 < s.candidates < s.keys_in.shape[0])
             and not pairs
-            and not skip_active
             and not linear_jump._RECORDS
             and not (fused is not None and fused._TRACE)
             and not s.jump_fits
+            and not split_unchained
             and not (y0.is_cuda and torch.cuda.is_current_stream_capturing())
-            and derived_mode() == "full"
+            and derived_mode(s) == "full"
+            and td is None
+            and not torch.is_grad_enabled()
+            and not derived_exclusion()
+            and s.aggregation == "accumulate"
+            and learned_kind(s) == "none"
+            and not (
+                _ROUTES
+                or _SHARES
+                or _DIRECTION_SHARES
+                or _SET_SHARES
+                or _GATE_STATS
+                or _PROBES
+                or _route_freeze.RECORDS
+            )
+        )
+        batched = (
+            walk_base
+            and not macro
+            and not skip_active
             and (
                 not y0.is_cuda
                 or os.environ.get("KILORA_DERIVED_BATCHED", "1") == "fast"
@@ -5265,19 +5629,6 @@ def _run_derived_walks(x, y0, sets, once, depth, regs, target, td, index, macro_
                         and s.up.shape[0] <= fused._COLUMN_BLOCK
                     )
                 )
-            )
-            and td is None
-            and not torch.is_grad_enabled()
-            and not derived_exclusion()
-            and s.aggregation == "accumulate"
-            and learned_kind(s) == "none"
-            and not (
-                _ROUTES
-                or _SHARES
-                or _DIRECTION_SHARES
-                or _GATE_STATS
-                or _PROBES
-                or _route_freeze.RECORDS
             )
         )
         speculate_ok = (
@@ -5293,7 +5644,56 @@ def _run_derived_walks(x, y0, sets, once, depth, regs, target, td, index, macro_
             and isinstance(s.scale, (int, float))
             and not s.fixed_point_stop
         )
-        if speculate_ok:
+        stacked = None
+        walk_skips = _import_skips(s, walk_depth) if skip_active else None
+        if walk_base and fused is not None:
+            reason = None
+            if walk_skips is not None:
+                reason = fused.import_skip_reason(s, walk_depth, td, regs[i])
+            if reason is not None:
+                reason = f"stacked {reason}"
+            elif os.environ.get("KILORA_DERIVED_STACKED", "1") == "0":
+                reason = "stacked walks are turned off"
+            elif os.environ.get("KILORA_DERIVED_BATCHED", "1") == "fast":
+                reason = "stacked walks with the fast batched walks"
+            elif speculate_ok:
+                reason = "stacked walks while the routes are speculated"
+            elif not (
+                _import_fast_ok(y0, [s], walk_depth)
+                and not _IR_FALLBACK.get()
+                and fused._fused_ok(y0, [s], walk_depth)
+            ):
+                reason = "stacked walks without the fused import chain"
+            elif _READ_KEEP_DETAIL_OBSERVERS or _READ_KEEP_RAW_OBSERVERS:
+                reason = "stacked walks while read keeps are observed"
+            else:
+                reason = fused.walks_reason(y0, s)
+            if reason is None:
+                stacked = _derived_stacked_walks(
+                    x, y0, sets, i, walk_depth, regs, target, entries, walk_skips, macro
+                )
+            else:
+                fused.count_walks(False, reason)
+        elif fused is not None and derived_mode(s) == "full":
+            fused.count_walks(
+                False,
+                "stacked walks with segment pair entries"
+                if pairs
+                else "stacked walks with candidate selection"
+                if 0 < s.candidates < s.keys_in.shape[0]
+                else "stacked walks with a folded route record"
+                if macro
+                else "stacked walks with a per-token depth"
+                if td is not None
+                else "stacked walks with a depth split without the import depth chain"
+                if split_unchained
+                else "stacked walks with entry exclusion"
+                if derived_exclusion()
+                else "stacked walks while routes, gates or steps are recorded",
+            )
+        if stacked is not None:
+            change, states, weights = stacked
+        elif speculate_ok:
             speculative = _SPECULATE[-1]
             skey = (target, i)
             signature = (
@@ -5420,22 +5820,33 @@ def _run_derived_walks(x, y0, sets, once, depth, regs, target, td, index, macro_
             )
         else:
             paths, states = [], []
-            for walk_index, entry in enumerate(entries):
-                stats = {"ablation_walk": walk_index}
-                if macro:
-                    stats["record_macro"] = True
-                paths.append(
-                    (_run_input if pairs else _run_input_fused)(
-                        x, y0, sets, [i], walk_depth, regs, target, td, entry, stats
+            recording = bool(_ROUTES or _SHARES or _SET_SHARES or _GATE_STATS or _PROBES)
+            with _SET_SHARE_HOLD.pushed(True):
+                for walk_index, entry in enumerate(entries):
+                    stats = {"ablation_walk": walk_index}
+                    if macro:
+                        stats["record_macro"] = True
+                    eager_walk = pairs or (recording and walk_index > 0)
+                    paths.append(
+                        (_run_input if eager_walk else _run_input_fused)(
+                            x, y0, sets, [i], walk_depth, regs, target, td, entry, stats
+                        )
                     )
-                )
-                stats.setdefault("converged", torch.zeros_like(stats["score"], dtype=torch.bool))
-                states.append(stats)
+                    stats.setdefault(
+                        "converged", torch.zeros_like(stats["score"], dtype=torch.bool)
+                    )
+                    states.append(stats)
             weights = select_weights(states, s.path_select)
             change = sum(
                 (path - y0) * weights[..., n : n + 1].to(path.dtype) for n, path in enumerate(paths)
             )
-        out = out + change
+        out = _add_derived_change(s, out, change)
+        if _SET_SHARES:
+            final = sum(st["gates"] * weights[..., n : n + 1] for n, st in enumerate(states))
+            _note_set_shares(tuple(_SET_SHARES), target, [final], [s])
+        if _FUSED_MASS and states and all("gates" in st for st in states):
+            final = sum(st["gates"] * weights[..., n : n + 1] for n, st in enumerate(states))
+            _note_fused_mass(target, [final], [s], walks=True)
         if macro and all(
             st.get("routes") and (not uses_adaptive(s) or st.get("output_gates")) for st in states
         ):
@@ -5572,6 +5983,22 @@ def _import_depth_coefs(st, base, carried, ups, region, cross=None):
     if region is not None:
         added = added * region.float()
     return base + added
+
+
+def walk_representatives(width, rows, *values):
+
+    first = next(value for value in values if value is not None)
+    owner = torch.arange(width * rows, device=first.device).reshape(width, rows)
+    if os.environ.get("KILORA_WALK_DEDUP", "1") == "0":
+        return owner.reshape(-1)
+    shaped = [v.reshape(width, rows, -1) for v in values if v is not None]
+    for n in range(1, width):
+        for earlier in range(n):
+            equal = torch.ones(rows, dtype=torch.bool, device=first.device)
+            for value in shaped:
+                equal = equal & (value[n] == value[earlier]).all(-1)
+            owner[n] = torch.where(equal, torch.minimum(owner[n], owner[earlier]), owner[n])
+    return owner.reshape(-1)
 
 
 def _exact_correction(st, x, coefs, weights, region, dtype):
@@ -5741,6 +6168,7 @@ def _run_input(
             if has_derived
             else _read_share_gates(ins, coefs, rg, x=x)
         )
+        _note_fused_mass(target, list(gates), ins)
         y = y0
         for i, (st, gate) in enumerate(zip(ins, gates, strict=True)):
             weight = gate.float().repeat_interleave(st.per_expert, dim=-1)
@@ -6001,7 +6429,7 @@ def _run_input(
 
         skip_tables = [
             skip_decisions(st)
-            if not joint_derived and import_score(st) == "derived" and derived_mode() == "full"
+            if not joint_derived and import_score(st) == "derived" and derived_mode(st) == "full"
             else None
             for st in ins
         ]
@@ -6009,10 +6437,14 @@ def _run_input(
     for k in range(1, steps + 1):
         keep = grad_steps is None or grad_steps(k)
         with contextlib.nullcontext() if keep else torch.no_grad():
-            old_zs, old_carried, old_holds = list(zs), list(carried), list(holds)
-            old_exact_weights = list(exact_weights)
-            old_alive = list(alive)
-            old_extras = list(chain_extras)
+            y = None
+            old_holds = list(holds)
+            per_token = td is not None
+            old_zs = list(zs) if per_token else None
+            old_carried = list(carried) if per_token else None
+            old_exact_weights = list(exact_weights) if per_token else None
+            old_alive = list(alive) if per_token else None
+            old_extras = list(chain_extras) if per_token else None
             step_coefs = [
                 _import_depth_coefs(st, coefs[i], carried, ups, rg[i], read_cross[i])
                 if (chains[i] or (joint_derived and st.form == "state")) and k > 1
@@ -6306,9 +6738,7 @@ def _run_input(
                         )
                     if stats is not None and stats.get("record_macro"):
                         stats.setdefault("read_keeps", []).append(m.detach())
-                    for rec in _route_freeze.RECORDS:
-                        keeps = rec.setdefault("input_keeps", {}).setdefault((target, k), {})
-                        keeps[i] = m.detach()
+                    _route_freeze.record_input_keep(target, k, i, m)
                     if holds[i] is None:
                         carried[i] = m * z
                     else:
@@ -6743,9 +7173,30 @@ def _token_values(d: torch.Tensor, y0: torch.Tensor) -> torch.Tensor:
 
 
 class _TokenDepth:
-    def __init__(self, d: torch.Tensor, maximum: float):
+    def __init__(self, d: torch.Tensor, maximum: float, source: torch.Tensor | None = None):
         self.d = d.clamp(min=0)
         self.steps = max(0, math.ceil(maximum))
+        self.source = source
+
+    def rows(self) -> _DepthRows:
+        shape = tuple(self.d.shape)
+
+        def plan():
+            return _DepthRows(self.d, self.steps)
+
+        if self.source is None:
+            return plan()
+        return _tensor_metadata(self.source, f"depth_rows{shape}{self.d.device}", plan)
+
+    def gather(self, tokens: int) -> _DepthGather:
+        shape = tuple(self.d.shape)
+
+        def plan():
+            return _DepthGather(self.d, self.steps, tokens)
+
+        if self.source is None:
+            return plan()
+        return _tensor_metadata(self.source, f"depth_gather{shape}{tokens}{self.d.device}", plan)
 
     def full(self, k: int) -> torch.Tensor:
         return self.d >= k
@@ -6765,6 +7216,140 @@ class _TokenDepth:
         if new is None:
             return None
         return torch.where(self.full(k), new, torch.zeros_like(new) if old is None else old)
+
+
+class _DepthRows:
+    def __init__(self, d: torch.Tensor, steps: int):
+        flat = d.reshape(-1)
+        last = torch.ceil(flat).long().clamp(0, steps)
+        weight = (flat - (last - 1).float()).clamp(0, 1)
+        fractional = (weight < 1) & (last > 0)
+        order = torch.argsort(last, stable=True)
+        lower = torch.nonzero(fractional & (last > 1)).reshape(-1)
+        lower = lower[torch.argsort(last[lower], stable=True)]
+        counts = torch.cat(
+            (
+                torch.bincount(last, minlength=steps + 1),
+                torch.bincount(last[lower] - 1, minlength=steps + 1),
+            )
+        ).tolist()
+        ends, lows = counts[: steps + 1], counts[steps + 1 :]
+        code = torch.where(fractional & (last == 1), weight + 10, weight)
+        groups = list(torch.split(order, ends))
+        lower_groups = list(torch.split(lower, lows))
+        self.steps = steps
+        self.plan = {}
+        for k in range(1, steps + 1):
+            ends_k, lower_k = groups[k], lower_groups[k]
+            parts = [ends_k, lower_k] + ([groups[0]] if k == 1 else [])
+            rows = torch.cat(parts)
+            weights = torch.cat(
+                [code[ends_k], torch.full_like(lower_k, -1, dtype=code.dtype)]
+                + ([torch.full_like(groups[0], -2, dtype=code.dtype)] if k == 1 else [])
+            )
+            is_last = torch.cat(
+                [torch.ones_like(ends_k), torch.zeros_like(lower_k)]
+                + ([torch.zeros_like(groups[0])] if k == 1 else [])
+            )
+            self.plan[k] = (
+                rows.contiguous(),
+                weights.contiguous(),
+                is_last.contiguous(),
+                int(ends_k.numel() + lower_k.numel()),
+            )
+
+    def step(self, k: int):
+        return self.plan[k]
+
+    def computed(self, k: int) -> int:
+        return self.plan[k][3]
+
+
+class _DepthGather:
+    def __init__(self, d: torch.Tensor, steps: int, tokens: int):
+        flat = d.reshape(-1)
+        n = flat.numel()
+        T = tokens
+        B = n // T
+        dev = flat.device
+        last = torch.ceil(flat).long().clamp(0, steps)
+        weight = (flat - (last - 1).float()).clamp(0, 1)
+        fractional = (weight < 1) & (last > 0)
+        by_sample = last.view(B, T)
+        perm = torch.argsort(by_sample, dim=1, descending=True, stable=True)
+        reached = torch.stack([(by_sample >= k).sum(1) for k in range(steps + 2)])
+        ends = torch.nonzero(last > 0).reshape(-1)
+        lower = torch.nonzero(fractional & (last > 1)).reshape(-1)
+        keys = torch.cat((last[ends] * 2, (last[lower] - 1) * 2 + 1))
+        order = torch.argsort(keys, stable=True)
+        entries = torch.cat((ends, lower))[order]
+        kinds = torch.bincount(keys, minlength=2 * (steps + 1))
+        host = torch.cat((reached.reshape(-1), kinds)).tolist()
+        reached_h = [host[k * B : (k + 1) * B] for k in range(steps + 2)]
+        kinds_h = host[(steps + 2) * B :]
+        self.steps, self.tokens, self.samples, self.rows_total = steps, T, B, n
+        self.perm = (perm + (torch.arange(B, device=dev) * T)[:, None]).reshape(-1)
+        self.perm_local = perm.to(torch.int32).contiguous()
+        self.entries = entries
+        self.total = int(entries.numel())
+        self.zero_rows = torch.nonzero(last == 0).reshape(-1)
+        self.zeros = n - int(sum(reached_h[1]))
+        self.ends = [int(kinds_h[2 * k]) for k in range(steps + 1)]
+        self.lows = [int(kinds_h[2 * k + 1]) for k in range(steps + 1)]
+        positions = torch.arange(self.total, device=dev)
+        high = torch.full((n,), -1, dtype=torch.long, device=dev)
+        low = torch.full((n,), -1, dtype=torch.long, device=dev)
+        base_high = [0] * (steps + 2)
+        base_low = [0] * (steps + 2)
+        groups = 0
+        offset = 0
+        self.offsets = [0] * (steps + 2)
+        for k in range(1, steps + 1):
+            self.offsets[k] = offset
+            e, w = self.ends[k], self.lows[k]
+            if e:
+                high[entries[offset : offset + e]] = positions[offset : offset + e]
+                base_high[k] = groups
+                groups += B
+            if w:
+                low[entries[offset + e : offset + e + w]] = positions[offset + e : offset + e + w]
+                base_low[k] = groups
+                groups += B
+            offset += e + w
+        self.offsets[steps + 1] = offset
+        self.groups = groups
+        sample = torch.arange(n, device=dev) // T
+        bh = torch.tensor(base_high, device=dev)
+        bl = torch.tensor(base_low, device=dev)
+        self.high = high.contiguous()
+        self.low = low.contiguous()
+        self.high_group = (bh[last] + sample).contiguous()
+        self.low_group = (bl[(last - 1).clamp(min=0)] + sample).contiguous()
+        code = torch.where(fractional & (last == 1), weight + 10, weight)
+        code = torch.where(fractional & (last > 1), weight, code)
+        code = torch.where(fractional, code, torch.ones_like(code))
+        self.code = torch.where(last == 0, torch.full_like(code, -2.0), code).contiguous()
+        self.plan = {}
+        for k in range(1, steps + 1):
+            counts = reached_h[k]
+            local = self.perm.view(B, T)
+            rows = torch.cat([local[b, : counts[b]] for b in range(B)]).contiguous()
+            lk = last[rows]
+            entry = torch.where(lk == k, high[rows], torch.full_like(lk, -1))
+            entry = torch.where((lk == k + 1) & fractional[rows], low[rows], entry)
+            self.plan[k] = (
+                rows,
+                entry.contiguous(),
+                torch.tensor(counts, dtype=torch.int32, device=dev),
+                max(counts),
+                int(sum(reached_h[k])),
+            )
+
+    def step(self, k: int):
+        return self.plan[k]
+
+    def picked(self, k: int) -> torch.Tensor:
+        return self.entries[self.offsets[k] : self.offsets[k + 1]]
 
 
 def _depth_parts(depth: int | float) -> tuple[int, int, float]:
@@ -6868,6 +7453,48 @@ def _note_directions(target, step, sets, gates):
 _SHARES = ContextStack("kilora_shares")
 _SET_SHARES = ContextStack("kilora_set_shares")
 _SET_SHARE_SCOPES = ContextStack("kilora_set_share_scopes")
+_SET_SHARE_HOLD = ContextStack("kilora_set_share_hold")
+
+
+_FUSED_MASS = ContextStack("kilora_fused_mass")
+
+
+@contextlib.contextmanager
+def observing_fused_mass(fn: Callable) -> Iterator[None]:
+    with _FUSED_MASS.pushed(fn):
+        yield
+
+
+def _note_fused_mass(target: str, gates: list, sets, walks: bool = False) -> None:
+    if _call_profile.outside_chain():
+        _call_profile.tick("layer")
+        try:
+            return _note_fused_mass_body(target, gates, sets, walks)
+        finally:
+            _call_profile.tick("stats")
+    return _note_fused_mass_body(target, gates, sets, walks)
+
+
+def _note_fused_mass_body(target: str, gates: list, sets, walks: bool = False) -> None:
+    if not _FUSED_MASS or not gates or (_SET_SHARE_HOLD and not walks):
+        return
+    if sets is not None and any(getattr(s, "window_indices", None) for s in sets):
+        from .entry_window import full_window_gates
+
+        gates = full_window_gates(gates, sets)
+    for fn in tuple(_FUSED_MASS):
+        fn(target, [g.detach() for g in gates], sets)
+
+
+def _note_set_shares(observers, target: str, gates: list[torch.Tensor], sets) -> None:
+    if not observers or not gates:
+        return
+    if sets is not None and any(getattr(s, "window_indices", None) for s in sets):
+        from .entry_window import full_window_gates
+
+        gates = full_window_gates(gates, sets)
+    for fn in observers:
+        fn(target, [g.detach() for g in gates], sets)
 
 
 @contextlib.contextmanager
@@ -6921,12 +7548,15 @@ def _note_routes_now(target: str, gates: list[torch.Tensor], sets=None) -> None:
         gates = full_window_gates(gates, sets)
     if _route_freeze.RECORDS and gates:
         _route_freeze.note_routes(target, gates)
+    if _FUSED_MASS and gates:
+        _note_fused_mass(target, gates, sets)
     if not gates or not (_ROUTES or _SHARES or _SET_SHARES):
         return
     for fn in _SHARES:
         fn(target, [g.detach() for g in gates])
-    for fn in tuple(_SET_SHARES):
-        fn(target, [g.detach() for g in gates], sets)
+    if not _SET_SHARE_HOLD:
+        for fn in tuple(_SET_SHARES):
+            fn(target, [g.detach() for g in gates], sets)
     if not _ROUTES:
         return
     choice = torch.stack([g.detach().argmax(-1) for g in gates], -1).cpu()

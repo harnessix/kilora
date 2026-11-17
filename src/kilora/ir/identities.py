@@ -19,7 +19,7 @@ NATIVE_IDENTITIES = {
     ("gate", "adaptive_active"): "b3233d875c544bc3304b02c4d2bf59b469d2e61a69ea4f3e8056f55580641c60",
     ("gate", "mask_expect"): "843de8dae61bc604001a519fcc715c8531ab230572aec9becdaa89a11bf4d5da",
     ("gate", "mask_sample"): "5928db10bbfa96c8bdf2ef2bb015fc5e56ee0a9a6624829875313dc74a4b94b4",
-    ("guard", "default"): "6a61048b6d23cfd5d4e58f9a181cbfbee529c3577d3e83fc38d9a8d98a20f341",
+    ("guard", "default"): "54d14a839f064cb04479678e965b10e6eed15765de9a328de8bd00215027d745",
     ("iterate", "accumulate"): "c31a1dbf3ba4face9711f1bec265a7a37eef455394c3a9fd7445eaf95d90a61e",
     ("iterate", "gated_read"): "62acd70ca758f7266aa91a3843893ccd9f0c38e8e6b214543c195b3979d1db2a",
     (
@@ -52,12 +52,12 @@ NATIVE_IDENTITIES = {
         "select",
         "tensor_sparsemax",
     ): "60546cd3a27e04be9eae10303fd2220b315439a8846b4c150ad27d5fa087d13c",
-    ("select", "tensor_top1"): "f22ab559f45b18db3d64c5ed1c3321f34daf53ff05217b8ec30987422d1886f1",
+    ("select", "tensor_top1"): "dfd25ea96620207e210494a255401cbca6265271b6ae63ae6f2aa2e71e6cdb67",
     (
         "select",
         "token_sparsemax",
     ): "2048acbe84e1440923af2ef132b522a37d251d1cd3f49326326ab287cfaf6bd7",
-    ("select", "token_top1"): "af0a1919ba7e2d64a329fb1190b8928b39c766873694850cc609647be0b1abb9",
+    ("select", "token_top1"): "ddaef7aee84ebbe89776cc6901cd57167043fdac52fbb25e6a62f7c63db7a98d",
     (
         "transition",
         "cosine_row",

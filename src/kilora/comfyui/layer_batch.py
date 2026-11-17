@@ -211,7 +211,7 @@ def _composed(conds, options, separate, tell):
         return None
     if any(c.get("kilora_crop") == "auto" for c in layers):
         tell("compose single does not use the crop input of the layers.")
-    tell(layer_compose.settings_note())
+    tell(layer_compose.settings_note(info[0]))
     from comfy.conds import CONDRegular
 
     key = layer_compose.register(info)

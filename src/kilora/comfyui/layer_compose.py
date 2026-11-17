@@ -20,6 +20,7 @@ MOUNT_WEIGHTS = "text"
 SELF_PENALTY = 1.0
 SELF_END = None
 MOUNT_SCOPE = "all"
+MOUNT_SCOPES = ("cross_kv", "all")
 SINGLE_READY = True
 
 FAMILIES = ("anima", "cosmos")
@@ -49,6 +50,8 @@ class Segment:
 @dataclass(frozen=True)
 class ComposedLayout:
     segments: tuple[Segment, ...]
+    self_penalty: float | None = None
+    mount_scope: str | None = None
 
     @property
     def lengths(self) -> tuple[int, ...]:
@@ -127,15 +130,25 @@ def self_end() -> float:
     return float(TEXT_END if SELF_END is None else SELF_END)
 
 
-def self_penalty(progress: float) -> float:
-    strength = max(float(SELF_PENALTY), 0.0)
+def penalty_of(layout: ComposedLayout | None = None) -> float:
+    value = getattr(layout, "self_penalty", None)
+    return float(SELF_PENALTY if value is None else value)
+
+
+def scope_of(layout: ComposedLayout | None = None) -> str:
+    value = getattr(layout, "mount_scope", None)
+    return str(MOUNT_SCOPE if value is None else value)
+
+
+def self_penalty(progress: float, layout: ComposedLayout | None = None) -> float:
+    strength = max(penalty_of(layout), 0.0)
     return strength if strength > 0 and progress < self_end() else 0.0
 
 
-def settings_note() -> str:
+def settings_note(layout: ComposedLayout | None = None) -> str:
     return (
-        f"compose single: self-attention penalty {float(SELF_PENALTY):g} until progress "
-        f"{self_end():g}, mount scope {MOUNT_SCOPE}."
+        f"compose single: self-attention penalty {max(penalty_of(layout), 0.0):g} until "
+        f"progress {self_end():g}, mount scope {scope_of(layout)}."
     )
 
 
@@ -161,7 +174,7 @@ def axis_maps(layouts, rows: torch.Tensor, latent: tuple[int, int], progress: fl
     image = {a: [] for a in AXES}
     text = {a: [] for a in AXES}
     lengths = set()
-    image_only_globals = MOUNT_SCOPE == "cross_kv"
+    image_only_globals = scope_of(positive) == "cross_kv"
     for b, kind in enumerate(rows):
         layout = layouts[kind] if 0 <= kind < len(layouts) and layouts[kind] else positive
         if kind not in cache:
@@ -265,6 +278,22 @@ def _check(c, base) -> str | None:
     return None
 
 
+DIFFERENT_SETTINGS = "the layers set different region penalties or mount scopes"
+
+
+def _sample_settings(layered) -> tuple[float | None, str | None, bool]:
+
+    raw_penalties = [c.get("kilora_region_penalty") for c in layered]
+    raw_scopes = [c.get("kilora_mount_scope") for c in layered]
+    penalties = {float(SELF_PENALTY if v is None else v) for v in raw_penalties}
+    scopes = {str(MOUNT_SCOPE if v is None else v) for v in raw_scopes}
+    if len(penalties) > 1 or len(scopes) > 1:
+        return None, None, False
+    penalty = None if all(v is None for v in raw_penalties) else penalties.pop()
+    scope = None if all(v is None for v in raw_scopes) else scopes.pop()
+    return penalty, scope, True
+
+
 def compose(conds, *, options=None, family=None, carry=False):
 
     options = options or {}
@@ -279,6 +308,9 @@ def compose(conds, *, options=None, family=None, carry=False):
         return None, "no layer"
     if any(c.get("kilora_compose", "separate") != "single" for c in layered):
         return None, "a layer uses compose separate"
+    penalty, scope, same = _sample_settings(layered)
+    if not same:
+        return None, DIFFERENT_SETTINGS
     if options.get("kilora_layer_filter"):
         return None, "a KiLoRA Layer Filter is connected"
     if options.get("kilora_alpha_mask"):
@@ -371,7 +403,9 @@ def compose(conds, *, options=None, family=None, carry=False):
                     text=t,
                 )
                 for (c, role, mask), n, t in zip(cs, lengths, texts, strict=True)
-            )
+            ),
+            self_penalty=penalty,
+            mount_scope=scope,
         )
 
     def composed(template, context):

@@ -24,6 +24,11 @@ TO_K = "blocks.0.attn2.to_k"
 IMAGE = "blocks.0.mlp.layer1"
 
 
+@pytest.fixture(autouse=True)
+def all_scope(monkeypatch):
+    monkeypatch.setattr(lc, "MOUNT_SCOPE", "all")
+
+
 def _box():
     mask = torch.zeros(1, *LATENT)
     mask[0, :2, :2] = 1.0

@@ -150,7 +150,7 @@ def test_link_state_undo_and_load(chunk_setup):
     )
 
 
-def test_accounting_for_single_and_combined_writes(chunk_setup, monkeypatch):
+def test_accounting_for_single_and_queued_writes(chunk_setup, monkeypatch):
     session, path, target = chunk_setup
     editor = cl.ChunkLive(str(path))
     editor.check(session)
@@ -172,7 +172,9 @@ def test_accounting_for_single_and_combined_writes(chunk_setup, monkeypatch):
     assert "merge_equiv=" in report and "merge_equiv_off=" in report
     records = [_record(session, target), _record(session, target)]
     report = commit_write(session, editor, records[0], records=records)
-    assert "merge_equiv=" in report and "merge_equiv_off=" in report
+    assert report.count("merge_equiv=") == 2 and report.count("merge_equiv_off=") == 2
+    assert len(session.commits) == 3
+    assert session._write_estimates == {}
 
 
 def test_identity_link_preserves_matching_target():

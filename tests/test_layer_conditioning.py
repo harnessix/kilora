@@ -331,3 +331,22 @@ def test_layer_compose_input_is_stored_and_defaults_to_separate(monkeypatch):
     assert {k: v for k, v in single.items() if k != "kilora_compose"} == {
         k: v for k, v in plain.items() if k != "kilora_compose"
     }
+
+
+def test_layer_region_penalty_and_mount_scope_are_stored(monkeypatch):
+    hooks = types.ModuleType("comfy.hooks")
+    hooks.set_mask_for_conditioning = lambda conds, mask, area, strength: [
+        [c, dict(meta)] for c, meta in conds
+    ]
+    comfy = types.ModuleType("comfy")
+    comfy.hooks = hooks
+    monkeypatch.setitem(sys.modules, "comfy", comfy)
+    monkeypatch.setitem(sys.modules, "comfy.hooks", hooks)
+    node = KiLoRALayerConditioning()
+    plain = node.layer([[1, {}]], "ip")[0][0][1]
+    assert plain["kilora_region_penalty"] is None
+    assert plain["kilora_mount_scope"] is None
+    set_ = node.layer([[1, {}]], "ip", region_penalty=0, mount_scope="all")[0][0][1]
+    assert set_["kilora_region_penalty"] == 0.0
+    assert isinstance(set_["kilora_region_penalty"], float)
+    assert set_["kilora_mount_scope"] == "all"

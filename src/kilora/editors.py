@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import json
+import logging
 import math
 import os
 import sys
@@ -19,6 +20,8 @@ from safetensors import safe_open
 from .errors import KiLoRAError, ModFormatError
 from .i18n import text
 from .recording import GenerationRecord, PathRecorder
+
+log = logging.getLogger(__name__)
 
 API_VERSION = "1.0"
 ENTRY_POINT_GROUP = "kilora.editors"
@@ -131,6 +134,7 @@ class EditorFileInfo:
 
 GUARD_GAP_DROP = 0.2
 GUARD_GAP_NOISE_K = 1.0
+GUARD_GAP_FLOOR = 1e-6
 GUARD_NOISE_WINDOW = 8
 GUARD_SPREAD = (0.95, 1.05)
 GUARD_ENV = "KILORA_LIVE_GUARD"
@@ -215,6 +219,7 @@ def guard_verdict(session: Any, before: dict, after: dict, override: Any = None)
             "noise": noise,
             "gap_drop": GUARD_GAP_DROP,
             "gap_noise_k": GUARD_GAP_NOISE_K,
+            "gap_floor": GUARD_GAP_FLOOR,
             "spread_low": GUARD_SPREAD[0],
             "spread_high": GUARD_SPREAD[1],
         }
@@ -231,7 +236,9 @@ def guard_verdict(session: Any, before: dict, after: dict, override: Any = None)
         if override is not None:
             last["refused"] = "guard"
             return True, text("msg.guard_follow", before=f"{gap0:.4g}", after=f"{gap1:.4g}")
-    if not gap1 >= gap0 - max(GUARD_GAP_DROP * abs(gap0), GUARD_GAP_NOISE_K * noise):
+    if not gap1 >= gap0 - max(
+        GUARD_GAP_DROP * abs(gap0), GUARD_GAP_NOISE_K * noise, GUARD_GAP_FLOOR
+    ):
         last["refused"] = "gap"
         return True, text("msg.guard_follow", before=f"{gap0:.4g}", after=f"{gap1:.4g}")
     if not GUARD_SPREAD[0] <= ratio <= GUARD_SPREAD[1]:
@@ -472,25 +479,109 @@ def _finish_write_memory(device: torch.device) -> str:
 
 def commit_write(session: Any, rule: Editor, record: GenerationRecord, *, records=None) -> str:
 
+    with _holding_models(record, records):
+        if records is not None and not hasattr(rule, "next_combined_state"):
+            return " ".join(_commit_held(session, rule, item, None) for item in records)
+        return _commit_held(session, rule, record, records)
+
+
+def _holding_models(record, records) -> contextlib.ExitStack:
+    stack = contextlib.ExitStack()
+    seen = set()
+    for item in [*(records or ()), record]:
+        hold = getattr(getattr(item, "measure", None), "__dict__", {}).get("hold")
+        if callable(hold) and id(hold) not in seen:
+            seen.add(id(hold))
+            stack.enter_context(hold())
+    return stack
+
+
+def _commit_held(session, rule, record, records) -> str:
     device = _write_memory_device(record)
+    outcome: dict[str, str] = {}
     if device is None:
-        return _commit_write(session, rule, record, records=records)
+        result = _logged_commit(session, rule, record, records, outcome)
+        _log_outcome(rule, outcome)
+        return result
     try:
         with contextlib.suppress(Exception):
             torch.cuda.reset_peak_memory_stats(device)
-        result = _commit_write(session, rule, record, records=records)
+        result = _logged_commit(session, rule, record, records, outcome)
     finally:
         memory_note = _finish_write_memory(device)
+    _log_outcome(rule, outcome)
     return result + memory_note
 
 
-def _commit_write(session: Any, rule: Editor, record: GenerationRecord, *, records=None) -> str:
+def _logged_commit(session, rule, record, records, outcome):
+    try:
+        return _commit_write(session, rule, record, records=records, outcome=outcome)
+    except BaseException as exc:
+        log.error("live write: failed (%s: %s).", type(exc).__name__, exc, exc_info=True)
+        raise
+
+
+def _rule_note(rule: Any) -> str:
+    note = getattr(rule, "write_note", None)
+    try:
+        value = note() if callable(note) else ""
+    except Exception:
+        return ""
+    return str(value or "").strip()
+
+
+def write_outcome(rule: Any, outcome: Mapping[str, str]) -> str:
+    kind = outcome.get("kind", "")
+    if not kind:
+        return ""
+    note = _rule_note(rule)
+    if kind == "no_write":
+        refused = str(getattr(rule, "_refused_note", "") or "").strip()
+        if refused:
+            kind, outcome = "refused", {"why": refused}
+        else:
+            reason = str(getattr(rule, "_no_moves_reason", "") or "")
+            if reason:
+                line = f"live write: no moves ({reason})."
+                return f"{line} {note}" if note else line
+            skips = int(getattr(rule, "_response_skips", 0) or 0)
+            line = f"live write: no moves ({skips} skipped below the response floor)."
+            return f"{line} {note}" if note else line
+    if kind == "refused":
+        line = f"live write: refused ({outcome.get('why', '').strip()})."
+    elif kind == "committed":
+        line = "live write: committed."
+    else:
+        line = f"live write: {kind.replace('_', ' ')}."
+    return f"{line} {note}" if note else line
+
+
+def _log_outcome(rule: Any, outcome: Mapping[str, str]) -> None:
+    line = write_outcome(rule, outcome)
+    if line:
+        log.info("%s", line)
+
+
+def _commit_write(
+    session: Any, rule: Editor, record: GenerationRecord, *, records=None, outcome=None
+) -> str:
+
     from .live import LearnResult
 
+    if outcome is None:
+        outcome = {}
+    clear_note = getattr(rule, "clear_write_note", None)
+    if clear_note is not None:
+        clear_note()
     if not session.learning:
+        outcome["kind"] = "learning_off"
         return text("msg.learning_off")
     if rule.needs_path and (record.stats is None or not record.stats.c_kk):
+        outcome["kind"] = "nothing_recorded"
         return text("msg.nothing_recorded")
+    if any(p.ready for p in record.extra.get("probe_acceptances", ())):
+        outcome["kind"] = "no_write"
+        return "Probe candidate accepted; committing before the next estimate."
     before = session.editor_snapshot() if hasattr(session, "editor_snapshot") else None
     old_write_branch = getattr(session, "pinned_write_branch", None)
     if hasattr(session, "prepare_pinned_write"):
@@ -518,6 +609,7 @@ def _commit_write(session: Any, rule: Editor, record: GenerationRecord, *, recor
     provisional = bool(getattr(rule, "provisional", False))
     if new is None:
         restore()
+        outcome["kind"] = "no_write"
         return deferred + text("msg.no_write")
     if set(new) != set(session.state):
         restore()
@@ -526,7 +618,17 @@ def _commit_write(session: Any, rule: Editor, record: GenerationRecord, *, recor
 
     if not all_finite(v for parts in new.values() for v in parts.values()):
         restore()
+        outcome["kind"] = "invalid_write"
         return deferred + text("msg.invalid_write")
+    if getattr(record, "extra", {}).get("render_probe") is not None and not record.extra.get(
+        "accepted_probe"
+    ):
+        from .comfyui.probe_rows import stage_probe_write
+
+        stage_probe_write(session, record, new, before)
+        restore()
+        outcome["kind"] = "probe_pending"
+        return "Probe acceptance pending on the next render."
     guard_note = text("msg.prediction_guard_deferred") if provisional else ""
     for item in () if provisional else records if records is not None else [record]:
         refused, guard_note = guard_check(rule, session, item, new)
@@ -535,6 +637,7 @@ def _commit_write(session: Any, rule: Editor, record: GenerationRecord, *, recor
             on_refusal = getattr(rule, "guard_refused", None)
             if on_refusal is not None:
                 on_refusal()
+            outcome.update(kind="refused", why=str(guard_note or ""))
             return deferred + text("msg.guard_refused", why=guard_note)
     from .live_queue import yield_point
 
@@ -553,6 +656,7 @@ def _commit_write(session: Any, rule: Editor, record: GenerationRecord, *, recor
         session.set_previous(record.latent, record.conditioning)
     state_before = session.state
     result = f"{session.commit(editor_before=before, previous_before=previous_before)} {guard_note}"
+    outcome["kind"] = "committed"
     if provisional and hasattr(session, "deferred_guard"):
         from .prediction_write import DeferredGuard
 

@@ -39,6 +39,10 @@
     "spread_high": {
       "axes": [],
       "dtype": "float64"
+    },
+    "gap_floor": {
+      "axes": [],
+      "dtype": "float64"
     }
   },
   "outputs": {
@@ -118,11 +122,32 @@
         "noise_drop",
         "relative_drop"
       ],
-      "result": "allowed_drop",
+      "result": "scaled_drop",
       "attributes": {}
     },
     {
       "id": 5,
+      "op": "gt",
+      "args": [
+        "gap_floor",
+        "scaled_drop"
+      ],
+      "result": "floor_greater",
+      "attributes": {}
+    },
+    {
+      "id": 6,
+      "op": "where",
+      "args": [
+        "floor_greater",
+        "gap_floor",
+        "scaled_drop"
+      ],
+      "result": "allowed_drop",
+      "attributes": {}
+    },
+    {
+      "id": 7,
       "op": "sub",
       "args": [
         "gap_before",
@@ -132,7 +157,7 @@
       "attributes": {}
     },
     {
-      "id": 6,
+      "id": 8,
       "op": "ge",
       "args": [
         "gap_after",
@@ -142,7 +167,7 @@
       "attributes": {}
     },
     {
-      "id": 7,
+      "id": 9,
       "op": "gt",
       "args": [
         "spread_before",
@@ -152,7 +177,7 @@
       "attributes": {}
     },
     {
-      "id": 8,
+      "id": 10,
       "op": "div",
       "args": [
         "spread_after",
@@ -162,7 +187,7 @@
       "attributes": {}
     },
     {
-      "id": 9,
+      "id": 11,
       "op": "where",
       "args": [
         "positive_spread",
@@ -173,7 +198,7 @@
       "attributes": {}
     },
     {
-      "id": 10,
+      "id": 12,
       "op": "le",
       "args": [
         "spread_low",
@@ -183,7 +208,7 @@
       "attributes": {}
     },
     {
-      "id": 11,
+      "id": 13,
       "op": "le",
       "args": [
         "ratio",
@@ -193,7 +218,7 @@
       "attributes": {}
     },
     {
-      "id": 12,
+      "id": 14,
       "op": "where",
       "args": [
         "above_low",
@@ -204,7 +229,7 @@
       "attributes": {}
     },
     {
-      "id": 13,
+      "id": 15,
       "op": "where",
       "args": [
         "gap_ok",
@@ -215,7 +240,7 @@
       "attributes": {}
     },
     {
-      "id": 14,
+      "id": 16,
       "op": "eq",
       "args": [
         "passed",
@@ -225,5 +250,5 @@
       "attributes": {}
     }
   ],
-  "identity": "6a61048b6d23cfd5d4e58f9a181cbfbee529c3577d3e83fc38d9a8d98a20f341"
+  "identity": "54d14a839f064cb04479678e965b10e6eed15765de9a328de8bd00215027d745"
 }

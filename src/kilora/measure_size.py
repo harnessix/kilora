@@ -77,9 +77,18 @@ def register_reducer(name: str, fn: Reducer) -> None:
 def measurement_latent(
     latent: torch.Tensor, *, size: int, reducer: str, vae: Any = None
 ) -> tuple[torch.Tensor, str]:
-    if latent.dim() < 4 or max(latent.shape[-2:]) * PIXELS_PER_LATENT <= size:
+    if size <= 0 or latent.dim() < 4 or max(latent.shape[-2:]) * PIXELS_PER_LATENT <= size:
         return latent, ""
     name = reducer if reducer in REDUCERS else DEFAULT_REDUCER
     if name == "decode-resize-encode" and vae is None:
         return latent_area(latent, size), "No VAE is connected, so the latent was reduced."
     return REDUCERS[name](latent, size, vae), ""
+
+
+def resolution_clause(measure: Any) -> str:
+    size = getattr(measure, "resolution", None)
+    tokens = getattr(measure, "tokens", None)
+    if not size or not tokens:
+        return ""
+    h, w = size
+    return f", samples at {w}x{h} px, {tokens} tokens per row"

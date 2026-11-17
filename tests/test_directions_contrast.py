@@ -1239,3 +1239,221 @@ def test_partial_rejects_other_precision(tmp_path):
         _solve(Model(), partial=partial, settings=replace(_settings(), stats_precision="float32"))
     with pytest.raises(ValueError, match="fit_dtype"):
         _solve(Model(), partial=partial, settings=replace(_settings(), fit_dtype="float64"))
+
+
+def _observed(x, y, target_y, weights, mode):
+    names = ["mount"]
+
+    def observe(_target, _student):
+        return {names[0]: (x, target_y)}, {names[0]: (x, y)}
+
+    item = ("target", "student")
+    if weights is not None:
+        item = contrast._WeightedPair(*item, weights)
+    statistics = contrast._group_statistics(names, [item], observe, lambda tensor: tensor, mode)
+    return statistics["mount"]
+
+
+def test_unit_weights_match_unweighted_statistics():
+    generator = torch.Generator().manual_seed(4)
+    x = torch.randn(2, 5, 3, generator=generator)
+    y = torch.randn(2, 5, 3, generator=generator)
+    target_y = y + torch.randn(2, 5, 3, generator=generator)
+    weights = torch.ones(2, 5)
+    for mode in ("tokens", "mean"):
+        plain = _observed(x, y, target_y, None, mode)
+        weighted = _observed(x, y, target_y, weights, mode)
+        torch.testing.assert_close(weighted[0], plain[0])
+        torch.testing.assert_close(weighted[1], plain[1])
+
+
+def test_zero_weights_leave_those_rows_out_of_the_statistics():
+    generator = torch.Generator().manual_seed(5)
+    x = torch.randn(2, 4, 3, generator=generator)
+    y = torch.randn(2, 4, 3, generator=generator)
+    target_y = y + 0.4
+    weights = torch.tensor([[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]])
+    kept = weights.reshape(-1) > 0
+    flat = x.reshape(-1, 3)
+    difference = (target_y - y).reshape(-1, 3)
+    gram = flat[kept].T @ flat[kept]
+    cross = difference[kept].T @ flat[kept]
+    weighted_gram, weighted_cross = _observed(x, y, target_y, weights, "tokens")
+    torch.testing.assert_close(weighted_gram, gram)
+    torch.testing.assert_close(weighted_cross, cross)
+    full_gram, full_cross = _observed(x, y, target_y, None, "tokens")
+    assert not torch.allclose(weighted_gram, full_gram)
+    assert not torch.allclose(weighted_cross, full_cross)
+
+
+def test_masked_mean_matches_a_direct_weighted_mean():
+    generator = torch.Generator().manual_seed(6)
+    x = torch.randn(2, 4, 3, generator=generator)
+    y = torch.randn(2, 4, 3, generator=generator)
+    target_y = y + torch.randn(2, 4, 3, generator=generator)
+    weights = torch.tensor([[0.0, 0.5, 1.0, 0.25], [1.0, 0.0, 0.5, 1.0]])
+    scale = weights.reshape(-1, 1)
+    flat = x.reshape(-1, 3)
+    target_rows = target_y.reshape(-1, 3)
+    student_rows = y.reshape(-1, 3)
+    count = weights.sum()
+    mean = ((target_rows - student_rows) * scale).sum(0) / count
+    expected_cross = torch.outer(mean, (flat * scale).sum(0))
+    expected_gram = (flat * scale).T @ flat
+    gram, cross = _observed(x, y, target_y, weights, "mean")
+    torch.testing.assert_close(gram, expected_gram)
+    torch.testing.assert_close(cross, expected_cross)
+
+
+def test_weights_survive_replay_batching():
+    left = torch.randn(1, 4, 3)
+    right = torch.randn(1, 4, 3)
+    first = ((left,), {"context": left})
+    second = ((right,), {"context": right})
+    weights = [torch.tensor([[1.0, 0.0, 0.5, 1.0]]), torch.tensor([[0.2, 0.4, 0.6, 0.8]])]
+    batches = contrast._replay_batches([(first, first), (second, second)], 8, weights)
+    assert len(batches) == 1
+    assert batches[0][0][0][0].shape[0] == 2
+    torch.testing.assert_close(batches[0].weights, torch.cat(weights, dim=0))
+    single = contrast._replay_batches([(first, first)], 8, weights[:1])
+    assert len(single) == 1
+    torch.testing.assert_close(single[0].weights, weights[0])
+
+
+def test_weighted_replay_matches_single_samples():
+    model = Model()
+    _set_change(model)
+    samples = _samples(count=4)
+    generator = torch.Generator().manual_seed(9)
+    for sample in samples:
+        sample.weights = torch.rand(1, 12, generator=generator).clamp_min(0.05)
+    mounts = ["transformer_blocks.0.attn1.to_q"]
+    expected = _solve(
+        copy.deepcopy(model),
+        samples,
+        mounts=mounts,
+        settings=replace(_settings(), replay_batch=1),
+    )
+    actual = _solve(model, samples, mounts=mounts, settings=replace(_settings(), replay_batch=8))
+    _assert_replay_equal(actual, expected)
+
+
+@pytest.mark.parametrize("ones", [False, True])
+def test_weighted_image_components_use_per_image_means(ones):
+    from kilora.library import contrast
+
+    generator = torch.Generator().manual_seed(735)
+    captured, expected, identities = [], {}, []
+    for image in (0, 1, 0, 1):
+        x, student, target = [torch.randn(1, 3, 2, generator=generator).double() for _ in range(3)]
+        w = torch.ones(1, 3).double() if ones else torch.tensor([[0.01, 0.1, 0.2]]).double()
+        captured.append(contrast._WeightedPair(target, (x, student), w))
+        identities.append(image)
+        record = [
+            w.sum(),
+            (target * w[..., None]).sum((0, 1)),
+            (student * w[..., None]).sum((0, 1)),
+            (x * w[..., None]).sum((0, 1)),
+        ]
+        if image not in expected:
+            expected[image] = record
+        else:
+            expected[image] = [a + b for a, b in zip(expected[image], record, strict=True)]
+
+    def observe(target, student):
+        return {"m": (None, target)}, {"m": student}
+
+    gram, cross = contrast._group_statistics(
+        ["m"], captured, observe, lambda x: x, "mean", 1, identities
+    )["m"]
+    totals = [sum(row[i] for row in expected.values()) for i in range(4)]
+    means = torch.stack([(r[1] - r[2]) / r[0] for r in expected.values()])
+    mean = (totals[1] - totals[2]) / totals[0]
+    centered = means - mean
+    _, _, vh = torch.linalg.svd(centered, full_matrices=False)
+    projected = centered @ vh[:1].T @ vh[:1]
+    direct = torch.outer(mean, totals[3])
+    for residual, row in zip(projected, expected.values(), strict=True):
+        direct += torch.outer(residual, row[3])
+    torch.testing.assert_close(cross, direct)
+    if ones:
+        plain = [(p[0], p[1]) for p in captured]
+        c, s = contrast._group_statistics(
+            ["m"], plain, observe, lambda x: x, "mean", 1, identities
+        )["m"]
+        torch.testing.assert_close(c, gram, rtol=0, atol=0)
+        torch.testing.assert_close(s, cross, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("patch", [1, 2])
+@pytest.mark.parametrize("mode", ["tokens", "mean"])
+def test_spatial_mask_matches_patchified_model_rows(patch, mode):
+    from kilora.library import contrast
+
+    class PatchModel(torch.nn.Module):
+        def forward(self, latent):
+            pooled = torch.nn.functional.avg_pool2d(latent, patch)
+            return pooled.flatten(2).transpose(1, 2)
+
+    latent = torch.arange(2 * 3 * 8 * 12).reshape(2, 3, 8, 12).float() / 100
+    x = PatchModel()(latent)
+    weights = torch.zeros(2, 1, 8, 12)
+    weights[:, :, :4] = 1
+    per_sample = (8 // patch) * (12 // patch)
+    expected = torch.cat([torch.ones(per_sample // 2), torch.zeros(per_sample // 2)])
+    expected = expected.repeat(2)
+    rows = contrast._token_row_weights(weights, x)
+    torch.testing.assert_close(rows, expected)
+    torch.testing.assert_close(contrast._token_row_weights(weights, x.reshape(-1, 3)), expected)
+    student = x * 0.2
+    target = student + x * 0.3
+    gram, cross = _observed(x, student, target, weights, mode)
+    direct = _observed(x, student, target, expected.reshape(2, per_sample), mode)
+    torch.testing.assert_close(gram, direct[0])
+    torch.testing.assert_close(cross, direct[1])
+
+
+def test_spatial_mask_rejects_incompatible_block_grid():
+    from kilora.library import contrast
+
+    with pytest.raises(ValueError, match="batch"):
+        contrast._token_row_weights(torch.ones(2, 1, 8, 12), torch.ones(1, 7, 3))
+    with pytest.raises(ValueError, match="token grid"):
+        contrast._token_row_weights(
+            torch.ones(1, 1, 8, 12), torch.ones(1, 999, 3), require_image=True
+        )
+
+
+@pytest.mark.parametrize("mode", ["tokens", "mean"])
+def test_spatial_mask_leaves_cross_attention_text_statistics_unweighted(mode):
+    from kilora.library import contrast
+
+    class CrossAttention(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.to_k = torch.nn.Linear(4, 3, bias=False)
+
+        def forward(self, text):
+            return self.to_k(text)
+
+    model = CrossAttention()
+    text = torch.arange(2 * 512 * 4).reshape(2, 512, 4).float() / 1000
+    student = model(text)
+    target = student.clone()
+    weights = torch.zeros(2, 1, 96, 96)
+    weights[:, :, :48] = 1
+    assert contrast._token_row_weights(weights, text) is None
+
+    def observe(_target, _student):
+        return {"attn2.to_k": (text, target)}, {"attn2.to_k": (text, student)}
+
+    masked = contrast._WeightedPair("target", "student", weights)
+    actual = contrast._group_statistics(
+        ["attn2.to_k"], [masked], observe, lambda value: value, mode
+    )["attn2.to_k"]
+    expected = contrast._group_statistics(
+        ["attn2.to_k"], [("target", "student")], observe, lambda value: value, mode
+    )["attn2.to_k"]
+    torch.testing.assert_close(actual[0], expected[0], rtol=0, atol=0)
+    torch.testing.assert_close(actual[1], expected[1], rtol=0, atol=0)
+    torch.testing.assert_close(actual[1], torch.zeros_like(actual[1]), rtol=0, atol=0)

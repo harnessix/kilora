@@ -560,10 +560,14 @@ def test_the_write_note_names_the_capped_quantity(setup, tmp_path):
     assert "eps_steps=" not in note and "eps_nodes=" not in note
 
 
-def test_write_note_counts_distinct_prediction_steps_and_nodes(setup, tmp_path):
+def test_write_note_counts_distinct_prediction_steps_and_nodes(setup, tmp_path, monkeypatch):
     from types import SimpleNamespace
 
     session, path, target = setup
+    monkeypatch.setenv("KILORA_PREDICTION_DEBUG", "1")
+    import kilora.recording as recording
+
+    monkeypatch.setattr(recording, "prediction_report", lambda *a, **k: "")
     editor = _frac_file(session, path, tmp_path, write_frac=0.05, cap_frac=0.12)
     entry = lambda progress, node: SimpleNamespace(
         progress=progress, node=node, error=torch.tensor([1.0])
@@ -1321,7 +1325,7 @@ def test_merge_measurement_has_same_forward_count(setup):
     assert off > 0
 
 
-def test_merge_guard_and_undo_are_separate(setup, monkeypatch):
+def test_merge_guard_is_separate_and_one_undo_takes_back_write_and_merge(setup, monkeypatch):
     session, path, target = setup
     editor = editor_for(path)
     editor.check(session)
@@ -1348,23 +1352,20 @@ def test_merge_guard_and_undo_are_separate(setup, monkeypatch):
     assert not session.editor_state.chunks.node_coef
 
     record.guard_score = lambda trial: {"gap": 1.0, "spread": 1.0}
-    before_merge = []
-    original_guard = cl.ChunkLive.guard_trial
-
-    def capture(rule, old, new):
-        if len(session.commits) == 2:
-            before_merge.append({t: parts["up"].clone() for t, parts in old.items()})
-        return original_guard(rule, old, new)
-
-    monkeypatch.setattr(cl.ChunkLive, "guard_trial", capture)
+    before_write = {t: parts["up"].clone() for t, parts in session.state.items()}
     report = commit_write(session, editor, record)
     assert "source=merge" in report
-    assert len(session.commits) == 3
+    assert "Merge refused" not in report
+    assert len(session.commits) == 2
+    assert session.commits[-1].source.endswith("+merge")
+    assert session.editor_state.chunks.node_coef
     session.undo()
-    assert all(torch.equal(session.state[t]["up"], v) for t, v in before_merge[0].items())
+    assert len(session.commits) == 1
+    assert all(torch.equal(session.state[t]["up"], v) for t, v in before_write.items())
+    assert not session.editor_state.chunks.node_coef
 
 
-def test_combined_backlog_commits_a_merge(setup, monkeypatch):
+def test_backlog_commits_each_write_with_its_merge(setup, monkeypatch):
     session, path, target = setup
     editor = editor_for(path)
     editor.check(session)
@@ -1383,7 +1384,11 @@ def test_combined_backlog_commits_a_merge(setup, monkeypatch):
     report = commit_write(session, editor, records[0], records=records)
     assert "source=merge" in report
     assert len(session.commits) == 2
+    assert all(commit.source.endswith("+merge") for commit in session.commits)
     assert session.editor_state.chunks.events == 2
+    assert session.editor_state.chunks.node_coef
+    session.undo()
+    assert len(session.commits) == 1
     assert session.editor_state.chunks.node_coef
     session.undo()
     assert not session.editor_state.chunks.node_coef

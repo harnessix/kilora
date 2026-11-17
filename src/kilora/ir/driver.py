@@ -455,6 +455,31 @@ def run_layer_ir(
         lo = walk(low) if low else y0
         return lo + (depth - low) * (hi - lo)
     if len(sets) == 1 and sets[0].form == "input":
+        if (
+            c.import_score(sets[0]) == "derived"
+            and c.derived_mode(sets[0]) == "full"
+            and sets[0].path_width > 1
+            and not c.depth_split_on(sets[0])
+        ):
+            from .dispatch import interpret_all
+
+            with interpret_all(), c.eager():
+                return c._run_layer(
+                    x,
+                    y0,
+                    sets,
+                    depth,
+                    shared=shared,
+                    target=target,
+                    regions=regions,
+                    index=index,
+                    count=count,
+                    kind=kind,
+                    t=t,
+                    token_depth=token_depth,
+                    expert_regions=expert_regions,
+                    expert_scales=expert_scales,
+                )
         if expert_regions is not None:
             sets = c._expert_masks(sets, expert_regions, y0)
         if expert_scales is not None:
@@ -1352,7 +1377,7 @@ def _run_import_ir(x, y0, s, depth, target, region, input_place=0):
         or (score in ("read_share", "derived") and c.share_transition_gamma(s))
         or (
             score == "derived"
-            and (c.derived_mode() != "keys" or c.derived_diffusion() or c.derived_exclusion())
+            and (c.derived_mode(s) != "keys" or c.derived_diffusion() or c.derived_exclusion())
         )
         or s.iteration not in (("accumulate", "path") if score == "derived" else ("accumulate",))
         or s.aggregation != "accumulate"

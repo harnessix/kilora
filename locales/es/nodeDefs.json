@@ -239,7 +239,7 @@
       },
       "depth": {
         "name": "profundidad",
-        "tooltip": "Número de pasadas. -1 usa la profundidad que recomienda el mod."
+        "tooltip": "Número de pasadas. -1 usa la profundidad que recomienda el mod (LoRA importados: 4)."
       }
     }
   },
@@ -257,7 +257,7 @@
       },
       "depth": {
         "name": "profundidad",
-        "tooltip": "Número de pasadas. -1 usa la profundidad que recomienda el mod."
+        "tooltip": "Número de pasadas. -1 usa la profundidad que recomienda el mod (LoRA importados: 4)."
       },
       "iteration": {
         "name": "iteración",
@@ -285,7 +285,7 @@
       },
       "path_width": {
         "name": "anchura del camino",
-        "tooltip": "Solo para la iteración en camino. El número de recorridos: empiezan en los mejores expertos del primer paso, y cada recorrido sigue desde su propia consulta. Una anchura mayor encuentra el experto correcto tras un primer paso equivocado. 0 usa el valor del mod (1 por defecto: un recorrido)."
+        "tooltip": "Solo para la iteración en camino. El número de recorridos: empiezan en los mejores expertos del primer paso, y cada recorrido sigue desde su propia consulta. Una anchura mayor encuentra el experto correcto tras un primer paso equivocado. 0 usa el valor del mod (LoRA importados: 3 recorridos; otros mods: 1)."
       },
       "path_select": {
         "name": "selección del camino",
@@ -488,6 +488,58 @@
         "name": "ediciones",
         "tooltip": "Las ediciones cambian la matriz central y la fuerza de cada LoRA por capa, más los términos de los paquetes. Nunca se escriben los archivos de origen. off restaura exactamente las LoRAs importadas. unchanged conserva la opción actual."
       },
+      "live_expert_mass": {
+        "name": "masa recorrida",
+        "tooltip": "Una escritura en vivo edita un experto solo si su masa de ruta en los caminos registrados supera esta fracción de la masa de su capa. -1: sin cambios. El valor por defecto es 0.05."
+      },
+      "live_expert_top": {
+        "name": "expertos recorridos por capa",
+        "tooltip": "El máximo de expertos por capa que edita una escritura en vivo, según la masa de ruta. 0: sin cambios. El valor por defecto es 4."
+      },
+      "live_expert_history": {
+        "name": "historial de rutas",
+        "tooltip": "El número de prompts registrados cuya masa de ruta conserva la sesión para encontrar expertos compartidos. 0: sin cambios. El valor por defecto es 16."
+      },
+      "live_expert_copies": {
+        "name": "copias por experto",
+        "tooltip": "El máximo de copias de un experto compartido que añaden las escrituras en vivo. -1: sin cambios. El valor por defecto es 2."
+      },
+      "write_measure": {
+        "name": "medida de escritura",
+        "tooltip": "Cómo encuentra su dirección una escritura en vivo. forward: una pasada limpia y un conjunto de pasadas con ruido pequeño en las salidas de los expertos objetivo (por defecto). candidates: mide cada movimiento candidato con pasadas emparejadas. unchanged mantiene la elección actual."
+      },
+      "forward_draws": {
+        "name": "muestras de ruido",
+        "tooltip": "El número de muestras de ruido de la estimación forward. Más muestras dan una dirección más estable y cuestan más tiempo. 0: sin cambios. El valor por defecto es 4."
+      },
+      "forward_sigma": {
+        "name": "tamaño del ruido",
+        "tooltip": "El tamaño del ruido de la estimación forward, como fracción del RMS de la salida de cada experto. -1: sin cambios. El valor por defecto es 0.05."
+      },
+      "forward_chunk": {
+        "name": "muestras por pasada",
+        "tooltip": "El número de muestras de ruido en una pasada agrupada. Un número menor usa menos memoria de GPU. 0: sin cambios. El valor por defecto es 4."
+      },
+      "write_resolution": {
+        "name": "resolución de escritura",
+        "tooltip": "El lado largo, en píxeles, de las muestras de una escritura. La escritura aprende de una copia reducida de la imagen: 256 a 4096, redondeado a 16. Un número menor hace la escritura más rápida. 0: la resolución del render. -1: sin cambios. Por defecto 512. Las escrituras ya usaban 512 px antes de este ajuste: tomaban el tamaño de medida (measure_size). Este ajuste da nombre a ese control."
+      },
+      "probe_rows": {
+        "name": "render probe rows",
+        "tooltip": "Collect write measurements during rendering. On by default. Image learning and writes without a complete render measurement use their own noise samples."
+      },
+      "probe_call": {
+        "name": "render probe call",
+        "tooltip": "Separate runs each probe after the image call. Larger batches can change image-row rounding even on the CPU, so separate is the only supported value. The image call keeps its original rows. Probe measurements do not update image records or step caches."
+      },
+      "probe_budget": {
+        "name": "probe row budget",
+        "tooltip": "Maximum perturbed rows per render, counting caption and empty-caption rows. The default 2 samples one caption for one antithetic pair per render. The write seed selects caption or empty caption with equal probability. Budgets of 4 or more retain both captions. Complete pairs are retained; fewer than two rows skips probes. Acceptance retains both captions for the prompt and collapse guard. Clean reference and acceptance rows are additional. Larger budgets allow more draws when the session is idle. Pairs run over consecutive eligible sampling steps, with two caption rows per probe call. A short schedule falls back to ordinary write samples."
+      },
+      "probe_draws": {
+        "name": "render probe draws",
+        "tooltip": "Maximum noise draws collected in a render. 0 uses the forward draws setting; -1 keeps the current value. Complete positive and negative pairs are kept. Fewer draws reduce the render work."
+      },
       "measure_samples": {
         "name": "samples per write measurement",
         "tooltip": "Samples per write measurement: the same noise and timesteps for every trial. More samples measure more steadily and cost more time. 1 = one sample at the middle timestep."
@@ -658,7 +710,7 @@
       },
       "depth": {
         "name": "profundidad",
-        "tooltip": "Número de pasadas. -1 usa la profundidad que recomienda el mod."
+        "tooltip": "Número de pasadas. -1 usa la profundidad que recomienda el mod (LoRA importados: 4)."
       },
       "iteration": {
         "name": "iteración",
@@ -1286,7 +1338,7 @@
   },
   "KiLoRADepthMap": {
     "display_name": "KiLoRA Mapa de profundidad",
-    "description": "Una profundidad por zona de la imagen, desde una máscara (SAM2 y otros segmentadores) o una imagen (su brillo: mapas de profundidad, lineart o pose de preprocesadores ControlNet). Hasta start, cada zona usa una sola profundidad, así la composición se forma como siempre. Después cada zona usa su propia profundidad. Conéctalo a KiLoRA Apply o KiLoRA LoRA Loader.",
+    "description": "Una profundidad por zona de la imagen, desde una máscara (SAM2 y otros segmentadores) o una imagen (su brillo: mapas de profundidad, lineart o pose de preprocesadores ControlNet). Hasta start, cada zona usa una sola profundidad, así la composición se forma como siempre. Después cada zona usa su propia profundidad. Conéctalo a KiLoRA Apply o KiLoRA LoRA Loader. Sin máscara ni imagen, source auto mide el mapa durante el muestreo: más profundidad en el detalle y donde los LoRA cambian más la imagen, con la misma profundidad media.",
     "inputs": {
       "min_depth": {
         "name": "min_depth",
@@ -1316,6 +1368,10 @@
         "name": "base",
         "tooltip": "La profundidad de cada zona antes de start, y de los tokens de texto. -1: la profundidad media del mapa, redondeada."
       },
+      "source": {
+        "name": "source",
+        "tooltip": "De dónde viene el mapa. mask o image: la entrada conectada (primero la máscara). auto: se mide en el paso de start a partir del detalle de la imagen, el cambio de KiLoRA y el desacuerdo de las rutas. Sin máscara ni imagen conectada se usa auto."
+      },
       "mask": {
         "name": "máscara",
         "tooltip": "Una máscara, por ejemplo de SAM2. 1 da max_depth. Si también hay una imagen conectada, se usa la máscara."
@@ -1323,6 +1379,26 @@
       "image": {
         "name": "image",
         "tooltip": "Una imagen. Su brillo es el mapa, por ejemplo la salida de un preprocesador de profundidad, lineart o pose."
+      },
+      "mean_depth": {
+        "name": "mean_depth",
+        "tooltip": "auto: la profundidad media sobre la imagen. -1 usa la profundidad de KiLoRA Apply, así el coste es el mismo que con esa profundidad uniforme. Valores más bajos son más rápidos."
+      },
+      "detail_weight": {
+        "name": "detail_weight",
+        "tooltip": "auto: el peso del detalle de la imagen (la estructura fina de la estimación de la imagen limpia)."
+      },
+      "change_weight": {
+        "name": "change_weight",
+        "tooltip": "auto: el peso del cambio de KiLoRA (donde los LoRA cambian más la imagen)."
+      },
+      "disagreement_weight": {
+        "name": "disagreement_weight",
+        "tooltip": "auto: el peso del desacuerdo de las rutas (donde los LoRA compiten). 0 lo desactiva."
+      },
+      "smooth": {
+        "name": "smooth",
+        "tooltip": "auto: el ancho gaussiano en tokens que suaviza el mapa combinado antes de elegir las profundidades. El mapa de una imagen pintada es ruidoso; 2 da zonas. 0 lo desactiva."
       }
     },
     "outputs": {
@@ -1371,6 +1447,14 @@
       "compose": {
         "name": "compose",
         "tooltip": "separate: each layer runs as its own model call. single: all layers run in one model call per guidance branch, and each image area reads its own layer text. Select single on every layer. The crop input is not used with single."
+      },
+      "region_penalty": {
+        "name": "region penalty",
+        "tooltip": "Con compose single: con qué fuerza las áreas de imagen de capas distintas dejan de leerse entre sí en los primeros pasos. 0 lo desactiva. Se usa el valor de la primera capa, y todas las capas deben fijar el mismo valor."
+      },
+      "mount_scope": {
+        "name": "mount scope",
+        "tooltip": "Con compose single: all aplica los mods de una capa al área de imagen de la capa y a su propio texto. cross_kv los aplica solo a las claves y valores de cross-attention de su propio texto, por lo que una LoRA sin esos pesos no tiene efecto. Todas las capas deben fijar el mismo valor."
       }
     },
     "outputs": {
@@ -1827,6 +1911,42 @@
       "folder": {
         "name": "Carpeta",
         "tooltip": "Carpeta de imágenes con descripciones .txt opcionales del mismo nombre. Usa carpeta o imágenes."
+      },
+      "contrast_components": {
+        "name": "Componentes de contraste",
+        "tooltip": "Añade a la media compartida hasta cuatro direcciones principales de los contrastes medios de cada imagen. Se limita al número de imágenes de ajuste menos uno, después de reservar las imágenes de validación. Valor predeterminado: 4; con 0 se guardan los pesos anteriores basados solo en la media. El ajuste sigue usando el rango indicado. Solo se aplica a esta resolución a partir de imágenes sin máscara."
+      },
+      "masks": {
+        "name": "Máscaras",
+        "tooltip": "Una máscara por imagen, en el orden de las imágenes. El cálculo aprende solo la región enmascarada. Deje este campo vacío para usar toda la imagen."
+      },
+      "mask_contrast": {
+        "name": "Comparación con máscara",
+        "tooltip": "Con máscaras, tokens compara cada token enmascarado y mean compara el promedio enmascarado. Se ignora si no hay máscaras."
+      },
+      "two_stage": {
+        "name": "Dos etapas",
+        "tooltip": "Calcula primero el estilo y después el personaje con ese estilo activo en el modelo alumno. Las máscaras seleccionan el personaje y su inversa selecciona el estilo. Sin máscaras, ambas etapas usan las imágenes completas. Guarda archivos separados: creative para el estilo e ip para el personaje."
+      },
+      "mask_start": {
+        "name": "Inicio de máscara",
+        "tooltip": "Con máscaras, inicia el alumno alineado en esta fracción del programa completo. Predeterminado 0.4. Se ignora sin máscaras."
+      },
+      "mask_samples": {
+        "name": "Muestras de máscara",
+        "tooltip": "Con máscaras: fracciones del programa completo separadas por espacios o comas, desde Inicio de máscara hasta 1.0; por ejemplo 0.5 0.75 1.0. Vacío conserva las tres posiciones originales. Se ignora sin máscaras."
+      },
+      "refit_rounds": {
+        "name": "Rondas de reajuste",
+        "tooltip": "Resoluciones adicionales en forma cerrada tras volver a muestrear las trayectorias del alumno con la solución anterior activa. 0 conserva la resolución original; hasta 8 rondas. Solo se comprueba y guarda el último resultado."
+      },
+      "guard_rule": {
+        "name": "Regla de validación",
+        "tooltip": "loss elige la menor pérdida de validación inferior a la pérdida base y dentro del límite de deriva en vivo. drift elige la mayor escala dentro del límite con una pérdida máxima de 1.25 veces la base. Predeterminado loss."
+      },
+      "trajectory_check": {
+        "name": "Comprobar trayectoria",
+        "tooltip": "Comprueba dos prompts no relacionados con 8 pasos de muestreo y la primera semilla, tamaño y cfg de la solución. Rechaza la escala si la desviación estándar espacial del latente cae por debajo de 0,5 veces la base o la distancia L2 relativa supera 1,0; después prueba escalas menores permitidas. Sin decodificación VAE. Desactivado por defecto."
       }
     },
     "outputs": {

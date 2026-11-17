@@ -66,6 +66,46 @@ def test_feedback_and_guard(tmp_path):
         torch.testing.assert_close(value, session.editor_snapshot()[key], equal_nan=True)
 
 
+@pytest.mark.parametrize("later", ["learning_off", "no_measure", "edits_off"])
+def test_write_note_belongs_to_the_current_call(tmp_path, later):
+    session = _session(tmp_path)
+    session.learning = True
+    session.set_options(core_dims=0)
+    move = session.moves()[0]
+    session.moves = lambda: [move]
+    editor = ImportEditor(session)
+    source = session._source.experts[move.target].up[move.expert, 0].float()
+
+    def loss(trial):
+        delta = None if trial is None else trial.du.get(move.target)
+        shift = (
+            0.0
+            if delta is None
+            else float(
+                (
+                    delta.reshape_as(session._source.experts[move.target].up)[move.expert, 0]
+                    * source
+                ).sum()
+                / source.square().sum()
+            )
+        )
+        strength = float(session.state[move.target][f"strength_{move.expert}"]) + shift
+        return (strength - 1.5) ** 2
+
+    record = GenerationRecord(measure=loss)
+    commit_write(session, editor, record)
+    assert session.commits and "Moves:" in editor.write_note()
+    if later == "learning_off":
+        session.learning = False
+    elif later == "no_measure":
+        record = GenerationRecord()
+    else:
+        session.edits = "off"
+    commit_write(session, editor, record)
+    assert len(session.commits) == 1
+    assert not editor.write_note()
+
+
 def test_baked_clean_routing_and_settings(tmp_path):
     session = _session(tmp_path)
     assert session.mod.settings.import_score == "derived"

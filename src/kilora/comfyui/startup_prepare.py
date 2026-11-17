@@ -34,9 +34,13 @@ def model_call():
 
 
 def busy():
+    from ..live_queue import writes_busy
+
     with _lock:
         if _active:
             return True
+    if writes_busy():
+        return True
     try:
         from server import PromptServer
 
@@ -83,10 +87,11 @@ class _Stopped(Exception):
     pass
 
 
-def _checkpoint(device):
+def _checkpoint(device, label="LoRA library"):
     if _stop.is_set():
         raise _Stopped
     if busy():
+        log.info("Startup preparation paused: %s", label)
         if _stop.is_set():
             raise _Stopped
         import torch
@@ -101,6 +106,7 @@ def _checkpoint(device):
         while busy():
             if _stop.wait(0.2):
                 raise _Stopped
+        log.info("Startup preparation resumed: %s", label)
 
 
 _SAFETENSORS_DTYPES = {
@@ -380,15 +386,15 @@ def _run(roots):
         if _stop.is_set():
             raise _Stopped
         device = apply_device()
-        checkpoint = lambda: _checkpoint(device)
-        checkpoint()
+        label = "LoRA library"
+        checkpoint = lambda: _checkpoint(device, label)
         paths, _ = selected_files(roots, "")
         ranks = {}
         labels = {}
         for selected in paths:
-            checkpoint()
             path = os.path.realpath(selected)
             label = display_path(selected, roots)
+            checkpoint()
             log.info("Preparing LoRA: %s", label)
             try:
                 new, current, skipped = prepare_lokr(
@@ -421,6 +427,7 @@ def _run(roots):
         for path, wanted in library_paddings(ranks).items():
             if not wanted:
                 continue
+            label = labels[path]
             checkpoint()
             try:
                 report = prepare_paddings(
@@ -444,6 +451,7 @@ def _run(roots):
                     report["bytes"],
                 )
         counts["paddings"] = added
+        label = ", ".join(labels.values()) or "LoRA library"
         counts["sizes"] = _prepare_sizes(list(labels), checkpoint)
         log.info("Startup LoRA preparation: %s in %.2f s", counts, time.monotonic() - started)
     except _Stopped:

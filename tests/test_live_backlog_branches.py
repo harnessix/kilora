@@ -42,16 +42,25 @@ def recorded(session, target):
     return record
 
 
-def test_backlog_combines_independent_coefficient_updates(tmp_path):
+def test_backlog_matches_separate_commits_and_resets_each_mean(tmp_path, monkeypatch):
+    import kilora.write_estimates as estimates
+
     session, rule, targets = setup_session(tmp_path)
-    initial = session.editor_state.chunks.snapshot()
-    expected = {k: torch.zeros_like(v) for k, v in initial["coef"].items()}
     for target in targets:
-        session.editor_state.chunks.restore(initial)
-        rule.next_state(session.state, recorded(session, target))
-        for key, value in session.editor_state.chunks.coef.items():
-            expected[key] += value - initial["coef"][key]
-    session.editor_state.chunks.restore(initial)
+        commit_write(session, rule, recorded(session, target))
+    expected = copy.deepcopy(session.editor_state.chunks.snapshot())
+    expected_state = copy.deepcopy(session.state)
+    for _ in targets:
+        session.undo()
+    counts = []
+    average = estimates.mean_write_values
+
+    def observe(*args, **kwargs):
+        result = average(*args, **kwargs)
+        counts.append([row[1] for row in session._write_estimates.values()])
+        return result
+
+    monkeypatch.setattr(estimates, "mean_write_values", observe)
     queue = WriteQueue()
     queue.begin_generation()
     records = [recorded(session, target) for target in targets]
@@ -64,12 +73,53 @@ def test_backlog_combines_independent_coefficient_updates(tmp_path):
         )
         queue.end_generation()
         assert queue.wait_idle(30)
-        assert len(session.commits) == 1 and not queue.dropped, queue.reports
-        assert "combined=4" in queue.reports[0][1]
-        for key, delta in expected.items():
-            torch.testing.assert_close(
-                session.editor_state.chunks.coef[key], initial["coef"][key] + delta
-            )
+        assert len(session.commits) == 4 and not queue.dropped, queue.reports
+        assert "combined=1" in queue.reports[0][1]
+        assert len(counts) == 4 and all(row and set(row) == {1} for row in counts)
+        assert session._write_estimates == {}
+        for key, value in expected["coef"].items():
+            assert torch.equal(session.editor_state.chunks.coef[key], value)
+        for target, parts in expected_state.items():
+            for key, value in parts.items():
+                assert torch.equal(session.state[target][key], value)
+    finally:
+        queue.close()
+
+
+def test_backlog_retains_refused_estimate_only_until_next_commit(tmp_path, monkeypatch):
+    import kilora.editors as editors
+    import kilora.write_estimates as estimates
+
+    session, rule, targets = setup_session(tmp_path)
+    counts = []
+    average = estimates.mean_write_values
+
+    def observe(*args, **kwargs):
+        result = average(*args, **kwargs)
+        counts.append([row[1] for row in session._write_estimates.values()])
+        return result
+
+    monkeypatch.setattr(estimates, "mean_write_values", observe)
+    monkeypatch.setattr(
+        editors,
+        "guard_check",
+        lambda _rule, _session, record, _new: (record.extra.get("refuse", False), "test guard"),
+    )
+    records = [recorded(session, target) for target in targets[:3]]
+    records[0].extra["refuse"] = True
+    queue = WriteQueue()
+    queue.begin_generation()
+    try:
+        for record in records:
+            queue.submit(QueuedWrite(session, rule, record, None))
+        queue.end_generation()
+        assert queue.wait_idle(30), queue.reports
+        assert len(session.commits) == 2 and not queue.dropped, queue.reports
+        assert len(counts) == 3
+        assert set(counts[0]) == {1}
+        assert 2 in counts[1] and set(counts[1]) <= {1, 2}
+        assert set(counts[2]) == {1}
+        assert session._write_estimates == {}
     finally:
         queue.close()
 
@@ -194,6 +244,6 @@ def test_pending_groups_captured_revisions_and_reuses_fork(tmp_path):
         assert forest.branches[a].state.events == first["events"] + 3
         assert forest.branches[b].state.events == second["events"] + 1
         assert len(queue.reports) == 3
-        assert "combined=2" in queue.reports[0][1]
+        assert "combined=1" in queue.reports[0][1]
     finally:
         queue.close()

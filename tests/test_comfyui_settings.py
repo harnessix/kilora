@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from kilora.comfyui import nodes as N
@@ -275,22 +277,59 @@ def test_import_edit_settings_are_last_and_default_to_unchanged():
         "measure",
         "measure_combos",
         "edits",
+        "live_expert_mass",
+        "live_expert_top",
+        "live_expert_history",
+        "live_expert_copies",
+        "write_measure",
+        "forward_draws",
+        "forward_sigma",
+        "forward_chunk",
+        "write_resolution",
+        "probe_rows",
+        "probe_call",
+        "probe_budget",
+        "probe_draws",
         "measure_samples",
         "learn",
     ]
+    assert types["optional"]["write_measure"][0] == ["unchanged", "forward", "candidates"]
+    assert types["optional"]["write_measure"][1]["default"] == "unchanged"
     assert types["optional"]["learn"][0] == ["unchanged", "measure", "prediction"]
     assert types["optional"]["learn"][1]["default"] == "unchanged"
     assert types["optional"]["edits"][0] == ["unchanged", "on", "off"]
     assert types["optional"]["controller"][0] == ["unchanged", "r1", "rprop"]
     for name in ("edits", "controller"):
         assert types["optional"][name][1]["default"] == "unchanged"
+    assert types["optional"]["write_resolution"][0] == "INT"
+    spec = types["optional"]["write_resolution"][1]
+    assert (spec["default"], spec["min"], spec["max"]) == (-1, -1, 4096)
+    assert inspect.signature(N.KiLoRALiveOptions.set).parameters["write_resolution"].default == -1
 
 
-def test_layer_compose_input_is_last_and_defaults_to_separate():
+def test_layer_compose_input_defaults_to_separate():
     types = N.KiLoRALayerConditioning.INPUT_TYPES()
-    assert list(types["optional"])[-1] == "compose"
+    assert list(types["optional"])[-3:] == ["compose", "region_penalty", "mount_scope"]
     assert types["optional"]["compose"][0] == ["separate", "single"]
     assert types["optional"]["compose"][1]["default"] == "separate"
+
+
+def test_layer_region_penalty_and_mount_scope_inputs():
+    optional = N.KiLoRALayerConditioning.INPUT_TYPES()["optional"]
+    kind, spec = optional["region_penalty"]
+    assert kind == "FLOAT"
+    assert {k: v for k, v in spec.items() if k != "tooltip"} == {
+        "default": 1.0,
+        "min": 0.0,
+        "max": 10.0,
+        "step": 0.1,
+    }
+    choices, spec = optional["mount_scope"]
+    assert choices == ["cross_kv", "all"]
+    assert spec["default"] == "all"
+    params = inspect.signature(N.KiLoRALayerConditioning.layer).parameters
+    assert params["region_penalty"].default is None
+    assert params["mount_scope"].default is None
 
 
 def test_size_norm_off_leaves_the_chain_alone(calls, monkeypatch):
@@ -512,4 +551,94 @@ def test_image_solve_defaults_match_prompt_family_sampling():
         assert inputs[name][0] == prompt[name][0]
         assert inputs[name][1]["default"] == prompt[name][1]["default"]
     assert inputs["ignore_guard"][1]["default"] is False
-    assert set(KiLoRASolveFromImages.INPUT_TYPES()["optional"]) == {"images", "captions", "folder"}
+    assert set(KiLoRASolveFromImages.INPUT_TYPES()["optional"]) == {
+        "images",
+        "captions",
+        "folder",
+        "contrast_components",
+        "masks",
+        "mask_contrast",
+        "two_stage",
+        "mask_start",
+        "mask_samples",
+        "refit_rounds",
+        "guard_rule",
+        "trajectory_check",
+    }
+
+
+def test_depth_map_source_is_last_with_the_auto_inputs():
+    types = N.KiLoRADepthMap.INPUT_TYPES()
+    assert list(types["required"]) == [
+        "min_depth",
+        "max_depth",
+        "invert",
+        "gamma",
+        "feather",
+        "start",
+        "base",
+        "source",
+    ]
+    source = types["required"]["source"]
+    assert list(source[0]) == ["auto", "mask", "image"]
+    assert source[1]["default"] == "mask" and source[1]["tooltip"]
+    optional = types["optional"]
+    assert list(optional) == [
+        "mask",
+        "image",
+        "mean_depth",
+        "detail_weight",
+        "change_weight",
+        "disagreement_weight",
+        "smooth",
+    ]
+    defaults = {name: optional[name][1]["default"] for name in list(optional)[2:]}
+    assert defaults == {
+        "mean_depth": -1.0,
+        "detail_weight": 1.0,
+        "change_weight": 1.0,
+        "disagreement_weight": 0.0,
+        "smooth": 2.0,
+    }
+    assert optional["smooth"][1].get("advanced") is True
+    assert all(optional[name][1]["tooltip"] for name in defaults)
+    params = inspect.signature(N.KiLoRADepthMap.build).parameters
+    assert params["source"].default == "mask"
+    assert {name: params[name].default for name in defaults} == defaults
+
+
+def test_image_contrast_components_advanced_input_and_help():
+    from kilora.comfyui.help import node_defs
+    from kilora.comfyui.image_solve import KiLoRASolveFromImages
+
+    spec = KiLoRASolveFromImages.INPUT_TYPES()["optional"]["contrast_components"]
+    assert spec[0] == "INT"
+    assert spec[1]["default"] == 4
+    assert spec[1]["min"] == 0 and spec[1]["max"] == 4
+    assert spec[1]["advanced"] is True
+    tip = catalog("en")["tip.image_solve_contrast_components"]
+    assert "principal directions" in tip
+    assert "0 writes the previous mean-only weights" in tip
+    assert spec[1]["tooltip"] == tip
+    definitions = node_defs("en", {"KiLoRASolveFromImages": KiLoRASolveFromImages})
+    assert definitions["KiLoRASolveFromImages"]["inputs"]["contrast_components"] == {
+        "name": catalog("en")["in.image_solve_contrast_components"],
+        "tooltip": tip,
+    }
+
+
+def test_image_solve_measurement_switches_are_advanced_and_keep_defaults():
+    from kilora.comfyui.image_solve import KiLoRASolveFromImages
+
+    inputs = KiLoRASolveFromImages.INPUT_TYPES()["optional"]
+    expected = {
+        "mask_start": ("FLOAT", {"default": 0.4, "min": 0.0, "max": 0.95, "advanced": True}),
+        "mask_samples": ("STRING", {"default": "", "advanced": True}),
+        "refit_rounds": ("INT", {"default": 0, "min": 0, "max": 8, "advanced": True}),
+        "guard_rule": (["loss", "drift"], {"default": "loss", "advanced": True}),
+        "trajectory_check": ("BOOLEAN", {"default": False, "advanced": True}),
+    }
+    for name, (expected_kind, expected_options) in expected.items():
+        kind, options = inputs[name]
+        assert kind == expected_kind
+        assert {key: options[key] for key in expected_options} == expected_options

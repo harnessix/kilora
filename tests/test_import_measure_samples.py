@@ -7,9 +7,10 @@ from test_import_edit_dimensions import _session as _imported
 from kilora.comfyui import nodes as N
 from kilora.comfyui import patching
 from kilora.comfyui.live_write import (
-    SAMPLE_SEED_STEP,
     PathHandle,
     batch_conditions,
+    flow_pairs,
+    flow_seed,
     image_loss,
     timing_note,
 )
@@ -65,24 +66,22 @@ def _x0():
     return torch.randn(1, 5, 4, generator=torch.Generator().manual_seed(11))
 
 
-def _noised(x0, value, seed):
-    noise = torch.randn(x0.shape, generator=torch.Generator().manual_seed(seed))
-    sigma = min(max(value, 0.0), 1.0)
+def _pairs(session, count):
+    return flow_pairs(None, (1, 5, 4), count, count, flow_seed(session, RETRY))
+
+
+def _noised(x0, sigma, noise):
     return sigma * noise + (1 - sigma) * x0
 
 
-def _seed():
-    return 1009 * (EVENT + 1) + 7919 * RETRY
-
-
-def _old_loss(x0, x, value):
+def _loss(x0, x, sigma):
     joined = batch_conditions(
         {"c_crossattn": torch.full((1, 2), 0.3)}, {"c_crossattn": torch.full((1, 2), -0.2)}, 1
     )
-    t = torch.full((1,), value, dtype=x0.dtype)
+    t = torch.full((1,), sigma, dtype=x0.dtype)
     outs = _model([])(torch.cat([x, x]), torch.cat([t, t]), **joined).chunk(2)
     losses = [float(masked_mean((o.float() - x0.float()).pow(2), None)) for o in outs]
-    return sum(losses) / len(losses), outs
+    return sum(losses) / len(losses) / sigma**2, outs
 
 
 def _gap(x0, outs):
@@ -101,7 +100,7 @@ def _run(session):
 
 
 @pytest.mark.parametrize("kind", ["imported", "plain"])
-def test_one_sample_measures_as_before(tmp_path, kind):
+def test_one_pair_measures_the_velocity_loss(tmp_path, kind):
     session = _imported(tmp_path) if kind == "imported" else _plain(tmp_path)
     if kind == "imported":
         assert session.measure_samples == 4
@@ -109,48 +108,46 @@ def test_one_sample_measures_as_before(tmp_path, kind):
     assert session.measure_samples == 1
     measure, base, trials, guard, seen = _run(session)
     x0 = _x0()
-    middle = sorted(TIMESTEPS)[len(TIMESTEPS) // 2]
-    x_t = _noised(x0, middle, _seed())
-    old, outs = _old_loss(x0, x_t, middle)
-    assert base == old and trials == [old, old]
+    (pair,), (held,) = _pairs(session, 1)
+    sigma, noise = pair
+    x_t = _noised(x0, sigma, noise)
+    loss, outs = _loss(x0, x_t, sigma)
+    assert base == pytest.approx(loss, rel=1e-6)
+    assert trials == pytest.approx([loss, loss], rel=1e-6)
     for x, t in seen[:3]:
-        assert torch.equal(x, torch.cat([x_t, x_t]))
-        assert torch.equal(t, torch.full((2,), middle))
-    _, alt_outs = _old_loss(x0, _noised(x0, middle, _seed() + 104729), middle)
+        assert torch.allclose(x, torch.cat([x_t, x_t]))
+        assert torch.equal(t, torch.full((2,), sigma))
+    _, alt_outs = _loss(x0, _noised(x0, *held), held[0])
     expected = {"gap": _gap(x0, outs), "spread": float(outs[0].float().std())}
     expected["gap_alt"] = _gap(x0, alt_outs)
-    assert guard[0] == expected and guard[1] == expected
+    for score in guard:
+        assert score == pytest.approx(expected, rel=1e-6)
     assert measure.calls[0] == 3 + 1 + 2
     timing = measure.timing
     assert len(timing["base_s"]) == 1 and len(timing["trial_s"]) == 2
-    assert measure.samples == [(middle, _seed())]
+    assert measure.samples == [(sigma, flow_seed(session, RETRY))]
     assert "measure_samples" not in timing_note(type("R", (), {"measure": measure})())
 
 
-def test_four_samples_use_the_planned_timesteps_and_seeds(tmp_path):
+def test_four_pairs_are_the_same_for_every_trial(tmp_path):
     session = _imported(tmp_path)
     assert session.measure_samples == 4
     measure, base, trials, guard, seen = _run(session)
     x0 = _x0()
-    ordered = sorted(TIMESTEPS)
-    plan = [(ordered[int((j + 0.5) / 4 * len(ordered))], _seed() + 104729 * j) for j in range(4)]
-    assert SAMPLE_SEED_STEP == 104729
-    assert measure.samples == plan
-    assert [v for v, _ in plan] == [ordered[1], ordered[3], ordered[5], ordered[7]]
-    middle = ordered[len(ordered) // 2]
-    assert torch.equal(seen[0][0], torch.cat([_noised(x0, middle, _seed())] * 2))
+    pairs, held = _pairs(session, 4)
+    assert [s for s, _seed in measure.samples] == [s for s, _n in pairs]
+    assert [s for s, _seed in measure.held_samples] == [s for s, _n in held]
     first, second = seen[1:5], seen[5:9]
-    for (value, seed), (x, t), (x2, t2) in zip(plan, first, second, strict=True):
-        expected = _noised(x0, value, seed)
+    for (sigma, noise), (x, t), (x2, t2) in zip(pairs, first, second, strict=True):
+        expected = _noised(x0, sigma, noise)
         assert torch.allclose(x, torch.cat([expected, expected]))
-        assert torch.equal(t, torch.full((2,), value))
+        assert torch.equal(t, torch.full((2,), sigma))
         assert torch.equal(x, x2) and torch.equal(t, t2)
-    per_sample = [_old_loss(x0, _noised(x0, v, s), v)[0] for v, s in plan]
-    assert measure.sample_losses == pytest.approx(per_sample, rel=1e-6)
-    assert trials[0] == pytest.approx(sum(per_sample) / 4, rel=1e-6)
+    per_pair = [_loss(x0, _noised(x0, s, n), s)[0] for s, n in pairs]
+    assert measure.sample_losses == pytest.approx(per_pair, rel=1e-6)
+    assert trials[0] == pytest.approx(sum(per_pair) / 4, rel=1e-6)
     assert trials[1] == trials[0]
-    assert sum(measure.sample_losses) / 4 == pytest.approx(trials[1], rel=1e-12)
-    assert base == _old_loss(x0, _noised(x0, middle, _seed()), middle)[0]
+    assert base == pytest.approx(per_pair[0], rel=1e-6)
     timing = measure.timing
     assert len(timing["base_s"]) == 1 and len(timing["trial_s"]) == 2
     assert measure.calls[0] == 1 + 2 * 4 + 1 + 2
@@ -158,12 +155,15 @@ def test_four_samples_use_the_planned_timesteps_and_seeds(tmp_path):
     assert "measure_samples=4" in note
 
 
-def test_the_guard_score_does_not_depend_on_the_samples(tmp_path):
+def test_the_guard_reads_the_first_pair_and_the_first_held_out_pair(tmp_path):
     session = _imported(tmp_path)
-    *_, guard_4, _ = _run(session)
-    session.set_options(measure_samples=1)
-    *_, guard_1, _ = _run(session)
-    assert guard_4 == guard_1
+    measure, _base, _trials, guard, _seen = _run(session)
+    x0 = _x0()
+    pairs, held = _pairs(session, 4)
+    _, outs = _loss(x0, _noised(x0, *pairs[0]), pairs[0][0])
+    _, alt = _loss(x0, _noised(x0, *held[0]), held[0][0])
+    assert guard[0]["gap"] == pytest.approx(_gap(x0, outs), rel=1e-6)
+    assert guard[0]["gap_alt"] == pytest.approx(_gap(x0, alt), rel=1e-6)
 
 
 def test_the_setting_is_checked_and_survives_a_save(tmp_path):

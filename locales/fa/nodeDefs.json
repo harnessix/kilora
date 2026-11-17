@@ -239,7 +239,7 @@
       },
       "depth": {
         "name": "عمق",
-        "tooltip": "تعداد گذرها. ‎-1 عمق پیشنهادی ماد را به کار می‌برد."
+        "tooltip": "تعداد گذرها. ‎-1 عمق پیشنهادی ماد را به کار می‌برد (LoRAهای واردشده: 4)."
       }
     }
   },
@@ -257,7 +257,7 @@
       },
       "depth": {
         "name": "عمق",
-        "tooltip": "تعداد گذرها. ‎-1 عمق پیشنهادی ماد را به کار می‌برد."
+        "tooltip": "تعداد گذرها. ‎-1 عمق پیشنهادی ماد را به کار می‌برد (LoRAهای واردشده: 4)."
       },
       "iteration": {
         "name": "تکرار",
@@ -285,7 +285,7 @@
       },
       "path_width": {
         "name": "پهنای مسیر",
-        "tooltip": "فقط برای تکرار مسیر. تعداد پیمایش‌ها: از بهترین متخصصان گام اول شروع می‌شوند و هر پیمایش از پرس‌وجوی خودش ادامه می‌دهد. پهنای بیشتر پس از گام اول اشتباه، متخصص درست را پیدا می‌کند. 0 مقدار ماد را به کار می‌برد (پیش‌فرض 1: یک پیمایش)."
+        "tooltip": "فقط برای تکرار مسیر. تعداد پیمایش‌ها: از بهترین متخصصان گام اول شروع می‌شوند و هر پیمایش از پرس‌وجوی خودش ادامه می‌دهد. پهنای بیشتر پس از گام اول اشتباه، متخصص درست را پیدا می‌کند. 0 مقدار ماد را به کار می‌برد (LoRAهای واردشده: 3 پیمایش؛ مادهای دیگر: 1)."
       },
       "path_select": {
         "name": "انتخاب مسیر",
@@ -488,6 +488,58 @@
         "name": "ویرایش‌ها",
         "tooltip": "ویرایش‌ها ماتریس مرکزی و قدرت هر LoRA در هر لایه و جمله‌های بسته را تغییر می‌دهند. فایل‌های منبع هرگز نوشته نمی‌شوند. off فایل‌های LoRA واردشده را دقیقا بازیابی می‌کند. unchanged انتخاب فعلی را نگه می‌دارد."
       },
+      "live_expert_mass": {
+        "name": "جرم پیموده‌شده",
+        "tooltip": "یک نوشتن زنده یک متخصص را فقط وقتی ویرایش می‌کند که جرم مسیر آن روی مسیرهای ثبت‌شده از این کسر از جرم لایه‌اش بیشتر باشد. -1: بدون تغییر. پیش‌فرض 0.05 است."
+      },
+      "live_expert_top": {
+        "name": "متخصص‌های پیموده‌شده در هر لایه",
+        "tooltip": "بیشترین تعداد متخصص در هر لایه که یک نوشتن زنده بر اساس جرم مسیر ویرایش می‌کند. 0: بدون تغییر. پیش‌فرض 4 است."
+      },
+      "live_expert_history": {
+        "name": "تاریخچه مسیر",
+        "tooltip": "تعداد پرامپت‌های ثبت‌شده که نشست جرم مسیرشان را برای یافتن متخصص‌های مشترک نگه می‌دارد. 0: بدون تغییر. پیش‌فرض 16 است."
+      },
+      "live_expert_copies": {
+        "name": "نسخه به ازای هر متخصص",
+        "tooltip": "بیشترین تعداد نسخه از یک متخصص مشترک که نوشتن‌های زنده اضافه می‌کنند. -1: بدون تغییر. پیش‌فرض 2 است."
+      },
+      "write_measure": {
+        "name": "اندازه‌گیری نوشتن",
+        "tooltip": "یک نوشتن زنده چگونه جهت خود را پیدا می‌کند. forward: یک گذر پیشرو تمیز و مجموعه‌ای از گذرهای پیشرو با نوفهٔ کوچک روی خروجی متخصص‌های هدف (پیش‌فرض). candidates: هر حرکت نامزد را با گذرهای جفت‌شده می‌سنجد. unchanged انتخاب فعلی را نگه می‌دارد."
+      },
+      "forward_draws": {
+        "name": "نمونه‌های نوفه",
+        "tooltip": "تعداد نمونه‌های نوفه در برآورد forward. نمونهٔ بیشتر جهت پایدارتری می‌دهد و زمان بیشتری می‌برد. 0: بدون تغییر. پیش‌فرض 4 است."
+      },
+      "forward_sigma": {
+        "name": "اندازهٔ نوفه",
+        "tooltip": "اندازهٔ نوفهٔ برآورد forward، به صورت کسری از RMS خروجی هر متخصص. -1: بدون تغییر. پیش‌فرض 0.05 است."
+      },
+      "forward_chunk": {
+        "name": "نمونه در هر گذر",
+        "tooltip": "تعداد نمونه‌های نوفه در یک گذر پیشرو دسته‌ای. عدد کمتر حافظهٔ GPU کمتری مصرف می‌کند. 0: بدون تغییر. پیش‌فرض 4 است."
+      },
+      "write_resolution": {
+        "name": "وضوح نوشتن",
+        "tooltip": "ضلع بلندتر نمونه‌های یک نوشتن، به پیکسل. نوشتن از نسخه کوچک‌شده تصویر یاد می‌گیرد: 256 تا 4096، گرد به مضرب 16. عدد کوچک‌تر نوشتن را سریع‌تر می‌کند. 0: وضوح رندر. -1: بدون تغییر. پیش‌فرض 512. نوشتن‌ها پیش از این تنظیم هم با 512 px اجرا می‌شدند: از اندازهٔ اندازه‌گیری (measure_size) استفاده می‌کردند. این تنظیم به همان کنترل نام می‌دهد."
+      },
+      "probe_rows": {
+        "name": "render probe rows",
+        "tooltip": "Collect write measurements during rendering. On by default. Image learning and writes without a complete render measurement use their own noise samples."
+      },
+      "probe_call": {
+        "name": "render probe call",
+        "tooltip": "Separate runs each probe after the image call. Larger batches can change image-row rounding even on the CPU, so separate is the only supported value. The image call keeps its original rows. Probe measurements do not update image records or step caches."
+      },
+      "probe_budget": {
+        "name": "probe row budget",
+        "tooltip": "Maximum perturbed rows per render, counting caption and empty-caption rows. The default 2 samples one caption for one antithetic pair per render. The write seed selects caption or empty caption with equal probability. Budgets of 4 or more retain both captions. Complete pairs are retained; fewer than two rows skips probes. Acceptance retains both captions for the prompt and collapse guard. Clean reference and acceptance rows are additional. Larger budgets allow more draws when the session is idle. Pairs run over consecutive eligible sampling steps, with two caption rows per probe call. A short schedule falls back to ordinary write samples."
+      },
+      "probe_draws": {
+        "name": "render probe draws",
+        "tooltip": "Maximum noise draws collected in a render. 0 uses the forward draws setting; -1 keeps the current value. Complete positive and negative pairs are kept. Fewer draws reduce the render work."
+      },
       "measure_samples": {
         "name": "samples per write measurement",
         "tooltip": "Samples per write measurement: the same noise and timesteps for every trial. More samples measure more steadily and cost more time. 1 = one sample at the middle timestep."
@@ -658,7 +710,7 @@
       },
       "depth": {
         "name": "عمق",
-        "tooltip": "تعداد گذرها. ‎-1 عمق پیشنهادی ماد را به کار می‌برد."
+        "tooltip": "تعداد گذرها. ‎-1 عمق پیشنهادی ماد را به کار می‌برد (LoRAهای واردشده: 4)."
       },
       "iteration": {
         "name": "تکرار",
@@ -1286,7 +1338,7 @@
   },
   "KiLoRADepthMap": {
     "display_name": "KiLoRA نقشه عمق",
-    "description": "یک عمق برای هر ناحیه از تصویر، از یک ماسک (SAM2 و دیگر بخش‌بندها) یا یک تصویر (روشنایی آن: نقشه‌های عمق، خط‌نگاری یا ژست از پیش‌پردازنده‌های ControlNet). تا start هر ناحیه با یک عمق اجرا می‌شود، پس چیدمان مثل همیشه شکل می‌گیرد. سپس هر ناحیه با عمق خودش اجرا می‌شود. آن را به KiLoRA Apply یا KiLoRA LoRA Loader وصل کنید.",
+    "description": "یک عمق برای هر ناحیه از تصویر، از یک ماسک (SAM2 و دیگر بخش‌بندها) یا یک تصویر (روشنایی آن: نقشه‌های عمق، خط‌نگاری یا ژست از پیش‌پردازنده‌های ControlNet). تا start هر ناحیه با یک عمق اجرا می‌شود، پس چیدمان مثل همیشه شکل می‌گیرد. سپس هر ناحیه با عمق خودش اجرا می‌شود. آن را به KiLoRA Apply یا KiLoRA LoRA Loader وصل کنید. بدون ماسک یا تصویر، source auto نقشه را هنگام نمونه‌برداری می‌سنجد: عمق بیشتر روی جزئیات و جایی که LoRAها تصویر را بیشتر تغییر می‌دهند، با همان عمق میانگین.",
     "inputs": {
       "min_depth": {
         "name": "min_depth",
@@ -1316,6 +1368,10 @@
         "name": "base",
         "tooltip": "عمق هر ناحیه پیش از start و عمق توکن‌های متن. ‎-1: میانگین عمق نقشه، گردشده."
       },
+      "source": {
+        "name": "source",
+        "tooltip": "منبع نقشه. mask یا image: ورودی وصل‌شده (اول ماسک). auto: در گام start از جزئیات تصویر، تغییر KiLoRA و ناهمسویی مسیرها سنجیده می‌شود. بدون ماسک یا تصویر وصل‌شده، auto به کار می‌رود."
+      },
       "mask": {
         "name": "ماسک",
         "tooltip": "یک ماسک، برای نمونه از SAM2. مقدار 1 عمق max_depth را می‌دهد. اگر تصویری هم وصل باشد، ماسک به کار می‌رود."
@@ -1323,6 +1379,26 @@
       "image": {
         "name": "image",
         "tooltip": "یک تصویر. روشنایی آن نقشه است، برای نمونه خروجی پیش‌پردازنده عمق، خط‌نگاری یا ژست."
+      },
+      "mean_depth": {
+        "name": "mean_depth",
+        "tooltip": "auto: عمق میانگین روی تصویر. ‎-1 عمق KiLoRA Apply را به کار می‌برد، پس هزینه همان عمق یکنواخت می‌ماند. مقدارهای کمتر سریع‌ترند."
+      },
+      "detail_weight": {
+        "name": "detail_weight",
+        "tooltip": "auto: وزن جزئیات تصویر (ساختار ریز تخمین تصویر تمیز)."
+      },
+      "change_weight": {
+        "name": "change_weight",
+        "tooltip": "auto: وزن تغییر KiLoRA (جایی که LoRAها تصویر را بیشتر تغییر می‌دهند)."
+      },
+      "disagreement_weight": {
+        "name": "disagreement_weight",
+        "tooltip": "auto: وزن ناهمسویی مسیرها (جایی که LoRAها رقابت می‌کنند). 0 آن را خاموش می‌کند."
+      },
+      "smooth": {
+        "name": "smooth",
+        "tooltip": "auto: پهنای گاوسی بر حسب توکن که نقشه ترکیبی را پیش از انتخاب عمق‌ها نرم می‌کند. نقشه تصویر نقاشی‌شده نویزی است؛ مقدار 2 ناحیه می‌دهد. مقدار 0 آن را خاموش می‌کند."
       }
     },
     "outputs": {
@@ -1371,6 +1447,14 @@
       "compose": {
         "name": "compose",
         "tooltip": "separate: each layer runs as its own model call. single: all layers run in one model call per guidance branch, and each image area reads its own layer text. Select single on every layer. The crop input is not used with single."
+      },
+      "region_penalty": {
+        "name": "region penalty",
+        "tooltip": "با compose single: میزان اینکه ناحیه‌های تصویر لایه‌های مختلف در گام‌های اول چقدر از خواندن یکدیگر دست بکشند. 0 آن را خاموش می‌کند. مقدار لایهٔ اول به کار می‌رود و همهٔ لایه‌ها باید یک مقدار را تنظیم کنند."
+      },
+      "mount_scope": {
+        "name": "mount scope",
+        "tooltip": "با compose single: all مادهای یک لایه را روی ناحیهٔ تصویر لایه و روی متن خود آن اعمال می‌کند. cross_kv آن‌ها را فقط روی کلیدها و مقادیر cross-attention متن خود لایه اعمال می‌کند، پس LoRA بدون این وزن‌ها هیچ اثری ندارد. همهٔ لایه‌ها باید یک مقدار را تنظیم کنند."
       }
     },
     "outputs": {
@@ -1827,6 +1911,42 @@
       "folder": {
         "name": "پوشه",
         "tooltip": "پوشه تصاویر با شرح‌های اختیاری .txt هم‌نام. پوشه یا تصاویر را انتخاب کنید."
+      },
+      "contrast_components": {
+        "name": "مؤلفه‌های کنتراست",
+        "tooltip": "حداکثر چهار جهت اصلی از میانگین کنتراست‌های هر تصویر را به میانگین مشترک اضافه می‌کند. پس از کنار گذاشتن تصاویر ارزیابی، تعداد به شمار تصاویر برازش منهای یک محدود می‌شود. مقدار پیش‌فرض 4 است؛ مقدار 0 وزن‌های قبلی مبتنی بر میانگین تنها را می‌نویسد. برازش همچنان از تنظیم رتبه استفاده می‌کند. فقط برای این حل از تصاویر بدون ماسک کاربرد دارد."
+      },
+      "masks": {
+        "name": "ماسک‌ها",
+        "tooltip": "یک ماسک برای هر تصویر، به ترتیب تصاویر. حل فقط ناحیهٔ ماسک‌شده را یاد می‌گیرد. برای استفاده از کل تصویر، این ورودی را خالی بگذارید."
+      },
+      "mask_contrast": {
+        "name": "مقایسهٔ ماسک",
+        "tooltip": "با ماسک، tokens هر توکن ماسک‌شده و mean میانگین ماسک‌شده را مقایسه می‌کند. بدون ماسک نادیده گرفته می‌شود."
+      },
+      "two_stage": {
+        "name": "دو مرحله",
+        "tooltip": "ابتدا سبک و سپس شخصیت را با فعال بودن همان سبک در مدل شاگرد حل می‌کند. ماسک‌ها شخصیت و معکوس آن‌ها سبک را انتخاب می‌کنند. بدون ماسک، هر دو مرحله از کل تصاویر استفاده می‌کنند. دو فایل جدا ذخیره می‌شود: creative برای سبک و ip برای شخصیت."
+      },
+      "mask_start": {
+        "name": "شروع ماسک",
+        "tooltip": "با ماسک، مسیر دانش‌آموز هم‌تراز از این نسبت از برنامهٔ کامل شروع می‌شود. پیش‌فرض 0.4 است. بدون ماسک نادیده گرفته می‌شود."
+      },
+      "mask_samples": {
+        "name": "نمونه‌های ماسک",
+        "tooltip": "با ماسک: نسبت‌های برنامهٔ کامل با فاصله یا ویرگول، از شروع ماسک تا 1.0؛ مانند 0.5 0.75 1.0. خالی گذاشتن، سه موقعیت اصلی را حفظ می‌کند. بدون ماسک نادیده گرفته می‌شود."
+      },
+      "refit_rounds": {
+        "name": "دورهای برازش مجدد",
+        "tooltip": "حل‌های اضافی به شکل بسته پس از نمونه‌گیری مجدد مسیرهای دانش‌آموز با فعال بودن حل قبلی. 0 حل اصلی را حفظ می‌کند؛ حداکثر 8 دور. فقط نتیجهٔ آخر بررسی و ذخیره می‌شود."
+      },
+      "guard_rule": {
+        "name": "قاعدهٔ بررسی",
+        "tooltip": "loss کمترین خطای اعتبارسنجی کمتر از خطای پایه را در حد انحراف ویرایش زنده انتخاب می‌کند. drift بزرگ‌ترین مقیاس در این حد را با خطای حداکثر 1.25 برابر پایه انتخاب می‌کند. پیش‌فرض loss است."
+      },
+      "trajectory_check": {
+        "name": "بررسی مسیر",
+        "tooltip": "دو پرامپت نامرتبط را با 8 گام نمونه‌برداری و نخستین بذر، اندازه و cfg حل بررسی می‌کند. اگر انحراف معیار مکانی نهفته کمتر از 0.5 برابر پایه شود یا فاصله نسبی L2 از 1.0 بیشتر شود، مقیاس رد و مقیاس‌های مجاز کوچک‌تر امتحان می‌شوند. بدون رمزگشایی VAE. پیش‌فرض خاموش است."
       }
     },
     "outputs": {

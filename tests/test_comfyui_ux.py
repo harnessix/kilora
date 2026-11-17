@@ -11,7 +11,9 @@ from kilora.comfyui import nodes as N
 def test_every_input_has_a_tooltip_and_every_node_a_description(folders):
     for key, cls in NODE_CLASS_MAPPINGS.items():
         assert cls.DESCRIPTION and cls.CATEGORY.startswith("KiLoRA"), key
-        for group in cls.INPUT_TYPES().values():
+        for group_name, group in cls.INPUT_TYPES().items():
+            if group_name == "hidden":
+                continue
             for name, spec in group.items():
                 assert len(spec) > 1 and spec[1].get("tooltip"), f"{key}.{name}"
 

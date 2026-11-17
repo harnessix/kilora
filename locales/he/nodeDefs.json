@@ -239,7 +239,7 @@
       },
       "depth": {
         "name": "עומק",
-        "tooltip": "מספר המעברים. ‎-1 משתמש בעומק שהמוד ממליץ."
+        "tooltip": "מספר המעברים. ‎-1 משתמש בעומק שהמוד ממליץ (LoRA מיובאים: 4)."
       }
     }
   },
@@ -257,7 +257,7 @@
       },
       "depth": {
         "name": "עומק",
-        "tooltip": "מספר המעברים. ‎-1 משתמש בעומק שהמוד ממליץ."
+        "tooltip": "מספר המעברים. ‎-1 משתמש בעומק שהמוד ממליץ (LoRA מיובאים: 4)."
       },
       "iteration": {
         "name": "איטרציה",
@@ -285,7 +285,7 @@
       },
       "path_width": {
         "name": "רוחב מסלול",
-        "tooltip": "לאיטרציית מסלול בלבד. מספר ההליכות: הן מתחילות מהמומחים הטובים של הצעד הראשון, וכל הליכה ממשיכה מהשאילתה שלה. רוחב גדול יותר מוצא את המומחה הנכון אחרי צעד ראשון שגוי. 0 משתמש בערך של המוד (ברירת מחדל 1: הליכה אחת)."
+        "tooltip": "לאיטרציית מסלול בלבד. מספר ההליכות: הן מתחילות מהמומחים הטובים של הצעד הראשון, וכל הליכה ממשיכה מהשאילתה שלה. רוחב גדול יותר מוצא את המומחה הנכון אחרי צעד ראשון שגוי. 0 משתמש בערך של המוד (LoRA מיובאים: 3 הליכות; מודים אחרים: 1)."
       },
       "path_select": {
         "name": "בחירת מסלול",
@@ -488,6 +488,58 @@
         "name": "עריכות",
         "tooltip": "העריכות משנות את מטריצת הליבה והעוצמה של כל LoRA בכל שכבה, ואת איברי החבילות. קובצי המקור לעולם אינם נכתבים. off משחזר בדיוק את ה־LoRA שיובאו. unchanged שומר את הבחירה הנוכחית."
       },
+      "live_expert_mass": {
+        "name": "מסה שנחצתה",
+        "tooltip": "כתיבה חיה עורכת מומחה רק אם מסת המסלול שלו על הנתיבים שנרשמו גבוהה מהשבר הזה ממסת השכבה שלו. -1: ללא שינוי. ברירת המחדל היא 0.05."
+      },
+      "live_expert_top": {
+        "name": "מומחים שנחצו בכל שכבה",
+        "tooltip": "המספר המרבי של מומחים בכל שכבה שכתיבה חיה אחת עורכת, לפי מסת המסלול. 0: ללא שינוי. ברירת המחדל היא 4."
+      },
+      "live_expert_history": {
+        "name": "היסטוריית מסלולים",
+        "tooltip": "מספר הפרומפטים שנרשמו שהמפגש שומר את מסת המסלול שלהם כדי למצוא מומחים משותפים. 0: ללא שינוי. ברירת המחדל היא 16."
+      },
+      "live_expert_copies": {
+        "name": "עותקים לכל מומחה",
+        "tooltip": "המספר המרבי של עותקים של מומחה משותף אחד שכתיבות חיות מוסיפות. -1: ללא שינוי. ברירת המחדל היא 2."
+      },
+      "write_measure": {
+        "name": "מדידת כתיבה",
+        "tooltip": "איך כתיבה חיה מוצאת את הכיוון שלה. forward: מעבר קדימה נקי אחד וקבוצת מעברים קדימה עם רעש קטן על הפלטים של מומחי היעד (ברירת מחדל). candidates: מודדת כל מהלך מועמד במעברים מזווגים. unchanged שומר את הבחירה הנוכחית."
+      },
+      "forward_draws": {
+        "name": "דגימות רעש",
+        "tooltip": "מספר דגימות הרעש של אומדן ה-forward. יותר דגימות נותנות כיוון יציב יותר ועולות יותר זמן. 0: ללא שינוי. ברירת המחדל היא 4."
+      },
+      "forward_sigma": {
+        "name": "גודל הרעש",
+        "tooltip": "גודל הרעש של אומדן ה-forward, כשבר מ-RMS של הפלט של כל מומחה. -1: ללא שינוי. ברירת המחדל היא 0.05."
+      },
+      "forward_chunk": {
+        "name": "דגימות לכל מעבר",
+        "tooltip": "מספר דגימות הרעש במעבר קדימה אחד באצווה. מספר נמוך יותר משתמש בפחות זיכרון GPU. 0: ללא שינוי. ברירת המחדל היא 4."
+      },
+      "write_resolution": {
+        "name": "רזולוציית כתיבה",
+        "tooltip": "הצלע הארוכה, בפיקסלים, של דגימות הכתיבה. הכתיבה לומדת מעותק מוקטן של התמונה: 256 עד 4096, מעוגל ל-16. מספר קטן יותר מאיץ את הכתיבה. 0: רזולוציית הרינדור. -1: ללא שינוי. ברירת המחדל 512. כתיבות כבר רצו ב-512 px לפני ההגדרה הזו: הן השתמשו בגודל המדידה (measure_size). ההגדרה הזו נותנת שם לבקרה הזו."
+      },
+      "probe_rows": {
+        "name": "render probe rows",
+        "tooltip": "Collect write measurements during rendering. On by default. Image learning and writes without a complete render measurement use their own noise samples."
+      },
+      "probe_call": {
+        "name": "render probe call",
+        "tooltip": "Separate runs each probe after the image call. Larger batches can change image-row rounding even on the CPU, so separate is the only supported value. The image call keeps its original rows. Probe measurements do not update image records or step caches."
+      },
+      "probe_budget": {
+        "name": "probe row budget",
+        "tooltip": "Maximum perturbed rows per render, counting caption and empty-caption rows. The default 2 samples one caption for one antithetic pair per render. The write seed selects caption or empty caption with equal probability. Budgets of 4 or more retain both captions. Complete pairs are retained; fewer than two rows skips probes. Acceptance retains both captions for the prompt and collapse guard. Clean reference and acceptance rows are additional. Larger budgets allow more draws when the session is idle. Pairs run over consecutive eligible sampling steps, with two caption rows per probe call. A short schedule falls back to ordinary write samples."
+      },
+      "probe_draws": {
+        "name": "render probe draws",
+        "tooltip": "Maximum noise draws collected in a render. 0 uses the forward draws setting; -1 keeps the current value. Complete positive and negative pairs are kept. Fewer draws reduce the render work."
+      },
       "measure_samples": {
         "name": "samples per write measurement",
         "tooltip": "Samples per write measurement: the same noise and timesteps for every trial. More samples measure more steadily and cost more time. 1 = one sample at the middle timestep."
@@ -658,7 +710,7 @@
       },
       "depth": {
         "name": "עומק",
-        "tooltip": "מספר המעברים. ‎-1 משתמש בעומק שהמוד ממליץ."
+        "tooltip": "מספר המעברים. ‎-1 משתמש בעומק שהמוד ממליץ (LoRA מיובאים: 4)."
       },
       "iteration": {
         "name": "איטרציה",
@@ -1286,7 +1338,7 @@
   },
   "KiLoRADepthMap": {
     "display_name": "KiLoRA מפת עומק",
-    "description": "עומק לכל אזור בתמונה, ממסכה (SAM2 ומפלחים אחרים) או מתמונה (הבהירות שלה: מפות עומק, lineart או תנוחה ממעבדים מקדימים של ControlNet). עד start כל אזור רץ בעומק אחד, כך שהפריסה נוצרת כרגיל. אחר כך כל אזור רץ בעומק שלו. חברו אותו ל-KiLoRA Apply או ל-KiLoRA LoRA Loader.",
+    "description": "עומק לכל אזור בתמונה, ממסכה (SAM2 ומפלחים אחרים) או מתמונה (הבהירות שלה: מפות עומק, lineart או תנוחה ממעבדים מקדימים של ControlNet). עד start כל אזור רץ בעומק אחד, כך שהפריסה נוצרת כרגיל. אחר כך כל אזור רץ בעומק שלו. חברו אותו ל-KiLoRA Apply או ל-KiLoRA LoRA Loader. בלי מסכה או תמונה, source auto מודד את המפה בזמן הדגימה: יותר עומק בפרטים ובמקום שבו ה-LoRA משנים את התמונה הכי הרבה, עם אותו עומק ממוצע.",
     "inputs": {
       "min_depth": {
         "name": "min_depth",
@@ -1316,6 +1368,10 @@
         "name": "base",
         "tooltip": "העומק של כל אזור לפני start ושל אסימוני הטקסט. ‎-1: העומק הממוצע של המפה, מעוגל."
       },
+      "source": {
+        "name": "source",
+        "tooltip": "מאיפה המפה מגיעה. mask או image: הקלט המחובר (המסכה קודם). auto: נמדדת בצעד של start מפרטי התמונה, משינוי KiLoRA ומאי-ההסכמה של המסלולים. בלי מסכה או תמונה מחוברות, משתמשים ב-auto."
+      },
       "mask": {
         "name": "מסכה",
         "tooltip": "מסכה, למשל מ-SAM2. הערך 1 נותן max_depth. אם מחוברת גם תמונה, המסכה משמשת."
@@ -1323,6 +1379,26 @@
       "image": {
         "name": "image",
         "tooltip": "תמונה. הבהירות שלה היא המפה, למשל הפלט של מעבד מקדים לעומק, lineart או תנוחה."
+      },
+      "mean_depth": {
+        "name": "mean_depth",
+        "tooltip": "auto: העומק הממוצע על התמונה. ‎-1 משתמש בעומק של KiLoRA Apply, כך שהעלות נשארת כמו בעומק האחיד הזה. ערכים נמוכים יותר מהירים יותר."
+      },
+      "detail_weight": {
+        "name": "detail_weight",
+        "tooltip": "auto: המשקל של פרטי התמונה (המבנה העדין של הערכת התמונה הנקייה)."
+      },
+      "change_weight": {
+        "name": "change_weight",
+        "tooltip": "auto: המשקל של שינוי KiLoRA (איפה שה-LoRA משנים את התמונה הכי הרבה)."
+      },
+      "disagreement_weight": {
+        "name": "disagreement_weight",
+        "tooltip": "auto: המשקל של אי-ההסכמה של המסלולים (איפה שה-LoRA מתחרים). 0 מכבה אותו."
+      },
+      "smooth": {
+        "name": "smooth",
+        "tooltip": "auto: רוחב הגאוסיאן ביחידות טוקנים שמחליק את המפה המשולבת לפני בחירת העומקים. המפה של תמונה מצוירת רועשת; 2 נותן אזורים. 0 מכבה."
       }
     },
     "outputs": {
@@ -1371,6 +1447,14 @@
       "compose": {
         "name": "compose",
         "tooltip": "separate: each layer runs as its own model call. single: all layers run in one model call per guidance branch, and each image area reads its own layer text. Select single on every layer. The crop input is not used with single."
+      },
+      "region_penalty": {
+        "name": "region penalty",
+        "tooltip": "עם compose single: עד כמה אזורי התמונה של שכבות שונות מפסיקים לקרוא זה את זה בצעדים הראשונים. 0 מכבה את זה. נעשה שימוש בערך של השכבה הראשונה, וכל השכבות חייבות להגדיר אותו ערך."
+      },
+      "mount_scope": {
+        "name": "mount scope",
+        "tooltip": "עם compose single: all מחיל את המודים של שכבה על אזור התמונה של השכבה ועל הטקסט שלה. cross_kv מחיל אותם רק על המפתחות והערכים של cross-attention בטקסט שלה, ולכן ל-LoRA בלי המשקלים האלה אין השפעה. כל השכבות חייבות להגדיר אותו ערך."
       }
     },
     "outputs": {
@@ -1827,6 +1911,42 @@
       "folder": {
         "name": "תיקייה",
         "tooltip": "תיקיית תמונות עם קובצי תיאור .txt אופציונליים בעלי אותו שם. יש לבחור תיקייה או תמונות."
+      },
+      "contrast_components": {
+        "name": "רכיבי ניגודיות",
+        "tooltip": "הוספת עד ארבעה כיוונים ראשיים של ממוצעי הניגודיות לכל תמונה לממוצע המשותף. המספר מוגבל למספר תמונות ההתאמה פחות אחת, לאחר הפרדת תמונות האימות. ברירת המחדל היא 4; הערך 0 כותב את המשקלים הקודמים המבוססים על הממוצע בלבד. ההתאמה עדיין משתמשת בהגדרת הדרגה. חל רק על פתרון זה מתמונות ללא מסכה."
+      },
+      "masks": {
+        "name": "מסכות",
+        "tooltip": "מסכה אחת לכל תמונה, לפי סדר התמונות. הפתרון לומד רק את האזור המסומן במסכה. יש להשאיר ריק כדי להשתמש בתמונה כולה."
+      },
+      "mask_contrast": {
+        "name": "השוואה עם מסכה",
+        "tooltip": "עם מסכות, tokens משווה כל טוקן מסומן ו־mean משווה את הממוצע באזור המסכה. ללא מסכות מתעלמים מהאפשרות."
+      },
+      "two_stage": {
+        "name": "שני שלבים",
+        "tooltip": "פותר תחילה את הסגנון ואז את הדמות, כשהסגנון פעיל במודל התלמיד. המסכות בוחרות את הדמות וההיפוך שלהן בוחר את הסגנון. ללא מסכות, שני השלבים משתמשים בתמונות שלמות. נשמרים קבצים נפרדים: creative לסגנון ו־ip לדמות."
+      },
+      "mask_start": {
+        "name": "תחילת המסכה",
+        "tooltip": "עם מסכות, מסלול התלמיד המיושר מתחיל בשבר זה של לוח הזמנים המלא. ברירת המחדל 0.4. ללא מסכות ההגדרה אינה בשימוש."
+      },
+      "mask_samples": {
+        "name": "דגימות המסכה",
+        "tooltip": "עם מסכות: שברים של לוח הזמנים המלא, מופרדים ברווחים או בפסיקים, מתחילת המסכה ועד 1.0; למשל 0.5 0.75 1.0. שדה ריק שומר על שלושת המיקומים המקוריים. ללא מסכות ההגדרה אינה בשימוש."
+      },
+      "refit_rounds": {
+        "name": "סבבי התאמה מחדש",
+        "tooltip": "פתרונות נוספים בצורה סגורה לאחר דגימה מחדש של מסלולי התלמיד כשהפתרון הקודם פעיל. 0 שומר על הפתרון המקורי; עד 8 סבבים. רק התוצאה האחרונה נבדקת ונשמרת."
+      },
+      "guard_rule": {
+        "name": "כלל הבדיקה",
+        "tooltip": "loss בוחר את הפסד האימות הנמוך ביותר שמתחת להפסד הבסיס ובתוך מגבלת הסטייה של העורך החי. drift בוחר את קנה המידה הגדול ביותר במגבלה זו עם הפסד עד פי 1.25 מהבסיס. ברירת המחדל loss."
+      },
+      "trajectory_check": {
+        "name": "בדיקת מסלול",
+        "tooltip": "בודק שתי הנחיות לא קשורות ב־8 צעדי דגימה עם הזרע הראשון, הגודל ו־cfg של הפתרון. דוחה קנה מידה אם סטיית התקן המרחבית של הייצוג החבוי יורדת מתחת לפי 0.5 מהבסיס או אם מרחק L2 היחסי עולה על 1.0, ואז מנסה ערכים קטנים יותר שמותרים. ללא פענוח VAE. כבוי כברירת מחדל."
       }
     },
     "outputs": {

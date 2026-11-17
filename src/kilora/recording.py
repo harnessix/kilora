@@ -55,6 +55,15 @@ class ContextStack:
         finally:
             self._pop(token, value, entry)
 
+    @contextlib.contextmanager
+    def hidden(self) -> Iterator[tuple]:
+        entries = self.get()
+        token = self._var.set(None)
+        try:
+            yield entries
+        finally:
+            self._var.reset(token)
+
     def _pop(self, token, value: tuple, entry) -> None:
         current = self._var.get()
         if current is value:
@@ -339,6 +348,7 @@ class CrossFrame:
     up: torch.Tensor | None = None
     down: torch.Tensor | None = None
     base: torch.Tensor | None = None
+    edit: tuple = ()
 
 
 @dataclass
@@ -469,11 +479,34 @@ class CrossStepRecorder:
             else:
                 w = frame.weight.detach()
                 jhat = p_out @ (w @ frame.p_in.to(w.device, w.dtype).t()).to(device).double()
-            if frame.up is not None and frame.down is not None:
-                left = p_out @ frame.up.detach().to(device, torch.float64)
-                jhat = jhat + left @ (frame.down.detach().to(device, torch.float64) @ p_in.t())
+            extra = self._edit_term(frame, p_in, p_out, device)
+            if extra is not None:
+                jhat = jhat + extra
             self._jhat[key] = jhat
         return jhat
+
+    def _edit_term(self, frame, p_in, p_out, device):
+
+        if frame.up is not None and frame.down is not None:
+            left = p_out @ frame.up.detach().to(device, torch.float64)
+            return left @ (frame.down.detach().to(device, torch.float64) @ p_in.t())
+        if not frame.edit:
+            return None
+        ups, downs = [], []
+        with torch.no_grad():
+            for up_e, down_e, rank, strength, core in frame.edit:
+                b = up_e.detach().double().T
+                mix = strength.detach().double().reshape(()) * (
+                    core.detach().double()
+                    if core is not None
+                    else torch.eye(int(rank), dtype=torch.float64)
+                )
+                ups.append(b @ mix.to(b.device))
+                downs.append(down_e.detach().double())
+            up = torch.cat(ups, 1)
+            down = torch.cat(downs, 0)
+            left = p_out @ up.detach().to(device, torch.float64)
+            return left @ (down.detach().to(device, torch.float64) @ p_in.t())
 
     def _close(self, key) -> None:
         pending = self._pending.pop(key, None)
@@ -584,9 +617,15 @@ def block_index(target: str, attr: str) -> int | None:
     return int(match[1]) if match else None
 
 
+def _output_rows(value) -> tuple[torch.Tensor, ...]:
+    if isinstance(value, torch.Tensor):
+        return (value,)
+    return tuple(value)
+
+
 @dataclass
 class BlockFrames:
-    outputs: dict[str, torch.Tensor]
+    outputs: dict
     k: int = BLOCK_RANK
     _cache: dict[tuple[str, int, int], torch.Tensor | None] = field(
         default_factory=dict, repr=False
@@ -595,11 +634,11 @@ class BlockFrames:
     def frame(self, attr: str, index: int, width: int) -> torch.Tensor | None:
         key = (attr, int(index), int(width))
         if key not in self._cache:
-            rows = [
-                p
-                for t, p in sorted(self.outputs.items())
-                if block_index(t, attr) == index and p.shape[-1] == width
-            ]
+            rows = []
+            for target, value in sorted(self.outputs.items()):
+                if block_index(target, attr) != index:
+                    continue
+                rows.extend(row for row in _output_rows(value) if row.shape[-1] == width)
             self._cache[key] = block_frame(rows, self.k)
         return self._cache[key]
 
@@ -944,7 +983,7 @@ def prediction_counts(depth, cross, hier=None, clamp=None) -> dict[str, int]:
 def prediction_note(depth, cross, hier=None, clamp=None, target_seconds=None) -> str:
     counts = prediction_counts(depth, cross, hier, clamp)
     line = ""
-    if counts["eps_steps"] or counts["eps_nodes"]:
+    if prediction_debug() and (counts["eps_steps"] or counts["eps_nodes"]):
         order = ("eps_steps", "eps_nodes", "eps_depth_steps", "eps_depth_nodes")
         order += ("eps_cross_steps", "eps_cross_nodes")
         if hier or clamp:

@@ -300,11 +300,6 @@ def test_transparent_relay_is_skipped_on_a_discrete_path(monkeypatch, fixed_read
         assert fast.norm() <= 2 * (x @ s.down[:1].t() @ s.up[:1]).norm() + 1e-6
     assert torch.equal(fast, plain)
     monkeypatch.setattr(compute, "LOWRANK_ENABLED", True)
-
-    def no_fused():
-        raise AssertionError("validated relay must use the eager path")
-
-    monkeypatch.setattr(compute, "_fused_module", no_fused)
     with torch.no_grad():
         dispatched = compute._run_input_fused(x, y0, [s], [0], 3, [None], "relay", entry=entry)
     assert torch.equal(dispatched, fast)

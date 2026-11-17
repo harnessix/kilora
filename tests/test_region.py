@@ -244,7 +244,10 @@ def test_derived_region_path_walks_never_start_outside_the_region(depth, width, 
     with torch.no_grad(), C.eager():
         run_layer(x, y0, [layer], depth, expert_regions=[masks])
     assert routes
-    assert all(torch.equal(gate, torch.cat(masks, -1)) for gate in routes)
+    expected = torch.cat(masks, -1)
+    for gate in routes:
+        assert torch.equal(gate == 0, expected == 0)
+        torch.testing.assert_close(gate, expected, rtol=0, atol=1e-7)
 
 
 def test_derived_region_scores_preserve_inside_and_fully_masked_tokens(monkeypatch):

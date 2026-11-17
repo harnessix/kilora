@@ -325,13 +325,14 @@ def _pattern_matches(preset, stem, body, layout):
 
 
 def _group_families(groups, layout):
-    from .families import detect_names
+    from .families import LORA_SIBLINGS, detect_names
     from .presets import PRESETS
 
     names = [stem.removeprefix("diffusion_model.") for stem in groups]
     detected = detect_names(names)
     if detected is not None and detected.family:
-        return (detected.family,)
+        siblings = LORA_SIBLINGS.get(detected.family, ())
+        return tuple(sorted({detected.family, *siblings})) if siblings else (detected.family,)
     return tuple(
         sorted(
             name

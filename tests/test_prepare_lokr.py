@@ -747,7 +747,7 @@ def test_exact_single_files_prepare_routed_mix(monkeypatch, tmp_path, kind, work
         monkeypatch.setattr(prepare_node, "selected_files", lambda *a: (paths, []))
         monkeypatch.setattr(prepare_node, "display_path", lambda path, roots: path)
         monkeypatch.setattr(prepare_node, "apply_device", lambda: "cpu")
-        monkeypatch.setattr(startup_prepare, "_checkpoint", lambda device: None)
+        monkeypatch.setattr(startup_prepare, "_checkpoint", lambda device, label=None: None)
         monkeypatch.setattr(startup_prepare.os, "nice", lambda value: None)
         startup_prepare._stop.clear()
         startup_prepare._run([str(tmp_path)])

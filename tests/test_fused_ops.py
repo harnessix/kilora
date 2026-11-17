@@ -128,7 +128,7 @@ def test_fused_torch_ops(monkeypatch, kind, depth):
     for name in dir(fused):
         if name.endswith("_kernel") and hasattr(getattr(fused, name), "__getitem__"):
             monkeypatch.setattr(fused, name, _Launcher(getattr(fused, name), counter))
-    for name in ("_token_rates_kernel", "_channel_rates_kernel"):
+    for name in ("_gate_token_kernel", "_gate_channel_kernel"):
         monkeypatch.setattr(adaptive_gate, name, _Launcher(getattr(adaptive_gate, name), counter))
     with counter:
         got = run()
@@ -155,7 +155,7 @@ def test_adaptive_gate_torch_ops_per_step(monkeypatch):
     norm = torch.rand(2, 8, device=DEVICE)
     rms = torch.rand(2, 24, device=DEVICE)
     counter = _Counter()
-    for name in ("_token_rates_kernel", "_channel_rates_kernel"):
+    for name in ("_gate_token_kernel", "_gate_channel_kernel"):
         monkeypatch.setattr(adaptive_gate, name, _Launcher(getattr(adaptive_gate, name), counter))
     with counter:
         adaptive_gate.adaptive_keep(z, z, z, up, norm, rms, gram=gram)

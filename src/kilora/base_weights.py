@@ -1,5 +1,6 @@
 # Copyright The KiLoRA Authors
 # SPDX-License-Identifier: Apache-2.0
+import sys
 from collections.abc import Mapping
 
 import torch
@@ -16,6 +17,19 @@ def is_quantized_weight(weight) -> bool:
     return callable(getattr(weight, "dequantize", None))
 
 
+def _gguf_dense(weight):
+
+    if getattr(weight, "tensor_type", None) is None:
+        return None
+    if getattr(weight, "tensor_shape", None) is None:
+        return None
+    owner = sys.modules.get(type(weight).__module__)
+    reader = getattr(owner, "dequantize_tensor", None)
+    if not callable(reader):
+        return None
+    return reader(weight, torch.float32)
+
+
 def read_base_weight(module, path="base weight", *, device=None):
 
     weight = getattr(module, "weight", None)
@@ -26,7 +40,9 @@ def read_base_weight(module, path="base weight", *, device=None):
     if not is_quantized_weight(weight):
         view = weight.detach()
         return view if device is None else view.to(device=device)
-    dense = weight.dequantize()
+    dense = _gguf_dense(weight)
+    if dense is None:
+        dense = weight.dequantize()
     if not isinstance(dense, torch.Tensor):
         raise KiLoRAError(f"{path}: base weight reader did not return a tensor")
     return dense.detach().to(device=device, dtype=torch.float32)

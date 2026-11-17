@@ -250,7 +250,7 @@ def test_startup_worker_passes_the_plan_dtype(monkeypatch, tmp_path):
     monkeypatch.setattr(prepare_node, "apply_device", lambda model=None: "cpu")
     monkeypatch.setattr(prepare_node, "selected_files", lambda roots, s: (paths, None))
     monkeypatch.setattr(prepare_node, "display_path", lambda p, roots: p)
-    monkeypatch.setattr(startup_prepare, "_checkpoint", lambda device: None)
+    monkeypatch.setattr(startup_prepare, "_checkpoint", lambda device, label=None: None)
     monkeypatch.setattr(prepare, "prepare_lokr", lambda *a, **k: (0, 0, False))
     ranks = iter([{("blocks.0.mlp.layer1", 4, 6): 2}, {("blocks.0.mlp.layer1", 4, 6): 4}])
     monkeypatch.setattr(prepare, "prepare_file", lambda *a, **k: object())

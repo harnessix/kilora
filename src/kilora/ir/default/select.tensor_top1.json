@@ -227,16 +227,6 @@
     },
     {
       "id": 14,
-      "op": "add",
-      "args": [
-        "one",
-        "picked"
-      ],
-      "result": "picked_plus_one",
-      "attributes": {}
-    },
-    {
-      "id": 15,
       "op": "detach",
       "args": [
         "picked"
@@ -245,11 +235,21 @@
       "attributes": {}
     },
     {
-      "id": 16,
+      "id": 15,
       "op": "sub",
       "args": [
-        "picked_plus_one",
+        "picked",
         "picked_detached"
+      ],
+      "result": "picked_gradient",
+      "attributes": {}
+    },
+    {
+      "id": 16,
+      "op": "add",
+      "args": [
+        "one",
+        "picked_gradient"
       ],
       "result": "picked_weight",
       "attributes": {}
@@ -287,5 +287,5 @@
       "attributes": {}
     }
   ],
-  "identity": "f22ab559f45b18db3d64c5ed1c3321f34daf53ff05217b8ec30987422d1886f1"
+  "identity": "dfd25ea96620207e210494a255401cbca6265271b6ae63ae6f2aa2e71e6cdb67"
 }

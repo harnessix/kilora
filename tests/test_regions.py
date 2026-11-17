@@ -23,6 +23,11 @@ def _model(x_t, t, c_crossattn):
     return torch.tanh(x_t) * 0.3 + c_crossattn.mean()
 
 
+def _weight(measure):
+    sigmas = measure.sigmas[: measure.sample_count]
+    return sum(1.0 / s**2 for s in sigmas) / len(sigmas)
+
+
 def test_full_mask_is_bit_identical_to_no_mask():
     x0 = torch.randn(1, 4, 6, 8, generator=torch.Generator().manual_seed(0))
     plain = image_loss(_handle(_model), x0, event=2)(None)
@@ -38,15 +43,19 @@ def test_part_mask_measures_only_the_region():
     zero = lambda x_t, t, c_crossattn: torch.zeros_like(x_t)
     mask = torch.zeros(1, 1, 6, 8)
     mask[..., :4] = 1.0
-    value = image_loss(_handle(zero), x0, event=0, mask=mask)(None)
-    assert abs(value - float(x0[..., :4].pow(2).mean())) < 1e-5
+    measure = image_loss(_handle(zero), x0, event=0, mask=mask)
+    value = measure(None)
+    expected = float(x0[..., :4].pow(2).mean()) * _weight(measure)
+    assert abs(value - expected) < 1e-5 * expected
     whole = image_loss(_handle(zero), x0, event=0)(None)
     assert value < whole / 4
     soft = mask * 0.5
     soft[..., 4:] = 0.25
-    value = image_loss(_handle(zero), x0, event=0, mask=soft)(None)
+    measure = image_loss(_handle(zero), x0, event=0, mask=soft)
+    value = measure(None)
     w = soft.expand_as(x0)
-    assert abs(value - float((x0.pow(2) * w).sum() / w.sum())) < 1e-4
+    expected = float((x0.pow(2) * w).sum() / w.sum()) * _weight(measure)
+    assert abs(value - expected) < 1e-4 * expected
 
 
 def _per_row(x_t, c):
@@ -59,8 +68,10 @@ def test_region_caption_replaces_the_prompt():
     mask[..., :2, :] = 1.0
     const = lambda x_t, t, c_crossattn: _per_row(x_t, c_crossattn)
     region = {"c_crossattn": torch.full((1, 3), 3.0)}
-    value = image_loss(_handle(const), x0, event=0, mask=mask, region_conditioning=region)(None)
-    assert abs(value - (9.0 + 1.0) / 2) < 1e-6
+    measure = image_loss(_handle(const), x0, event=0, mask=mask, region_conditioning=region)
+    value = measure(None)
+    expected = (9.0 + 1.0) / 2 * _weight(measure)
+    assert abs(value - expected) < 1e-6 * expected
 
 
 def _planted_probes(signal, other, grid=(6, 8), d=16, steps=3, seed=0):
@@ -122,3 +133,36 @@ def test_book_round_trip():
     assert (e.name, e.caption, e.new, e.index) == ("cat", "a cat", True, 0)
     assert torch.equal(e.keys["t"]["keys_in"], q[:4])
     assert RegionBook.from_tensors({}).experts == []
+
+
+def test_a_region_mask_and_a_depth_map_scale_with_the_write_resolution():
+    import torch.nn.functional as F
+
+    from kilora.adapter import _layer_token_depth
+    from kilora.comfyui.live_write import write_latent
+    from kilora.regions import latent_mask
+
+    session = type("S", (), {"write_resolution": 512, "measure_reducer": "latent"})()
+    render = torch.randn(1, 4, 128, 96, generator=torch.Generator().manual_seed(2))
+    small, _ = write_latent(render, session)
+    assert tuple(small.shape[-2:]) == (64, 48)
+    mask = torch.zeros(1, 1024, 768)
+    mask[:, :256, :384] = 1.0
+    full, write = latent_mask(mask, render), latent_mask(mask, small)
+    assert tuple(write.shape) == (1, 1, 64, 48)
+    assert float(write.mean()) == float(full.mean()) == 0.125
+    assert bool((write[..., :16, :24] == 1).all()) and float(write[..., 16:, :].sum()) == 0
+    assert torch.equal(F.interpolate(full, size=(64, 48), mode="area"), write)
+    changed = small.clone()
+    changed[..., 16:, :] += 5.0
+    changed[..., :16, 24:] -= 5.0
+    measure = image_loss(_handle(_model), small, 0, mask=write)
+    other = image_loss(_handle(_model), changed, 0, mask=write)
+    assert measure.batched(None) == other.batched(None)
+    depth = torch.ones(1, 1024, 768)
+    depth[:, :512] = 3.0
+    tokens = _layer_token_depth(depth, torch.zeros(1, 32, 24, 8))
+    grid = tokens.reshape(1, 32, 24)
+    assert bool((grid[:, :16] == 3).all()) and bool((grid[:, 16:] == 1).all())
+    at_render = _layer_token_depth(depth, torch.zeros(1, 64, 48, 8)).reshape(1, 64, 48)
+    assert torch.equal(F.interpolate(at_render[:, None], size=(32, 24), mode="area")[:, 0], grid)

@@ -13,6 +13,7 @@ from ..parts import PARTS
 
 _PARTS = ("transition", "entry", "budget", "freeze")
 _VARIANTS = {
+    ("entry", "chance"): "entry.chance",
     ("freeze", "step"): "freeze_step",
     ("budget", "auto_sum"): "budget_auto_sum",
     ("budget", "auto"): "budget_auto",
@@ -49,7 +50,7 @@ def default_program(
         )
         data = json.loads(files(__package__).joinpath("entry.derived_basis.json").read_text())
         return validate(data, signature)
-    if (part, variant) == ("entry", "from_input"):
+    if part == "entry" and variant in ("from_input", "chance_from_input"):
         size = sizes or {}
         experts, per, key = (size.get(axis, 1) for axis in ("experts", "per", "key"))
         batch, tokens = (size.get(axis, 1) for axis in ("batch", "tokens"))
@@ -59,7 +60,7 @@ def default_program(
             x=ValueType(("batch", "tokens", "key"), shape=(batch, tokens, key)),
             keys=ValueType(("experts", "per", "key"), shape=(experts, per, key)),
         )
-        data = json.loads(files(__package__).joinpath("entry.from_input.json").read_text())
+        data = json.loads(files(__package__).joinpath(f"entry.{variant}.json").read_text())
         return validate(data, Signature(inputs, original.outputs))
     if (part, variant) == ("transition", "cosine_row"):
         size = sizes or {}

@@ -209,3 +209,28 @@ def test_path_merge_accepts_frozen_and_live_keys(setup):
     commit_write(session, editor, _record(session, target))
     chunks = session.editor_state.chunks
     editor._path_merge(chunks, session.state, {}, {})
+
+
+@pytest.mark.parametrize("measure", ["compressed", "full"])
+def test_live_direction_estimates_share_the_mean_until_commit(setup, measure):
+    from kilora.write_estimates import copy_write_state
+
+    session, path, target = setup
+    editor = editor_for(path)
+    editor.check(session)
+    editor.configure({"measure": measure, "path_merge": False})
+    before = copy_write_state(session.state)
+    history = session.editor_snapshot()
+    with torch.no_grad():
+        for attempt in range(2):
+            proposed = editor.next_state(session.state, _record(session, target))
+            assert proposed is not None
+            assert session._write_estimates
+            assert all(row[1] == attempt + 1 for row in session._write_estimates.values())
+            assert f"over {attempt + 1} estimates" in editor.write_note()
+            session.editor_state.load_tensors(history)
+    assert all(torch.equal(parts["up"], before[t]["up"]) for t, parts in session.state.items())
+    assert "1 commits" in commit_write(session, editor, _record(session, target))
+    assert session._write_estimates == {}
+    session.undo()
+    assert session._write_estimates == {}

@@ -224,6 +224,7 @@ def axis_layout():
 def test_cross_kv_scope_takes_the_layers_off_the_image_tokens(monkeypatch):
     one = axis_layout()
     rows = torch.tensor([0, 1])
+    monkeypatch.setattr(lc, "MOUNT_SCOPE", "all")
     main = axis_maps((one, one), rows, AXIS_LATENT, 0.0)
     monkeypatch.setattr(lc, "MOUNT_SCOPE", "cross_kv")
     scoped = axis_maps((one, one), rows, AXIS_LATENT, 0.0)
@@ -234,20 +235,98 @@ def test_cross_kv_scope_takes_the_layers_off_the_image_tokens(monkeypatch):
     assert torch.equal(scoped["ip"].text[:, 4:], torch.ones(2, 3))
 
 
+def all_maps_hold(maps, one):
+    inside = one.segments[1].mask[0].reshape(-1).bool()
+    ip = maps["ip"].image.reshape(2, -1)
+    assert torch.allclose(ip[:, inside], torch.full_like(ip[:, inside], 1.0 - lc.BETA))
+    assert torch.equal(ip[:, ~inside], torch.zeros_like(ip[:, ~inside]))
+
+
 def test_all_scope_keeps_the_maps(monkeypatch):
     one = axis_layout()
     rows = torch.tensor([0, 1])
-    assert lc.MOUNT_SCOPE == "all"
-    main = axis_maps((one, one), rows, AXIS_LATENT, 0.0)
-    inside = one.segments[1].mask[0].reshape(-1).bool()
-    ip = main["ip"].image.reshape(2, -1)
-    assert torch.allclose(ip[:, inside], torch.full_like(ip[:, inside], 1.0 - lc.BETA))
-    assert torch.equal(ip[:, ~inside], torch.zeros_like(ip[:, ~inside]))
     monkeypatch.setattr(lc, "MOUNT_SCOPE", "all")
-    again = axis_maps((one, one), rows, AXIS_LATENT, 0.0)
+    main = axis_maps((one, one), rows, AXIS_LATENT, 0.0)
+    all_maps_hold(main, one)
+
+
+def with_settings(one, penalty=None, scope=None):
+    return ComposedLayout(one.segments, self_penalty=penalty, mount_scope=scope)
+
+
+def test_the_default_scope_gives_the_all_maps(monkeypatch):
+    one = axis_layout()
+    rows = torch.tensor([0, 1])
+    default = axis_maps((one, one), rows, AXIS_LATENT, 0.0)
+    monkeypatch.setattr(lc, "MOUNT_SCOPE", "all")
+    explicit = axis_maps((one, one), rows, AXIS_LATENT, 0.0)
     for a in C.AXES:
-        assert torch.equal(again[a].image, main[a].image)
-        assert torch.equal(again[a].text, main[a].text)
+        assert torch.equal(default[a].image, explicit[a].image)
+        assert torch.equal(default[a].text, explicit[a].text)
+    all_maps_hold(default, one)
+
+
+def test_a_layout_scope_all_gives_the_all_maps(monkeypatch):
+    base = axis_layout()
+    one = with_settings(base, scope="all")
+    rows = torch.tensor([0, 1])
+    layered = axis_maps((one, one), rows, AXIS_LATENT, 0.0)
+    all_maps_hold(layered, one)
+    monkeypatch.setattr(lc, "MOUNT_SCOPE", "all")
+    constant = axis_maps((base, base), rows, AXIS_LATENT, 0.0)
+    for a in C.AXES:
+        assert torch.equal(layered[a].image, constant[a].image)
+        assert torch.equal(layered[a].text, constant[a].text)
+
+
+def test_a_layout_scope_wins_over_the_constant(monkeypatch):
+    monkeypatch.setattr(lc, "MOUNT_SCOPE", "all")
+    one = with_settings(axis_layout(), scope="cross_kv")
+    maps = axis_maps((one, one), torch.tensor([0, 1]), AXIS_LATENT, 0.0)
+    assert torch.equal(maps["ip"].image, torch.zeros_like(maps["ip"].image))
+
+
+def test_a_layout_penalty_of_zero_is_bit_identical():
+    one = with_settings(layout(), penalty=0.0)
+    h = hidden()
+    MASKS.clear()
+    out = self_call((one, one), None, h)
+    assert MASKS == [None]
+    assert torch.equal(out, attn(h, h, h, HEADS))
+
+
+def test_a_layout_penalty_sets_the_bias_strength(monkeypatch):
+    monkeypatch.setattr(lc, "SELF_PENALTY", 5.0)
+    one = with_settings(layout(), penalty=0.3)
+    MASKS.clear()
+    self_call((one, one), None, hidden())
+    inside = in_box()
+    bias = MASKS[0][0, 0]
+    assert torch.allclose(bias[inside][:, ~inside], torch.tensor(-0.3))
+
+
+def test_without_layout_values_a_patched_constant_changes_the_bias(monkeypatch):
+    one = layout()
+    assert one.self_penalty is None and one.mount_scope is None
+    MASKS.clear()
+    self_call((one, one), None, hidden())
+    monkeypatch.setattr(lc, "SELF_PENALTY", 2.5)
+    self_call((one, one), None, hidden())
+    first, second = MASKS
+    inside = in_box()
+    assert torch.allclose(first[0, 0][inside][:, ~inside], torch.tensor(-1.0))
+    assert torch.allclose(second[0, 0][inside][:, ~inside], torch.tensor(-2.5))
+
+
+def test_the_penalty_comes_from_the_first_positive_layout():
+    mask = box_mask()
+    pos = ComposedLayout(layout(mask).segments, self_penalty=0.4)
+    neg = ComposedLayout(layout(mask).segments, self_penalty=0.4)
+    MASKS.clear()
+    self_call((pos, neg), torch.tensor([1, 0]), hidden(batch=2))
+    inside = in_box()
+    for b in range(2):
+        assert torch.allclose(MASKS[0][b, 0][inside][:, ~inside], torch.tensor(-0.4))
 
 
 def test_the_settings_note_names_the_penalty_its_end_and_the_scope(monkeypatch):
@@ -259,7 +338,29 @@ def test_the_settings_note_names_the_penalty_its_end_and_the_scope(monkeypatch):
     assert "mount scope cross_kv" in note
 
 
+def test_the_settings_note_reports_the_values_of_the_sample():
+    one = with_settings(layout(), penalty=0.0, scope="all")
+    note = lc.settings_note(one)
+    assert "penalty 0 " in note
+    assert "mount scope all" in note
+    assert "mount scope all" in lc.settings_note(layout())
+    assert "penalty 1 " in lc.settings_note(layout())
+
+
+def test_self_penalty_reads_the_layout_else_the_constant(monkeypatch):
+    assert lc.self_penalty(0.0) == 1.0
+    assert lc.self_penalty(0.0, layout()) == 1.0
+    assert lc.self_penalty(0.0, with_settings(layout(), penalty=2.0)) == 2.0
+    assert lc.self_penalty(0.0, with_settings(layout(), penalty=0.0)) == 0.0
+    assert lc.self_penalty(0.9, with_settings(layout(), penalty=2.0)) == 0.0
+    monkeypatch.setattr(lc, "SELF_PENALTY", 0.7)
+    assert lc.self_penalty(0.0, layout()) == 0.7
+
+
 def test_the_defaults():
     assert lc.SELF_PENALTY == 1.0
     assert lc.SELF_END is None
     assert lc.MOUNT_SCOPE == "all"
+    assert lc.MOUNT_SCOPES == ("cross_kv", "all")
+    assert ComposedLayout(()).self_penalty is None
+    assert ComposedLayout(()).mount_scope is None

@@ -101,7 +101,11 @@ def test_derived_logits_match_float_reference(monkeypatch, dtype):
     s = dataclasses.replace(planted(), down=torch.randn(8, 64), up=torch.randn(8, 64), per_expert=4)
     x = torch.randn(3, 7, 64).to(dtype)
     kin, rows, _, _, _ = compute.derived_keys(s)
-    expected = s.tau * compute.norm_energy(x.float(), kin, rows.clamp_min(1))
+    share = compute.norm_energy(x.float(), kin, rows.clamp_min(1)) * rows / kin.shape[-1]
+    rank = rows.float()
+    width = kin.shape[-1]
+    variance = 2 * rank * (width - rank) / (width * width * (width + 2))
+    expected = s.tau * (share - rank / width) / variance.sqrt()
     torch.testing.assert_close(compute.derived_logits(s, x), expected, rtol=0.012, atol=0.004)
 
 
@@ -596,6 +600,7 @@ def test_batched_fused_launches_once_per_step(monkeypatch):
     monkeypatch.setenv("KILORA_FUSED", "1")
     monkeypatch.setenv("KILORA_FUSED_CPU", "1")
     monkeypatch.setenv("KILORA_IMPORT_SCORE", "derived")
+    monkeypatch.setenv("KILORA_DERIVED_STACKED", "0")
     s = dataclasses.replace(planted(), path_width=2)
     x = torch.ones(1, 3, 2)
     original = fused.derived_batched_step

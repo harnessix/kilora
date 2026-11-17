@@ -79,6 +79,22 @@ def test_the_thresholds():
     assert editors.GUARD_SPREAD == (0.95, 1.05) and editors.GUARD_NOISE_WINDOW == 8
 
 
+@pytest.mark.parametrize("interpreted", [False, True])
+@pytest.mark.parametrize("gap0, refused", [(5.96e-8, False), (1e-3, True)])
+def test_guard_ignores_rounding_but_refuses_a_real_drop(session, interpreted, gap0, refused):
+    from kilora.compute import _IR_INTERPRET_ALL
+
+    token = _IR_INTERPRET_ALL.set(interpreted)
+    try:
+        actual, _ = editors.guard_verdict(
+            session, {"gap": gap0, "spread": 1.0}, {"gap": 0.0, "spread": 1.0}
+        )
+    finally:
+        _IR_INTERPRET_ALL.reset(token)
+    assert session.guard_last["gap_noise"] == 0.0
+    assert actual is refused
+
+
 def _gaps(gap0, gap1, alt0=None, alt1=None):
     def score(trial):
         gap, alt = (gap0, alt0) if trial is None else (gap1, alt1)

@@ -239,7 +239,7 @@
       },
       "depth": {
         "name": "深度",
-        "tooltip": "迭代次數。-1 使用模組建議的深度。"
+        "tooltip": "迭代次數。-1 使用模組建議的深度（匯入的 LoRA：4）。"
       }
     }
   },
@@ -257,7 +257,7 @@
       },
       "depth": {
         "name": "深度",
-        "tooltip": "迭代次數。-1 使用模組建議的深度。"
+        "tooltip": "迭代次數。-1 使用模組建議的深度（匯入的 LoRA：4）。"
       },
       "iteration": {
         "name": "迭代方式",
@@ -285,7 +285,7 @@
       },
       "path_width": {
         "name": "路徑寬度",
-        "tooltip": "僅用於路徑迭代。行走的條數：從第一步排名靠前的專家出發，每條行走從自己的查詢繼續。寬度越大，第一步選錯後越能找到正確的專家。0 使用模組的值（預設 1：一條行走）。"
+        "tooltip": "僅用於路徑迭代。行走的條數：從第一步排名靠前的專家出發，每條行走從自己的查詢繼續。寬度越大，第一步選錯後越能找到正確的專家。0 使用模組的值（匯入的 LoRA：3 條行走；其他模組：1）。"
       },
       "path_select": {
         "name": "路徑選擇",
@@ -488,6 +488,58 @@
         "name": "編輯",
         "tooltip": "編輯會變更每個 LoRA 各層的核心矩陣和強度，以及套件中的項。絕不寫入來源檔案。off 精確還原匯入的 LoRA。unchanged 保持目前選擇。"
       },
+      "live_expert_mass": {
+        "name": "經過的質量",
+        "tooltip": "僅當專家在已記錄路徑上的路由質量高於其所在層質量的這一比例時，即時寫入才會編輯該專家。-1：不變。預設值為 0.05。"
+      },
+      "live_expert_top": {
+        "name": "每層經過的專家數",
+        "tooltip": "一次即時寫入依路由質量在每層最多編輯的專家數。0：不變。預設值為 4。"
+      },
+      "live_expert_history": {
+        "name": "路由歷史",
+        "tooltip": "工作階段為尋找共用專家而保留其路由質量的已記錄提示詞數量。0：不變。預設值為 16。"
+      },
+      "live_expert_copies": {
+        "name": "每個專家的副本數",
+        "tooltip": "即時寫入為一個共用專家最多新增的副本數。-1：不變。預設值為 2。"
+      },
+      "write_measure": {
+        "name": "寫入測量",
+        "tooltip": "即時寫入如何找到方向。forward：一次乾淨的前向傳播，加上一組在目標專家輸出上帶小雜訊的前向傳播（預設）。candidates：以成對的前向傳播測量每個候選移動。unchanged 保持目前選擇。"
+      },
+      "forward_draws": {
+        "name": "雜訊抽樣數",
+        "tooltip": "forward 估計的雜訊抽樣數。抽樣越多，方向越穩定，耗時也越多。0：不變。預設值為 4。"
+      },
+      "forward_sigma": {
+        "name": "雜訊大小",
+        "tooltip": "forward 估計的雜訊大小，以各專家輸出 RMS 的比例表示。-1：不變。預設值為 0.05。"
+      },
+      "forward_chunk": {
+        "name": "每次前向的抽樣數",
+        "tooltip": "一次批次前向傳播中的雜訊抽樣數。數值越小，占用的 GPU 記憶體越少。0：不變。預設值為 4。"
+      },
+      "write_resolution": {
+        "name": "寫入解析度",
+        "tooltip": "寫入樣本的長邊像素數。寫入從影像的縮小副本中學習：256 到 4096，以 16 取整。數值越小寫入越快。0：算圖解析度。-1：不變。預設 512。 在此設定之前，寫入已經以 512 px 執行：它使用測量尺寸 (measure_size)。此設定為該控制項命名。"
+      },
+      "probe_rows": {
+        "name": "render probe rows",
+        "tooltip": "Collect write measurements during rendering. On by default. Image learning and writes without a complete render measurement use their own noise samples."
+      },
+      "probe_call": {
+        "name": "render probe call",
+        "tooltip": "Separate runs each probe after the image call. Larger batches can change image-row rounding even on the CPU, so separate is the only supported value. The image call keeps its original rows. Probe measurements do not update image records or step caches."
+      },
+      "probe_budget": {
+        "name": "probe row budget",
+        "tooltip": "Maximum perturbed rows per render, counting caption and empty-caption rows. The default 2 samples one caption for one antithetic pair per render. The write seed selects caption or empty caption with equal probability. Budgets of 4 or more retain both captions. Complete pairs are retained; fewer than two rows skips probes. Acceptance retains both captions for the prompt and collapse guard. Clean reference and acceptance rows are additional. Larger budgets allow more draws when the session is idle. Pairs run over consecutive eligible sampling steps, with two caption rows per probe call. A short schedule falls back to ordinary write samples."
+      },
+      "probe_draws": {
+        "name": "render probe draws",
+        "tooltip": "Maximum noise draws collected in a render. 0 uses the forward draws setting; -1 keeps the current value. Complete positive and negative pairs are kept. Fewer draws reduce the render work."
+      },
       "measure_samples": {
         "name": "samples per write measurement",
         "tooltip": "Samples per write measurement: the same noise and timesteps for every trial. More samples measure more steadily and cost more time. 1 = one sample at the middle timestep."
@@ -658,7 +710,7 @@
       },
       "depth": {
         "name": "深度",
-        "tooltip": "迭代次數。-1 使用模組建議的深度。"
+        "tooltip": "迭代次數。-1 使用模組建議的深度（匯入的 LoRA：4）。"
       },
       "iteration": {
         "name": "迭代方式",
@@ -1286,7 +1338,7 @@
   },
   "KiLoRADepthMap": {
     "display_name": "KiLoRA 深度圖",
-    "description": "從遮罩（SAM2 等分割器）或影像（其亮度：ControlNet 前處理器輸出的深度、線稿或姿勢圖）為影像的每個區域設定深度。在 start 之前，所有區域使用同一個深度，因此構圖照常形成。之後每個區域使用自己的深度。連接到 KiLoRA Apply 或 KiLoRA LoRA Loader。",
+    "description": "從遮罩（SAM2 等分割器）或影像（其亮度：ControlNet 前處理器輸出的深度、線稿或姿勢圖）為影像的每個區域設定深度。在 start 之前，所有區域使用同一個深度，因此構圖照常形成。之後每個區域使用自己的深度。連接到 KiLoRA Apply 或 KiLoRA LoRA Loader。 沒有遮罩或影像時，source auto 在取樣中測量深度圖：細節處和 LoRA 改變影像最多的地方獲得更多深度，平均深度不變。",
     "inputs": {
       "min_depth": {
         "name": "min_depth",
@@ -1316,6 +1368,10 @@
         "name": "base",
         "tooltip": "start 之前所有區域的深度，以及文字 token 的深度。-1：圖的平均深度，四捨五入。"
       },
+      "source": {
+        "name": "source",
+        "tooltip": "深度圖的來源。mask 或 image：連接的輸入（遮罩優先）。auto：在 start 那一步根據影像細節、KiLoRA 變化和路由分歧測量。沒有連接遮罩或影像時使用 auto。"
+      },
       "mask": {
         "name": "遮罩",
         "tooltip": "遮罩，例如來自 SAM2。1 對應 max_depth。如果同時連接了影像，使用遮罩。"
@@ -1323,6 +1379,26 @@
       "image": {
         "name": "image",
         "tooltip": "影像。其亮度即為深度圖，例如深度、線稿或姿勢前處理器的輸出。"
+      },
+      "mean_depth": {
+        "name": "mean_depth",
+        "tooltip": "auto：整張影像的平均深度。-1 使用 KiLoRA Apply 的深度，因此開銷與該統一深度相同。數值越低越快。"
+      },
+      "detail_weight": {
+        "name": "detail_weight",
+        "tooltip": "auto：影像細節的權重（乾淨影像估計的精細結構）。"
+      },
+      "change_weight": {
+        "name": "change_weight",
+        "tooltip": "auto：KiLoRA 變化的權重（LoRA 改變影像最多的地方）。"
+      },
+      "disagreement_weight": {
+        "name": "disagreement_weight",
+        "tooltip": "auto：路由分歧的權重（LoRA 互相競爭的地方）。0 表示關閉。"
+      },
+      "smooth": {
+        "name": "smooth",
+        "tooltip": "auto：選擇深度之前，用來平滑合併後地圖的高斯寬度（單位為 token）。繪畫類影像的地圖雜訊很多，取 2 可得到成片的區域。0 表示關閉。"
       }
     },
     "outputs": {
@@ -1371,6 +1447,14 @@
       "compose": {
         "name": "compose",
         "tooltip": "separate: each layer runs as its own model call. single: all layers run in one model call per guidance branch, and each image area reads its own layer text. Select single on every layer. The crop input is not used with single."
+      },
+      "region_penalty": {
+        "name": "region penalty",
+        "tooltip": "使用 compose single 時：在早期步驟中，不同層的影像區域彼此不再讀取的強度。0 表示關閉。使用第一個層的值，且每個層都必須設定相同的值。"
+      },
+      "mount_scope": {
+        "name": "mount scope",
+        "tooltip": "使用 compose single 時：all 把層的模組套用到該層的影像區域和該層自己的文字。cross_kv 只把它們套用到該層自己文字的 cross-attention 鍵和值，因此沒有這些權重的 LoRA 沒有效果。每個層都必須設定相同的值。"
       }
     },
     "outputs": {
@@ -1827,6 +1911,42 @@
       "folder": {
         "name": "資料夾",
         "tooltip": "影像資料夾，可附上同名 .txt 描述檔。資料夾與影像只能擇一。"
+      },
+      "contrast_components": {
+        "name": "對比成分",
+        "tooltip": "將每張影像的平均對比的最多四個主方向加入共用平均值。保留驗證影像後，數量上限為擬合影像數減一。預設值為 4；設為 0 時寫入僅使用平均值的原有權重。擬合仍使用所設定的秩。僅適用於此無遮罩的影像求解。"
+      },
+      "masks": {
+        "name": "遮罩",
+        "tooltip": "依圖片順序，為每張圖片提供一個遮罩。求解只學習遮罩區域。留空可使用整張圖片。"
+      },
+      "mask_contrast": {
+        "name": "遮罩比較",
+        "tooltip": "有遮罩時，tokens 比較遮罩中的每個 token，mean 比較遮罩區域的平均值。沒有遮罩時忽略此設定。"
+      },
+      "two_stage": {
+        "name": "兩階段",
+        "tooltip": "先求解風格，再於學生模型中啟用該風格來求解角色。遮罩選取角色，反向遮罩選取風格。沒有遮罩時，兩階段都使用整張圖片。分別儲存風格與角色檔案，軸標記為 creative 與 ip。"
+      },
+      "mask_start": {
+        "name": "遮罩起點",
+        "tooltip": "有遮罩時，從完整排程的此比例處開始對齊的學生軌跡。預設0.4。無遮罩時忽略。"
+      },
+      "mask_samples": {
+        "name": "遮罩取樣位置",
+        "tooltip": "有遮罩時，以空格或逗號分隔完整排程的比例，必須不早於遮罩起點且不超過1.0，例如0.5 0.75 1.0。留空保留原來的三個取樣位置。無遮罩時忽略。"
+      },
+      "refit_rounds": {
+        "name": "重新擬合輪數",
+        "tooltip": "啟用上一輪的解重新取樣學生軌跡，再進行額外的閉式求解。0保留原有求解，最多8輪。僅檢查並儲存最後一輪結果。"
+      },
+      "guard_rule": {
+        "name": "檢查規則",
+        "tooltip": "loss在即時編輯的漂移上限內，選擇低於基準損失的最小驗證損失。drift在同一上限內，選擇損失不超過基準1.25倍的最大縮放值。預設為loss。"
+      },
+      "trajectory_check": {
+        "name": "軌跡檢查",
+        "tooltip": "使用求解的第一個種子、尺寸與 cfg，以 8 個取樣步驟檢查前兩個無關提示詞。若潛在表示的空間標準差低於基準的 0.5 倍，或相對 L2 距離超過 1.0，則拒絕該縮放值，再嘗試較小且允許的縮放值。不進行 VAE 解碼。預設關閉。"
       }
     },
     "outputs": {

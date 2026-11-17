@@ -24,6 +24,7 @@ from torch.nn import functional as F
 
 from ..modfile import write_safetensors
 from ..presets import anima_name, get_preset
+from ..regions import token_weights
 
 _GROUPS = (
     ("attn1.to_q", "attn1.to_k", "attn1.to_v"),
@@ -60,12 +61,15 @@ class Settings:
     ridge: float = 0.1
     replay_batch: int = 8
     contrast_mode: str = "tokens"
+    contrast_components: int = 0
     stats_precision: str = "tf32"
     fit_dtype: str = "float32"
 
     def validate(self) -> None:
         if self.contrast_mode not in ("tokens", "mean"):
             raise ValueError("contrast_mode must be tokens or mean")
+        if type(self.contrast_components) is not int or not 0 <= self.contrast_components <= 4:
+            raise ValueError("contrast_components must be an integer from 0 to 4")
         if self.stats_precision not in ("tf32", "float32"):
             raise ValueError("stats_precision must be tf32 or float32")
         if self.fit_dtype not in ("float32", "float64"):
@@ -94,6 +98,8 @@ class Settings:
 class Sample:
     target: dict[str, Any]
     student: dict[str, Any]
+    image_index: int | None = None
+    weights: torch.Tensor | None = None
 
 
 @dataclass
@@ -276,7 +282,11 @@ class EffectSource:
 
 
 def mean_contrast(target_sum, student_sum, count):
-    return (target_sum - student_sum) / max(count, 1)
+    if isinstance(count, torch.Tensor):
+        count = count.clamp_min(torch.finfo(count.dtype).tiny)
+    else:
+        count = max(count, 1)
+    return (target_sum - student_sum) / count
 
 
 @contextmanager
@@ -293,10 +303,94 @@ def _input_gram(x: torch.Tensor) -> torch.Tensor:
     return x.T @ x
 
 
-def _group_statistics(names, captured, observe, image_rows, contrast_mode):
+class _WeightedPair(tuple):
+    def __new__(cls, target, student, weights):
+        pair = super().__new__(cls, (target, student))
+        pair.weights = weights
+        return pair
+
+
+def _carry_weights(source, target, student):
+    weights = getattr(source, "weights", None)
+    if weights is None:
+        return (target, student)
+    return _WeightedPair(target, student, weights)
+
+
+def _cat_weights(weights):
+    if any(item is None for item in weights):
+        raise ValueError("a replay batch cannot mix weighted and unweighted samples")
+    return torch.cat([item for item in weights], dim=0)
+
+
+def _token_row_weights(weights, reference, *, require_image=False):
+    if not isinstance(weights, torch.Tensor) or weights.ndim not in (2, 4):
+        raise ValueError("token weights must have shape [batch, tokens] or [batch, 1, h, w]")
+    rows = reference.reshape(-1, reference.shape[-1]).shape[0]
+    if weights.ndim == 4:
+        batch = weights.shape[0]
+        if not batch or weights.shape[1] != 1 or rows % batch:
+            raise ValueError("spatial mask batch does not match image rows")
+        if reference.ndim >= 3 and reference.shape[0] != batch:
+            raise ValueError("spatial mask batch does not match image rows")
+        if not bool(torch.isfinite(weights).all()):
+            raise ValueError("token weights must be finite")
+        reduced = token_weights(weights, rows // batch)
+        if reduced is None:
+            if require_image:
+                raise ValueError("spatial mask cannot reduce to the block image token grid")
+            return None
+        weights = reduced
+    if weights.numel() != rows:
+        raise ValueError(f"token weights {tuple(weights.shape)} do not match {rows} image rows")
+    flat = weights.reshape(-1).to(dtype=reference.dtype, device=reference.device)
+    if not bool(torch.isfinite(flat).all()):
+        raise ValueError("token weights must be finite")
+    if float(flat.sum()) <= 0:
+        raise ValueError("token weights cover no rows")
+    return flat
+
+
+def _mean_cross(totals, per_image, components):
+    count, target_sum, student_sum, input_sum = totals
+    mean = mean_contrast(target_sum, student_sum, count)
+    cross = torch.outer(mean, input_sum)
+    keep = min(components, len(per_image) - 1)
+    if keep <= 0:
+        return cross
+    centered = torch.stack(
+        [
+            mean_contrast(target, student, count) - mean
+            for count, target, student, _ in per_image.values()
+        ]
+    )
+    _, _, vh = torch.linalg.svd(centered, full_matrices=False)
+    basis = vh[:keep].T
+    projected = (centered @ basis) @ basis.T
+    for residual, (_, _, _, inputs) in zip(projected, per_image.values(), strict=True):
+        cross.add_(torch.outer(residual, inputs))
+    return cross
+
+
+def measured_rank(solution):
+
+    _, left = torch.linalg.qr(solution.up.T.double(), mode="reduced")
+    _, right = torch.linalg.qr(solution.down.T.double(), mode="reduced")
+    values = torch.linalg.svdvals(left @ right.T)
+    return int((values > 1e-3 * values[0]).sum()) if values.numel() else 0
+
+
+def _group_statistics(
+    names, captured, observe, image_rows, contrast_mode, contrast_components=0, image_indices=None
+):
 
     statistics = {}
-    for target, student in captured:
+    by_image = {name: {} for name in names}
+    if contrast_mode == "mean" and contrast_components and image_indices is None:
+        raise ValueError("per-image identities are required for contrast components")
+    for sample_index, item in enumerate(captured):
+        target, student = item
+        sample_weights = getattr(item, "weights", None)
         desired, actual = observe(target, student)
         grams = {}
         updated = set()
@@ -312,31 +406,69 @@ def _group_statistics(names, captured, observe, image_rows, contrast_mode):
                 )
             if y.shape != target_y.shape:
                 raise ValueError(f"{name}: target and student token shapes differ")
-            key = (x.data_ptr(), x.shape, x.dtype)
             flat = x.reshape(-1, x.shape[-1])
+            row_weights = None
+            if sample_weights is None:
+                key = (x.data_ptr(), x.shape, x.dtype)
+            else:
+                row_weights = _token_row_weights(sample_weights, x)
+                key = (
+                    x.data_ptr(),
+                    x.shape,
+                    x.dtype,
+                    sample_weights.data_ptr(),
+                    tuple(sample_weights.shape),
+                )
             gram = grams.get(key)
             if gram is None:
-                gram = _input_gram(flat)
+                if row_weights is None:
+                    gram = _input_gram(flat)
+                else:
+                    scaled = flat * row_weights[:, None]
+                    gram = scaled.T @ flat
                 grams[key] = gram
             if contrast_mode == "mean":
-                sums = (
-                    target_y.reshape(-1, y.shape[-1]).sum(0),
-                    y.reshape(-1, y.shape[-1]).sum(0),
-                    flat.sum(0),
-                )
+                if row_weights is None:
+                    sums = (
+                        target_y.reshape(-1, y.shape[-1]).sum(0),
+                        y.reshape(-1, y.shape[-1]).sum(0),
+                        flat.sum(0),
+                    )
+                    count = flat.shape[0]
+                else:
+                    scale = row_weights[:, None]
+                    sums = (
+                        (target_y.reshape(-1, y.shape[-1]) * scale).sum(0),
+                        (y.reshape(-1, y.shape[-1]) * scale).sum(0),
+                        (flat * scale).sum(0),
+                    )
+                    count = row_weights.sum()
+                if contrast_components:
+                    image_index = image_indices[sample_index]
+                    per_image = by_image[name]
+                    if image_index not in per_image:
+                        per_image[image_index] = [count, *(value.clone() for value in sums)]
+                    else:
+                        image_totals = per_image[image_index]
+                        image_totals[0] = image_totals[0] + count
+                        for total, value in zip(image_totals[1:], sums, strict=True):
+                            total.add_(value)
                 if name in statistics:
                     stored, totals = statistics[name]
                     if stored is not gram and id(stored) not in updated:
                         stored.add_(gram)
                         updated.add(id(stored))
-                    totals[0] += flat.shape[0]
+                    totals[0] = totals[0] + count
                     for total, value in zip(totals[1:], sums, strict=True):
                         total.add_(value)
                 else:
-                    statistics[name] = (gram, [flat.shape[0], *sums])
+                    statistics[name] = (gram, [count, *sums])
                 continue
             difference = (target_y - y).reshape(-1, y.shape[-1])
-            cross = difference.T @ flat
+            if row_weights is None:
+                cross = difference.T @ flat
+            else:
+                cross = (difference * row_weights[:, None]).T @ flat
             if name in statistics:
                 stored, total = statistics[name]
                 if stored is not gram and id(stored) not in updated:
@@ -347,9 +479,8 @@ def _group_statistics(names, captured, observe, image_rows, contrast_mode):
                 statistics[name] = (gram, cross)
     if contrast_mode == "mean":
         for name in names:
-            gram, (count, target_sum, student_sum, input_sum) = statistics[name]
-            mean = mean_contrast(target_sum, student_sum, count)
-            statistics[name] = (gram, torch.outer(mean, input_sum))
+            gram, totals = statistics[name]
+            statistics[name] = (gram, _mean_cross(totals, by_image[name], contrast_components))
     return statistics
 
 
@@ -621,28 +752,57 @@ def _batch_call(calls):
         return None
 
 
-def _replay_batches(captured, limit):
+def _replay_batches(captured, limit, weights=None):
+
+    if weights is not None and len(weights) != len(captured):
+        raise ValueError("token weights must match the replay samples")
     if limit == 1:
-        return captured
+        if weights is None:
+            return captured
+        return [
+            _WeightedPair(sample[0], sample[1], weight)
+            for sample, weight in zip(captured, weights, strict=True)
+        ]
     partitions = []
-    for sample in captured:
-        for partition in partitions:
+    weight_parts = []
+    for index, sample in enumerate(captured):
+        placed = False
+        for part_index, partition in enumerate(partitions):
             if len(partition) < limit and _same_structure(partition[0], sample):
                 partition.append(sample)
+                if weights is not None:
+                    weight_parts[part_index].append(weights[index])
+                placed = True
                 break
-        else:
+        if not placed:
             partitions.append([sample])
+            if weights is not None:
+                weight_parts.append([weights[index]])
     batches = []
-    for partition in partitions:
+    for part_index, partition in enumerate(partitions):
         if len(partition) == 1:
-            batches.extend(partition)
+            if weights is None:
+                batches.extend(partition)
+            else:
+                batches.append(
+                    _WeightedPair(partition[0][0], partition[0][1], weight_parts[part_index][0])
+                )
             continue
         target = _batch_call([sample[0] for sample in partition])
         student = _batch_call([sample[1] for sample in partition])
         if target is None or student is None:
-            batches.extend(partition)
-        else:
+            if weights is None:
+                batches.extend(partition)
+            else:
+                batches.extend(
+                    _WeightedPair(sample[0], sample[1], weight)
+                    for sample, weight in zip(partition, weight_parts[part_index], strict=True)
+                )
+            continue
+        if weights is None:
             batches.append((target, student))
+        else:
+            batches.append(_WeightedPair(target, student, _cat_weights(weight_parts[part_index])))
     return batches
 
 
@@ -799,6 +959,8 @@ def write_lora(path: str | Path, result: ContrastResult) -> None:
     if Path(path).suffix != ".safetensors":
         raise ValueError("output must end in .safetensors")
     header = {"kilora_directions": json.dumps(result.metadata)}
+    if "axis" in result.metadata:
+        header["kilora_axis"] = result.metadata["axis"]
     cues = list(dict.fromkeys(p.get("cue", "") for p in result.metadata.get("pairs", [])))
     cues = [cue for cue in cues if cue]
     if cues and "prompt_solve" in result.metadata:
@@ -969,6 +1131,8 @@ def solve(
                     changes.add(name, solution)
         model_passes = 0
         captured = []
+        image_indices = None
+        weight_rows = []
         if start < len(indices):
             block = block_at(indices[start])
             device = next(model.parameters()).device if adapter is None else adapter.device
@@ -986,8 +1150,31 @@ def solve(
                     with student_chain(False), layout.active("replay"):
                         target = _capture(model, block, target_call)
                 captured.append(_map_tensors((target, student), lambda t: t.to(device)))
+                weight = sample.weights
+                weight_rows.append(None if weight is None else weight.detach().to(device))
             model_passes += 2 * len(samples)
-            captured = _replay_batches(captured, settings.replay_batch)
+            if settings.contrast_mode == "mean" and settings.contrast_components:
+                per_image = {}
+                for sample, calls, weight in zip(samples, captured, weight_rows, strict=True):
+                    if sample.image_index is None:
+                        raise ValueError(
+                            "per-image identities are required for contrast components"
+                        )
+                    per_image.setdefault(sample.image_index, []).append((calls, weight))
+                captured, image_indices = [], []
+                for image_index, calls in per_image.items():
+                    pairs, weights = zip(*calls, strict=True)
+                    batches = _replay_batches(
+                        list(pairs),
+                        settings.replay_batch,
+                        list(weights) if any(w is not None for w in weights) else None,
+                    )
+                    captured.extend(batches)
+                    image_indices.extend([image_index] * len(batches))
+            elif any(weight is not None for weight in weight_rows):
+                captured = _replay_batches(captured, settings.replay_batch, weight_rows)
+            else:
+                captured = _replay_batches(captured, settings.replay_batch)
         for position in range(start, len(indices)):
             if interrupt is not None:
                 interrupt()
@@ -1034,7 +1221,13 @@ def solve(
 
                 with _matmul_allow_tf32(settings.stats_precision == "tf32"):
                     statistics = _group_statistics(
-                        names, captured, observe, image_rows, settings.contrast_mode
+                        names,
+                        captured,
+                        observe,
+                        image_rows,
+                        settings.contrast_mode,
+                        settings.contrast_components,
+                        image_indices,
                     )
                 cholesky_cache = []
                 for name in names:
@@ -1057,6 +1250,8 @@ def solve(
                         "ridge": solution.ridge,
                         "fit_share": solution.fit_share,
                     }
+                    if settings.contrast_mode == "mean":
+                        result.metadata["fit"][name]["measured_rank"] = measured_rank(solution)
                     if solution.exact_fit:
                         result.metadata["fit"][name]["exact_fit"] = True
                     if solution.svd_fallback:
@@ -1069,7 +1264,8 @@ def solve(
                 cholesky_cache.clear()
             numerator = denominator = 0.0
             advanced = []
-            for target, student in captured:
+            for pair in captured:
+                target, student = pair
                 if layout is None:
                     with student_chain(False):
                         wanted = _tensor_output(_run_block(block, target))
@@ -1080,7 +1276,9 @@ def solve(
                         got = _tensor_output(_run_block(block, student))
                     with student_chain(False), layout.active("replay"):
                         wanted = _tensor_output(_run_block(block, target))
-                advanced.append((_advance(target, wanted), _advance(student, got)))
+                advanced.append(
+                    _carry_weights(pair, _advance(target, wanted), _advance(student, got))
+                )
                 wanted, got = image_rows(wanted).float(), image_rows(got).float()
                 if wanted.shape != got.shape:
                     raise ValueError(
@@ -1096,7 +1294,8 @@ def solve(
             for between in range(index + 1, next_index):
                 intermediate = block_at(between)
                 advanced = []
-                for target, student in captured:
+                for pair in captured:
+                    target, student = pair
                     if layout is None:
                         with student_chain(False):
                             wanted = _tensor_output(_run_block(intermediate, target))
@@ -1107,7 +1306,9 @@ def solve(
                             got = _tensor_output(_run_block(intermediate, student))
                         with student_chain(False), layout.active("replay"):
                             wanted = _tensor_output(_run_block(intermediate, target))
-                    advanced.append((_advance(target, wanted), _advance(student, got)))
+                    advanced.append(
+                        _carry_weights(pair, _advance(target, wanted), _advance(student, got))
+                    )
                 captured = advanced
             if partial is not None:
                 _save_partial(partial, result, position + 1)
@@ -1378,6 +1579,15 @@ def prompt_set_from_data(data) -> dict[str, list[PromptPair]]:
     return result
 
 
+def refit_results(result, settings, sample, solve_round):
+
+    for round_index in range(1, settings.refit_rounds + 1):
+        started = time.perf_counter()
+        samples = sample(student_change=result)
+        result = solve_round(samples, round_index)
+        yield round_index, result, time.perf_counter() - started
+
+
 def extract(
     model_path: str | Path,
     out: str | Path,
@@ -1446,17 +1656,14 @@ def extract(
     write_lora(out, result)
     partial.unlink(missing_ok=True)
     progress(f"Wrote {out}")
-    for round_index in range(1, settings.refit_rounds + 1):
-        samples = trajectory_samples(
-            pipe,
-            pairs,
-            settings,
-            device,
-            student_change=result,
-        )
+
+    def resample(*, student_change):
+        return trajectory_samples(pipe, pairs, settings, device, student_change=student_change)
+
+    def solve_round(samples, round_index):
         round_out = out.with_name(f"{out.stem}.round-{round_index}.safetensors")
         round_partial = round_out.with_name(round_out.name + ".partial.safetensors")
-        result = solve(
+        return solve(
             model,
             samples,
             pairs,
@@ -1470,6 +1677,13 @@ def extract(
             refit_round=round_index,
             **({} if coupling is None else {"coupling": coupling}),
         )
+
+    for round_index, round_result, _seconds in refit_results(
+        result, settings, resample, solve_round
+    ):
+        result = round_result
+        round_out = out.with_name(f"{out.stem}.round-{round_index}.safetensors")
+        round_partial = round_out.with_name(round_out.name + ".partial.safetensors")
         write_lora(round_out, result)
         round_partial.unlink(missing_ok=True)
         progress(f"Wrote {round_out}")

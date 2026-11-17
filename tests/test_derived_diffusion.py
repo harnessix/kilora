@@ -37,8 +37,12 @@ def test_diffusion_path_and_projector_lift(monkeypatch):
     kin, rows, *_ = compute.derived_keys(s)
     projectors = torch.stack([k.T @ k for k in kin])
     mixed = torch.einsum("ef,fij->eij", rin, projectors)
-    expected_lifts = torch.einsum("bi,eij,bj->be", x, mixed, x)
-    expected_lifts *= x.shape[-1] / x.square().sum(-1, keepdim=True)
+    shares = torch.einsum("bi,eij,bj->be", x, mixed, x)
+    shares /= x.square().sum(-1, keepdim=True) + compute.SCORE_EPS
+    rank = rows.float()
+    width = x.shape[-1]
+    variance = 2 * rank * (width - rank) / (width * width * (width + 2))
+    expected_lifts = (shares - (rin @ (rank / width))) / variance.sqrt()
     torch.testing.assert_close(compute.derived_logits(s, x), s.tau * expected_lifts)
     assert rows.tolist() == [1, 1, 1]
 

@@ -237,3 +237,21 @@ def test_routing_is_saved(model, tmp_path):
         save_mod(path, sets, Settings(routing_scope=scope, routing_select=select), id="r")
         st = load_mod(path).settings
         assert (st.routing_scope, st.routing_select) == (scope, select)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("noisy", [False, True])
+def test_top1_is_exact_and_keeps_the_soft_gradient(dtype, noisy):
+    gen = torch.Generator().manual_seed(1947)
+    logits = torch.randn(2, 127, 7, generator=gen).to(dtype).requires_grad_()
+    reference = logits.detach().clone().requires_grad_()
+    noise = torch.randn(2, 127, 7, generator=gen).to(dtype) if noisy else None
+    weights = torch.randn(2, 127, 7, generator=gen).to(dtype)
+    gate = compute.top1_gate(logits, noise)
+    choice = (reference if noise is None else reference + noise).argmax(-1, keepdim=True)
+    hard = torch.zeros_like(reference).scatter(-1, choice, 1.0)
+    assert torch.equal(gate, hard)
+    actual_grad = torch.autograd.grad((gate * weights).sum(), logits)[0]
+    picked = reference.softmax(-1).gather(-1, choice)
+    expected_grad = torch.autograd.grad((picked * weights.gather(-1, choice)).sum(), reference)[0]
+    assert torch.equal(actual_grad, expected_grad)

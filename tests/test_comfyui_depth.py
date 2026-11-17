@@ -13,6 +13,11 @@ from kilora.comfyui import depth as D
 from kilora.comfyui import nodes as N
 
 
+@pytest.fixture(autouse=True)
+def _keys_arm(monkeypatch):
+    monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
+
+
 def _build(text="", preset="none", **kw):
     out = N.KiLoRADepthSchedule().build(text, preset, **kw)
     return out["result"], out["ui"]["text"][0]

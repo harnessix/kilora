@@ -45,6 +45,7 @@ def test_the_use_cases_are_there():
         "kilora-palette-shuffle.json",
         "kilora-depth-map.json",
         "kilora-layers.json",
+        "kilora-learn-from-masked-images.json",
     } <= names
 
 
@@ -211,3 +212,16 @@ def test_layers_combine_global_creative_and_masked_ip_with_plain_negative():
     decode = source(save, "images")
     assert decode["type"] == "VAEDecode"
     assert source(decode, "samples") is ks
+
+
+def test_learn_character_from_images_uses_a_mask():
+    g, source = _wiring("kilora-learn-from-masked-images.json")
+    solve = next(n for n in g["nodes"] if n["type"] == "KiLoRASolveFromImages")
+    assert source(solve, "masks")["type"] == "BiRefNetRMBG"
+    assert source(solve, "images")["type"] == "ImageBatch"
+    note = next(n for n in g["nodes"] if n["type"] == "Note")
+    text = note["widgets_values"][0]
+    assert "ComfyUI-RMBG" in text
+    assert "optional" in text and "installed separately" in text
+    for name in ("rembg", "BiRefNet", "SAM"):
+        assert name in text

@@ -122,6 +122,7 @@ def _wrapped(sets, x, base, default_carry=False):
 @pytest.mark.parametrize("score", ["keys", "read_share", "derived"])
 def test_carry_on_for_routed_import_and_off_for_enabled_mod(score, monkeypatch):
     monkeypatch.setenv("KILORA_READ_DROPOUT", "off")
+    monkeypatch.setenv("KILORA_DERIVED_ENTRY_TEMP", "0")
     sets, x, base = _case("input")
     sets = [dataclasses.replace(st, import_score=score) for st in sets]
     call = _wrapped(sets, x, base)

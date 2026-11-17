@@ -306,10 +306,10 @@ class FamilySpec:
                 return layout
         return None
 
-    def image_token_rows(self, tokens: int, latent_hw: tuple[int, int]) -> slice | None:
+    def image_token_rows(self, tokens: int, latent_hw: tuple[int, ...]) -> slice | None:
 
         layout = self.layout(self.image_token_target) if self.image_token_target else None
-        if layout is None or layout.kind != "image2d" or layout.patch is None:
+        if layout is None or layout.kind not in ("image2d", "video3d") or layout.patch is None:
             return None
         return layout.image_rows(tokens, latent_hw)
 

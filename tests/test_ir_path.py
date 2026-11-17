@@ -7,6 +7,11 @@ from kilora.compute import LayerSet, dropout_key, eager, run_layer
 from kilora.ir.driver import run_layer_ir
 
 
+@pytest.fixture(autouse=True)
+def _keys_arm(monkeypatch):
+    monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
+
+
 @pytest.mark.parametrize("path_select", ["converged", "score", "mix"])
 @pytest.mark.parametrize("depth", [0.5, 1, 2, 3.5, 5])
 @pytest.mark.parametrize("fixed", [False, True])
@@ -169,3 +174,31 @@ def test_path_gradients():
         actual_grad = torch.autograd.grad(actual.square().sum(), (y, down, up))
     assert torch.equal(actual, expected)
     assert all(torch.equal(a, b) for a, b in zip(actual_grad, expected_grad, strict=True))
+
+
+@pytest.mark.parametrize("scope", ["token", "tensor"])
+@pytest.mark.parametrize("square", [False, True])
+@pytest.mark.parametrize("carry", ["drop", "dropped"])
+def test_imported_derived_chain_scores_shared_input(scope, square, carry, monkeypatch):
+    monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
+    monkeypatch.setenv("KILORA_MASKS", "expect")
+    gen = torch.Generator().manual_seed(1193)
+    x = torch.randn(2, 5, 8, generator=gen)
+    width = 8 if square else 6
+    y = torch.randn(2, 5, width, generator=gen)
+    layer = LayerSet(
+        router=torch.randn(3, width, generator=gen),
+        keys_in=torch.randn(3, 1, 3, generator=gen),
+        down=torch.randn(6, 8, generator=gen) * 0.3,
+        up=torch.randn(6, width, generator=gen) * 0.3,
+        per_expert=2,
+        form="input",
+        import_score="derived",
+        routing_scope=scope,
+        carry=carry,
+        gate_mode="none",
+    )
+    with torch.no_grad(), eager(), dropout_key(12, 3):
+        expected = run_layer(x, y, [layer], 4, target="derived-chain")
+        actual = run_layer_ir(x, y, [layer], 4, target="derived-chain")
+    assert torch.equal(actual, expected), (actual - expected).abs().max()

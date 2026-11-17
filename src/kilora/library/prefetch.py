@@ -177,6 +177,8 @@ class PlanPrefetch:
         self.pin()
 
     def pin(self):
+        if not torch.cuda.is_available():
+            return
         for group in self.groups:
             for plan in group:
                 for _, _, target in plan.parts:

@@ -16,6 +16,11 @@ from kilora.references import MissingReferenceError
 from kilora.sections import Section
 
 
+@pytest.fixture(autouse=True)
+def _keys_arm(monkeypatch):
+    monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
+
+
 def make_recipe(path, files):
     sections = []
     for file, strength in files:

@@ -14,6 +14,11 @@ from kilora.sections import Section
 from kilora.sets import new_keyed_set
 
 
+@pytest.fixture(autouse=True)
+def _keys_arm(monkeypatch):
+    monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
+
+
 def _set():
     s = new_keyed_set(
         "s",

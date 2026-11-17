@@ -772,3 +772,24 @@ def test_derived_fused_output_without_regions_keeps_original_scores(depth, monke
     monkeypatch.setattr(compute, "derived_logits", compute._derived_logits)
     expected, used = _run(monkeypatch, True, x, y0, [layer], depth)
     assert used and torch.equal(actual, expected)
+
+
+@pytest.mark.parametrize("routing", ["token", "tensor"])
+@pytest.mark.parametrize("depth", [2, 4])
+def test_derived_keys_chain_uses_shared_logits(routing, depth, monkeypatch):
+    monkeypatch.setenv("KILORA_IMPORT_SCORE", "derived")
+    monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
+    monkeypatch.setenv("KILORA_MASKS", "expect")
+    s = _imported(1239, n_in=24, routing=routing, gate_mode="none", path_width=1)
+    x, y0 = _inputs(1240, n_in=24)
+    scores = []
+    original = compute.pooled_derived_logits
+
+    def score(layer, value, target):
+        scores.append(value.clone())
+        return original(layer, value, target)
+
+    monkeypatch.setattr(compute, "pooled_derived_logits", score)
+    _same(monkeypatch, x, y0, [s], depth)
+    assert scores
+    assert all(torch.equal(value, x) for value in scores)

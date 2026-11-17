@@ -239,7 +239,7 @@
       },
       "depth": {
         "name": "العمق",
-        "tooltip": "عدد التمريرات. ‎-1 يستخدم العمق الذي يوصي به المود."
+        "tooltip": "عدد التمريرات. ‎-1 يستخدم العمق الذي يوصي به المود (لـ LoRA المستوردة: 4)."
       }
     }
   },
@@ -257,7 +257,7 @@
       },
       "depth": {
         "name": "العمق",
-        "tooltip": "عدد التمريرات. ‎-1 يستخدم العمق الذي يوصي به المود."
+        "tooltip": "عدد التمريرات. ‎-1 يستخدم العمق الذي يوصي به المود (لـ LoRA المستوردة: 4)."
       },
       "iteration": {
         "name": "التكرار",
@@ -285,7 +285,7 @@
       },
       "path_width": {
         "name": "عرض المسار",
-        "tooltip": "لتكرار المسار فقط. عدد المسارات: تبدأ من أفضل الخبراء في الخطوة الأولى، ويتابع كل مسار من استعلامه الخاص. العرض الأكبر يجد الخبير الصحيح بعد خطوة أولى خاطئة. القيمة 0 تستخدم قيمة التعديل (1 افتراضيًا: مسار واحد)."
+        "tooltip": "لتكرار المسار فقط. عدد المسارات: تبدأ من أفضل الخبراء في الخطوة الأولى، ويتابع كل مسار من استعلامه الخاص. العرض الأكبر يجد الخبير الصحيح بعد خطوة أولى خاطئة. القيمة 0 تستخدم قيمة التعديل (لـ LoRA المستوردة: 3 مسارات؛ للمودات الأخرى: 1)."
       },
       "path_select": {
         "name": "اختيار المسار",
@@ -488,6 +488,58 @@
         "name": "التعديلات",
         "tooltip": "تغير التعديلات المصفوفة المركزية وقوة كل LoRA لكل طبقة، وحدود الحزم. لا تتم الكتابة إلى الملفات المصدر أبدا. يعيد off ملفات LoRA المستوردة بدقة. يحفظ unchanged الخيار الحالي."
       },
+      "live_expert_mass": {
+        "name": "الكتلة المعبورة",
+        "tooltip": "لا تعدّل الكتابة الحية خبيرًا إلا إذا كانت كتلة مساره على المسارات المسجلة أعلى من هذه النسبة من كتلة طبقته. -1: دون تغيير. الافتراضي 0.05."
+      },
+      "live_expert_top": {
+        "name": "الخبراء المعبورون لكل طبقة",
+        "tooltip": "أكبر عدد من الخبراء في كل طبقة تعدّلهم كتابة حية واحدة، بحسب كتلة المسار. 0: دون تغيير. الافتراضي 4."
+      },
+      "live_expert_history": {
+        "name": "سجل المسارات",
+        "tooltip": "عدد الأوامر المسجلة التي تحتفظ الجلسة بكتلة مسارها لإيجاد الخبراء المشتركين. 0: دون تغيير. الافتراضي 16."
+      },
+      "live_expert_copies": {
+        "name": "نسخ لكل خبير",
+        "tooltip": "أكبر عدد من نسخ خبير مشترك واحد تضيفها الكتابات الحية. -1: دون تغيير. الافتراضي 2."
+      },
+      "write_measure": {
+        "name": "قياس الكتابة",
+        "tooltip": "كيف تجد الكتابة الحية اتجاهها. forward: تمريرة أمامية نظيفة واحدة ومجموعة من التمريرات الأمامية بضوضاء صغيرة على مخرجات الخبراء المستهدفين (الافتراضي). candidates: تقيس كل خطوة مرشحة بتمريرات أمامية مزدوجة. unchanged يبقي الاختيار الحالي."
+      },
+      "forward_draws": {
+        "name": "سحوبات الضوضاء",
+        "tooltip": "عدد سحوبات الضوضاء في التقدير الأمامي. كلما زادت السحوبات صار الاتجاه أثبت وزادت التكلفة زمنًا. 0: دون تغيير. الافتراضي 4."
+      },
+      "forward_sigma": {
+        "name": "حجم الضوضاء",
+        "tooltip": "حجم ضوضاء التقدير الأمامي، كنسبة من RMS لمخرجات كل خبير. -1: دون تغيير. الافتراضي 0.05."
+      },
+      "forward_chunk": {
+        "name": "سحوبات لكل تمريرة",
+        "tooltip": "عدد سحوبات الضوضاء في تمريرة أمامية مجمّعة واحدة. العدد الأقل يستخدم ذاكرة GPU أقل. 0: دون تغيير. الافتراضي 4."
+      },
+      "write_resolution": {
+        "name": "دقة الكتابة",
+        "tooltip": "الضلع الأطول بالبكسل لعينات الكتابة. تتعلم الكتابة من نسخة مصغرة من الصورة: من 256 إلى 4096، يُقرّب إلى مضاعفات 16. الرقم الأصغر يجعل الكتابة أسرع. 0: دقة التصيير. -1: دون تغيير. الافتراضي 512. كانت عمليات الكتابة تعمل بالفعل بدقة 512 px قبل هذا الإعداد: كانت تستخدم حجم القياس (measure_size). هذا الإعداد يسمّي ذلك التحكم."
+      },
+      "probe_rows": {
+        "name": "render probe rows",
+        "tooltip": "Collect write measurements during rendering. On by default. Image learning and writes without a complete render measurement use their own noise samples."
+      },
+      "probe_call": {
+        "name": "render probe call",
+        "tooltip": "Separate runs each probe after the image call. Larger batches can change image-row rounding even on the CPU, so separate is the only supported value. The image call keeps its original rows. Probe measurements do not update image records or step caches."
+      },
+      "probe_budget": {
+        "name": "probe row budget",
+        "tooltip": "Maximum perturbed rows per render, counting caption and empty-caption rows. The default 2 samples one caption for one antithetic pair per render. The write seed selects caption or empty caption with equal probability. Budgets of 4 or more retain both captions. Complete pairs are retained; fewer than two rows skips probes. Acceptance retains both captions for the prompt and collapse guard. Clean reference and acceptance rows are additional. Larger budgets allow more draws when the session is idle. Pairs run over consecutive eligible sampling steps, with two caption rows per probe call. A short schedule falls back to ordinary write samples."
+      },
+      "probe_draws": {
+        "name": "render probe draws",
+        "tooltip": "Maximum noise draws collected in a render. 0 uses the forward draws setting; -1 keeps the current value. Complete positive and negative pairs are kept. Fewer draws reduce the render work."
+      },
       "measure_samples": {
         "name": "samples per write measurement",
         "tooltip": "Samples per write measurement: the same noise and timesteps for every trial. More samples measure more steadily and cost more time. 1 = one sample at the middle timestep."
@@ -658,7 +710,7 @@
       },
       "depth": {
         "name": "العمق",
-        "tooltip": "عدد التمريرات. ‎-1 يستخدم العمق الذي يوصي به المود."
+        "tooltip": "عدد التمريرات. ‎-1 يستخدم العمق الذي يوصي به المود (لـ LoRA المستوردة: 4)."
       },
       "iteration": {
         "name": "التكرار",
@@ -1286,7 +1338,7 @@
   },
   "KiLoRADepthMap": {
     "display_name": "KiLoRA خريطة العمق",
-    "description": "عمق لكل منطقة من الصورة، من قناع (SAM2 وأدوات التقسيم الأخرى) أو من صورة (سطوعها: خرائط العمق أو الخطوط أو الوضعية من معالجات ControlNet المسبقة). حتى start تعمل كل منطقة بعمق واحد، فيتكوّن التخطيط كالمعتاد. بعد ذلك تعمل كل منطقة بعمقها الخاص. صِله بـ KiLoRA Apply أو KiLoRA LoRA Loader.",
+    "description": "عمق لكل منطقة من الصورة، من قناع (SAM2 وأدوات التقسيم الأخرى) أو من صورة (سطوعها: خرائط العمق أو الخطوط أو الوضعية من معالجات ControlNet المسبقة). حتى start تعمل كل منطقة بعمق واحد، فيتكوّن التخطيط كالمعتاد. بعد ذلك تعمل كل منطقة بعمقها الخاص. صِله بـ KiLoRA Apply أو KiLoRA LoRA Loader. بدون قناع أو صورة يقيس source auto الخريطة أثناء أخذ العينات: عمق أكبر في التفاصيل وحيث تغيّر نماذج LoRA الصورة أكثر، مع متوسط العمق نفسه.",
     "inputs": {
       "min_depth": {
         "name": "min_depth",
@@ -1316,6 +1368,10 @@
         "name": "base",
         "tooltip": "عمق كل منطقة قبل start، وعمق رموز النص. ‎-1: متوسط عمق الخريطة مقرَّبًا."
       },
+      "source": {
+        "name": "source",
+        "tooltip": "مصدر الخريطة. mask أو image: المدخل الموصول (القناع أولاً). auto: تُقاس عند خطوة start من تفاصيل الصورة وتغيير KiLoRA واختلاف المسارات. بدون قناع أو صورة موصولة يُستخدم auto."
+      },
       "mask": {
         "name": "قناع",
         "tooltip": "قناع، مثلًا من SAM2. القيمة 1 تعطي max_depth. إذا وُصلت صورة أيضًا يُستخدم القناع."
@@ -1323,6 +1379,26 @@
       "image": {
         "name": "image",
         "tooltip": "صورة. سطوعها هو الخريطة، مثلًا مخرج معالج مسبق للعمق أو الخطوط أو الوضعية."
+      },
+      "mean_depth": {
+        "name": "mean_depth",
+        "tooltip": "auto: متوسط العمق على الصورة. القيمة -1 تستخدم عمق KiLoRA Apply، فتبقى الكلفة مثل ذلك العمق الموحد. القيم الأصغر أسرع."
+      },
+      "detail_weight": {
+        "name": "detail_weight",
+        "tooltip": "auto: وزن تفاصيل الصورة (البنية الدقيقة لتقدير الصورة النظيفة)."
+      },
+      "change_weight": {
+        "name": "change_weight",
+        "tooltip": "auto: وزن تغيير KiLoRA (حيث تغيّر نماذج LoRA الصورة أكثر)."
+      },
+      "disagreement_weight": {
+        "name": "disagreement_weight",
+        "tooltip": "auto: وزن اختلاف المسارات (حيث تتنافس نماذج LoRA). القيمة 0 توقفه."
+      },
+      "smooth": {
+        "name": "smooth",
+        "tooltip": "auto: عرض غاوس بوحدة الرموز (tokens) الذي يُنعّم الخريطة المدمجة قبل اختيار الأعماق. خريطة الصورة المرسومة مشوشة؛ القيمة 2 تعطي مناطق. القيمة 0 تعطّله."
       }
     },
     "outputs": {
@@ -1371,6 +1447,14 @@
       "compose": {
         "name": "compose",
         "tooltip": "separate: each layer runs as its own model call. single: all layers run in one model call per guidance branch, and each image area reads its own layer text. Select single on every layer. The crop input is not used with single."
+      },
+      "region_penalty": {
+        "name": "region penalty",
+        "tooltip": "مع compose single: مدى قوة توقّف مناطق الصورة في الطبقات المختلفة عن قراءة بعضها بعضًا في الخطوات الأولى. القيمة 0 توقفه. تُستخدم قيمة الطبقة الأولى، ويجب أن تضبط كل طبقة القيمة نفسها."
+      },
+      "mount_scope": {
+        "name": "mount scope",
+        "tooltip": "مع compose single: يطبّق all مودات الطبقة على منطقة الصورة الخاصة بالطبقة وعلى نصها. ويطبّقها cross_kv فقط على مفاتيح وقيم cross-attention في نصها، لذلك لا يكون لـ LoRA بدون هذه الأوزان أي تأثير. يجب أن تضبط كل طبقة القيمة نفسها."
       }
     },
     "outputs": {
@@ -1827,6 +1911,42 @@
       "folder": {
         "name": "المجلد",
         "tooltip": "مجلد صور مع أوصاف .txt اختيارية بالاسم نفسه. استخدم المجلد أو الصور."
+      },
+      "contrast_components": {
+        "name": "مكونات التباين",
+        "tooltip": "أضف إلى المتوسط المشترك ما يصل إلى أربعة اتجاهات رئيسية لمتوسطات التباين لكل صورة. يقتصر العدد على عدد صور الملاءمة ناقص واحد، بعد استبعاد صور التحقق. القيمة الافتراضية 4؛ والقيمة 0 تكتب الأوزان السابقة المعتمدة على المتوسط فقط. تظل الملاءمة تستخدم إعداد الرتبة. ينطبق فقط على حل الصور هذا دون قناع."
+      },
+      "masks": {
+        "name": "الأقنعة",
+        "tooltip": "قناع واحد لكل صورة، بترتيب الصور. يتعلم الحل المنطقة المقنّعة فقط. اتركه فارغًا لاستخدام الصورة كاملة."
+      },
+      "mask_contrast": {
+        "name": "مقارنة القناع",
+        "tooltip": "مع الأقنعة، يقارن tokens كل رمز مقنّع، ويقارن mean المتوسط المقنّع. يُتجاهل هذا الخيار دون أقنعة."
+      },
+      "two_stage": {
+        "name": "مرحلتان",
+        "tooltip": "يحل الأسلوب أولًا، ثم الشخصية مع تفعيل ذلك الأسلوب في نموذج الطالب. تحدد الأقنعة الشخصية ويحدد معكوسها الأسلوب. دون أقنعة، تستخدم المرحلتان الصور كاملة. يحفظ ملفين منفصلين: creative للأسلوب وip للشخصية."
+      },
+      "mask_start": {
+        "name": "بداية القناع",
+        "tooltip": "عند استخدام الأقنعة، يبدأ مسار الطالب المحاذى عند هذه النسبة من الجدول الكامل. الافتراضي 0.4. يُتجاهل دون أقنعة."
+      },
+      "mask_samples": {
+        "name": "عينات القناع",
+        "tooltip": "مع الأقنعة: نسب من الجدول الكامل مفصولة بمسافات أو فواصل، من بداية القناع إلى 1.0، مثل 0.5 0.75 1.0. تركه فارغًا يحافظ على المواضع الثلاثة الأصلية. يُتجاهل دون أقنعة."
+      },
+      "refit_rounds": {
+        "name": "جولات إعادة الملاءمة",
+        "tooltip": "حلول إضافية بصيغة مغلقة بعد إعادة أخذ عينات لمسارات الطالب مع تفعيل الحل السابق. 0 يحافظ على الحل الأصلي؛ حتى 8 جولات. يُفحص ويُحفظ الناتج الأخير فقط."
+      },
+      "guard_rule": {
+        "name": "قاعدة التحقق",
+        "tooltip": "يختار loss أقل خسارة تحقق دون الخسارة الأساسية وضمن حد الانحراف في المحرر المباشر. يختار drift أكبر مقياس ضمن الحد بخسارة لا تتجاوز 1.25 ضعف الأساسية. الافتراضي loss."
+      },
+      "trajectory_check": {
+        "name": "فحص المسار",
+        "tooltip": "يفحص مطالبتين غير مرتبطتين عبر 8 خطوات أخذ عينات باستخدام أول بذرة وحجم وcfg للحل. يرفض المقياس إذا انخفض الانحراف المعياري المكاني للكامن دون 0.5 من الأساس أو تجاوزت مسافة L2 النسبية 1.0، ثم يجرب المقاييس الأصغر المسموح بها. دون فك ترميز VAE. معطل افتراضياً."
       }
     },
     "outputs": {

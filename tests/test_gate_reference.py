@@ -14,6 +14,7 @@ from kilora.adaptive_gate import adaptive_keep, change_stats
 @pytest.fixture(autouse=True)
 def _new_rule(monkeypatch):
     monkeypatch.delenv("KILORA_GATE_BASE_REFERENCE", raising=False)
+    monkeypatch.setenv("KILORA_DERIVED_MODE", "keys")
 
 
 def _stats(value):

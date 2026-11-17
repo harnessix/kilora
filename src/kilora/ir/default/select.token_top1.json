@@ -130,16 +130,6 @@
     },
     {
       "id": 7,
-      "op": "add",
-      "args": [
-        "one",
-        "picked"
-      ],
-      "result": "picked_plus_one",
-      "attributes": {}
-    },
-    {
-      "id": 8,
       "op": "detach",
       "args": [
         "picked"
@@ -148,11 +138,21 @@
       "attributes": {}
     },
     {
-      "id": 9,
+      "id": 8,
       "op": "sub",
       "args": [
-        "picked_plus_one",
+        "picked",
         "picked_detached"
+      ],
+      "result": "picked_gradient",
+      "attributes": {}
+    },
+    {
+      "id": 9,
+      "op": "add",
+      "args": [
+        "one",
+        "picked_gradient"
       ],
       "result": "picked_weight",
       "attributes": {}
@@ -168,5 +168,5 @@
       "attributes": {}
     }
   ],
-  "identity": "af0a1919ba7e2d64a329fb1190b8928b39c766873694850cc609647be0b1abb9"
+  "identity": "ddaef7aee84ebbe89776cc6901cd57167043fdac52fbb25e6a62f7c63db7a98d"
 }

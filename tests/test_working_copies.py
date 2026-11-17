@@ -269,8 +269,6 @@ def test_memory_estimate_survives_clone_and_clear(tmp_path):
                         "router",
                         "keys_in",
                         "keys_out",
-                        "rows_in",
-                        "rows_out",
                         "down",
                         "up",
                         "share_transition_weighted",
@@ -278,6 +276,10 @@ def test_memory_estimate_survives_clone_and_clear(tmp_path):
                         value = getattr(layer, name, None)
                         if isinstance(value, torch.Tensor):
                             count += value.numel()
+                    for name in ("rows_in", "rows_out"):
+                        value = getattr(layer, name, None)
+                        if isinstance(value, torch.Tensor):
+                            count += value.numel() * value.element_size() // 4
                     count += sum(t.numel() for t in (layer.gate or {}).values())
         if is_fixed(module):
             count += sum(

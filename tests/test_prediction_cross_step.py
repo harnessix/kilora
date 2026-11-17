@@ -133,6 +133,7 @@ def test_counts_keep_the_old_fields_as_sums(monkeypatch):
         "a": [SimpleNamespace(step=s, node=0) for s in (2, 3, 4)],
         "b": [SimpleNamespace(step=2, node=0)],
     }
+    monkeypatch.setenv("KILORA_PREDICTION_DEBUG", "1")
     counts = prediction_counts(depth, cross)
     assert counts["eps_depth_steps"] == 2 and counts["eps_depth_nodes"] == 2
     assert counts["eps_cross_steps"] == 3 and counts["eps_cross_nodes"] == 2
@@ -201,6 +202,7 @@ def test_imported_frames_come_from_the_source_directions(imported):
     from kilora.live_imports import ImportEditor, import_source_frames
 
     session, model = imported
+    session.align_for_moves()
     frames = import_source_frames(session, _weights(session, model))
     assert frames
     for target, items in frames.items():
@@ -267,13 +269,14 @@ def test_the_adapter_hook_hands_full_outputs_to_the_recorder(imported):
     assert h.shape == o.shape
 
 
-def test_imported_recording_leaves_outputs_and_state_equal(imported):
+def test_imported_recording_leaves_outputs_and_state_equal(imported, monkeypatch):
     from test_import_modes import DIM, Toy
 
     from kilora import compose
     from kilora.live_imports import ImportEditor, import_source_frames
 
     session, model = imported
+    session.align_for_moves()
     import_source_frames(session, _weights(session, model))
     before = {t: {k: v.clone() for k, v in parts.items()} for t, parts in session.state.items()}
     base = Toy().eval()
@@ -297,6 +300,9 @@ def test_imported_recording_leaves_outputs_and_state_equal(imported):
     stats = recorder.finish()
     assert stats.cross_errors
     assert all(entry.step >= 2 for items in stats.cross_errors.values() for entry in items)
+    monkeypatch.delenv("KILORA_PREDICTION_DEBUG", raising=False)
+    assert "eps_" not in ImportEditor._prediction_line(SimpleNamespace(stats=stats))
+    monkeypatch.setenv("KILORA_PREDICTION_DEBUG", "1")
     line = ImportEditor._prediction_line(SimpleNamespace(stats=stats))
     counts = prediction_counts({}, stats.cross_errors)
     assert f"eps_steps={counts['eps_steps']} eps_nodes={counts['eps_nodes']}" in line
